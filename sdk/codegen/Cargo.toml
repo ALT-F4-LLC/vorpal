@@ -8,3 +8,6 @@ version = "0.4.1"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
+
+[lints]
+workspace = true

@@ -1,10 +1,24 @@
+//! Generates Go, TypeScript, and Python SDK artifact files from the Rust
+//! `linux_vorpal` scripts, source helpers, and orchestration source under
+//! `sdk/rust/src/artifact/linux_vorpal`.
+
 use proc_macro2::TokenTree;
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use syn::{File, Item, Stmt};
+
+/// Print a progress line for the codegen tool's own console output.
+#[expect(
+    clippy::print_stderr,
+    reason = "the codegen tool's single sanctioned progress output path"
+)]
+fn report(msg: &str) {
+    eprintln!("{msg}");
+}
 
 // ─── Parsed data structures ───────────────────────────────────────────────
 
@@ -14,7 +28,7 @@ struct ParsedScript {
     params: Vec<String>,
     /// The raw template string from formatdoc!
     template: String,
-    /// Named arguments with transformed expressions (e.g., unzip_version = expr)
+    /// Named arguments with transformed expressions (e.g., `unzip_version` = expr)
     named_args: Vec<(String, String)>,
 }
 
@@ -26,7 +40,7 @@ struct ParsedSourceFn {
     params: Vec<String>,
     /// The source name (literal or derived from param)
     source_name: String,
-    /// Whether source_name is a literal string or a parameter reference
+    /// Whether `source_name` is a literal string or a parameter reference
     source_name_is_param: bool,
     /// The URL path format string with {name}/{version} placeholders
     path_template: String,
@@ -34,24 +48,24 @@ struct ParsedSourceFn {
     has_version_replace: bool,
 }
 
-/// A parsed version constant from linux_vorpal.rs
+/// A parsed version constant from `linux_vorpal.rs`
 struct VersionConst {
     name: String,
     value: String,
 }
 
-/// A parsed source call from linux_vorpal.rs
+/// A parsed source call from `linux_vorpal.rs`
 struct SourceCall {
     var_name: String,
     func_name: String,
     args: Vec<String>,
 }
 
-/// A parsed step from linux_vorpal.rs
+/// A parsed step from `linux_vorpal.rs`
 struct StepDef {
-    /// Which bwrap_arguments to use: "default" (empty), "custom_stage03", "bwrap_arguments"
+    /// Which `bwrap_arguments` to use: "default" (empty), "`custom_stage03`", "`bwrap_arguments`"
     bwrap_mode: String,
-    /// rootfs: Some("step_rootfs.clone()") or None
+    /// rootfs: `Some("step_rootfs.clone()`") or None
     rootfs: Option<String>,
     /// The script variable or inline formatdoc
     script: String,
@@ -62,8 +76,8 @@ struct StepDef {
 // ─── Parsing ──────────────────────────────────────────────────────────────
 
 /// Extract the formatdoc! template string and function parameters from a script file.
-fn parse_script_file(source: &str) -> ParsedScript {
-    let ast: File = syn::parse_str(source).expect("Failed to parse Rust source");
+fn parse_script_file(source: &str) -> Result<ParsedScript, Box<dyn std::error::Error>> {
+    let ast: File = syn::parse_str(source)?;
 
     let mut params: Vec<String> = Vec::new();
     let mut template = String::new();
@@ -87,12 +101,13 @@ fn parse_script_file(source: &str) -> ParsedScript {
             // Find the formatdoc! macro invocation
             if let Some(Stmt::Macro(macro_stmt)) = func.block.stmts.last() {
                 let mac = &macro_stmt.mac;
+                // `mac` is borrowed from the AST, but `TokenStream` only implements
+                // `IntoIterator` by value, so the token stream must be duplicated here.
                 let tokens: Vec<TokenTree> = mac.tokens.clone().into_iter().collect();
 
                 // First token is the template string literal
                 if let Some(TokenTree::Literal(lit)) = tokens.first() {
-                    let lit_str: syn::LitStr =
-                        syn::parse_str(&lit.to_string()).expect("Expected string literal");
+                    let lit_str: syn::LitStr = syn::parse_str(&lit.to_string())?;
                     template = lit_str.value();
                 }
 
@@ -135,16 +150,16 @@ fn parse_script_file(source: &str) -> ParsedScript {
         }
     }
 
-    ParsedScript {
+    Ok(ParsedScript {
         params,
         template,
         named_args,
-    }
+    })
 }
 
 /// Parse source.rs to extract all source helper functions.
-fn parse_source_file(source: &str) -> Vec<ParsedSourceFn> {
-    let ast: File = syn::parse_str(source).expect("Failed to parse source.rs");
+fn parse_source_file(source: &str) -> Result<Vec<ParsedSourceFn>, Box<dyn std::error::Error>> {
+    let ast: File = syn::parse_str(source)?;
     let mut results = Vec::new();
 
     for item in &ast.items {
@@ -185,7 +200,7 @@ fn parse_source_file(source: &str) -> Vec<ParsedSourceFn> {
         }
     }
 
-    results
+    Ok(results)
 }
 
 /// Extract the source name from a function body string.
@@ -281,7 +296,7 @@ fn strip_indoc(s: &str) -> String {
 
 // ─── Name conversion helpers ──────────────────────────────────────────────
 
-/// Convert snake_case to Go camelCase (first letter lowercase).
+/// Convert `snake_case` to Go camelCase (first letter lowercase).
 fn to_go_camel(s: &str) -> String {
     let parts: Vec<&str> = s.split('_').collect();
     let mut result = String::new();
@@ -291,7 +306,7 @@ fn to_go_camel(s: &str) -> String {
         } else {
             let mut chars = part.chars();
             if let Some(first) = chars.next() {
-                result.push(first.to_uppercase().next().unwrap());
+                result.extend(first.to_uppercase());
                 result.extend(chars);
             }
         }
@@ -307,26 +322,26 @@ fn to_go_camel(s: &str) -> String {
     result
 }
 
-/// Convert snake_case to Go PascalCase (first letter uppercase).
+/// Convert `snake_case` to Go `PascalCase` (first letter uppercase).
 fn to_go_pascal(s: &str) -> String {
     let parts: Vec<&str> = s.split('_').collect();
     let mut result = String::new();
-    for part in parts.iter() {
+    for part in &parts {
         let mut chars = part.chars();
         if let Some(first) = chars.next() {
-            result.push(first.to_uppercase().next().unwrap());
+            result.extend(first.to_uppercase());
             result.extend(chars);
         }
     }
     result
 }
 
-/// Convert snake_case to TS camelCase.
+/// Convert `snake_case` to TS camelCase.
 fn to_ts_camel(s: &str) -> String {
     to_go_camel(s)
 }
 
-/// Keep generated Python names as snake_case, escaping reserved words if needed.
+/// Keep generated Python names as `snake_case`, escaping reserved words if needed.
 fn to_py_name(s: &str) -> String {
     let mut name = s.to_string();
     let py_reserved = [
@@ -345,10 +360,10 @@ fn to_py_name(s: &str) -> String {
 /// If the string contains backticks, split and concatenate.
 fn escape_go_raw_string(s: &str) -> String {
     if !s.contains('`') {
-        return format!("`{}`", s);
+        return format!("`{s}`");
     }
     let parts: Vec<&str> = s.split('`').collect();
-    let escaped: Vec<String> = parts.iter().map(|p| format!("`{}`", p)).collect();
+    let escaped: Vec<String> = parts.iter().map(|p| format!("`{p}`")).collect();
     escaped.join(" + \"`\" + ")
 }
 
@@ -464,12 +479,11 @@ fn transform_rust_expr_to_go(rust_expr: &str, _params: &[String]) -> String {
     // Handle: var.replace(".", "") -> strings.ReplaceAll(var, ".", "")
     let expr = rust_expr.trim();
 
-    if expr.contains(".replace") {
+    if let Some(dot_pos) = expr.find(".replace") {
         // Extract the variable name before .replace
-        let dot_pos = expr.find(".replace").unwrap();
         let var_name = expr[..dot_pos].trim();
         let go_var = to_go_camel(var_name);
-        return format!("strings.ReplaceAll({}, \".\", \"\")", go_var);
+        return format!("strings.ReplaceAll({go_var}, \".\", \"\")");
     }
 
     to_go_camel(expr)
@@ -511,9 +525,9 @@ fn generate_ts_script(
                 // Check if this is a named argument with a transformation
                 if let Some(rust_expr) = named_arg_map.get(param_name.as_str()) {
                     let ts_expr = transform_rust_expr_to_ts(rust_expr, params);
-                    result.push_str(&format!("${{{}}}", ts_expr));
+                    let _ = write!(result, "${{{ts_expr}}}");
                 } else {
-                    result.push_str(&format!("${{{}}}", to_ts_camel(&param_name)));
+                    let _ = write!(result, "${{{}}}", to_ts_camel(&param_name));
                 }
                 i = end + 1;
             }
@@ -560,11 +574,10 @@ fn generate_ts_script(
 fn transform_rust_expr_to_ts(rust_expr: &str, _params: &[String]) -> String {
     let expr = rust_expr.trim();
 
-    if expr.contains(".replace") {
-        let dot_pos = expr.find(".replace").unwrap();
+    if let Some(dot_pos) = expr.find(".replace") {
         let var_name = expr[..dot_pos].trim();
         let ts_var = to_ts_camel(var_name);
-        return format!("{}.replaceAll(\".\", \"\")", ts_var);
+        return format!("{ts_var}.replaceAll(\".\", \"\")");
     }
 
     to_ts_camel(expr)
@@ -624,9 +637,9 @@ fn build_py_f_string_body(template: &str, named_arg_map: &HashMap<&str, &str>) -
                 let param_name: String = chars[start..end].iter().collect();
 
                 if let Some(rust_expr) = named_arg_map.get(param_name.as_str()) {
-                    result.push_str(&format!("{{{}}}", transform_rust_expr_to_py(rust_expr)));
+                    let _ = write!(result, "{{{}}}", transform_rust_expr_to_py(rust_expr));
                 } else {
-                    result.push_str(&format!("{{{}}}", to_py_name(&param_name)));
+                    let _ = write!(result, "{{{}}}", to_py_name(&param_name));
                 }
                 i = end + 1;
             }
@@ -651,8 +664,7 @@ fn build_py_f_string_body(template: &str, named_arg_map: &HashMap<&str, &str>) -
 fn transform_rust_expr_to_py(rust_expr: &str) -> String {
     let expr = rust_expr.trim();
 
-    if expr.contains(".replace") {
-        let dot_pos = expr.find(".replace").unwrap();
+    if let Some(dot_pos) = expr.find(".replace") {
         let var_name = expr[..dot_pos].trim();
         return format!("{}.replace(\".\", \"\")", to_py_name(var_name));
     }
@@ -680,25 +692,25 @@ fn generate_go_source(sources: &[ParsedSourceFn]) -> String {
             .collect::<Vec<_>>()
             .join(", ");
 
-        out.push_str(&format!(
-            "func {}({}) api.ArtifactSource {{\n",
-            go_func_name, param_list
-        ));
+        let _ = writeln!(
+            out,
+            "func {go_func_name}({param_list}) api.ArtifactSource {{"
+        );
 
         // Determine the name value
         if src.source_name_is_param {
             // name is a parameter, use it directly
         } else {
-            out.push_str(&format!("\tname := \"{}\"\n", src.source_name));
+            let _ = writeln!(out, "\tname := \"{}\"", src.source_name);
         }
 
         // Handle version replacement if needed
         if src.has_version_replace {
-            out.push_str(&format!(
-                "\t{v} := strings.ReplaceAll({v_param}, \".\", \"\")\n",
-                v = "versionClean",
-                v_param = to_go_camel("version"),
-            ));
+            let _ = writeln!(
+                out,
+                "\tversionClean := strings.ReplaceAll({}, \".\", \"\")",
+                to_go_camel("version"),
+            );
         }
 
         // Build the path
@@ -709,11 +721,8 @@ fn generate_go_source(sources: &[ParsedSourceFn]) -> String {
             "name".to_string()
         };
 
-        out.push_str(&format!("\tpath := {}\n\n", go_path));
-        out.push_str(&format!(
-            "\treturn NewArtifactSource({}, path).Build()\n",
-            name_ref
-        ));
+        let _ = writeln!(out, "\tpath := {go_path}\n");
+        let _ = writeln!(out, "\treturn NewArtifactSource({name_ref}, path).Build()");
         out.push_str("}\n");
     }
 
@@ -743,7 +752,7 @@ fn build_go_source_path(template: &str, has_version_replace: bool, _func_name: &
         + template.matches("{name}").count();
 
     if placeholder_count == 0 && !template.contains('{') {
-        return format!("\"{}\"", template);
+        return format!("\"{template}\"");
     }
 
     // Escape existing % as %% before replacing placeholders (Go fmt.Sprintf treats bare % as format verb)
@@ -758,7 +767,10 @@ fn build_go_source_path(template: &str, has_version_replace: bool, _func_name: &
     // Walk the original template to determine arg order
     let mut remaining = template;
     while let Some(pos) = remaining.find('{') {
-        let end = remaining[pos..].find('}').unwrap() + pos;
+        let Some(end) = remaining[pos..].find('}') else {
+            break;
+        };
+        let end = end + pos;
         let placeholder = &remaining[pos + 1..end];
         match placeholder {
             "name" => args.push("name".to_string()),
@@ -779,7 +791,7 @@ fn build_go_source_path(template: &str, has_version_replace: bool, _func_name: &
     }
 
     if args.is_empty() {
-        format!("\"{}\"", go_fmt)
+        format!("\"{go_fmt}\"")
     } else {
         format!("fmt.Sprintf(\"{}\", {})", go_fmt, args.join(", "))
     }
@@ -803,15 +815,15 @@ fn generate_ts_source(sources: &[ParsedSourceFn]) -> String {
             .collect::<Vec<_>>()
             .join(", ");
 
-        out.push_str(&format!(
-            "export function {}({}): ArtifactSource {{\n",
-            ts_func_name, param_list
-        ));
+        let _ = writeln!(
+            out,
+            "export function {ts_func_name}({param_list}): ArtifactSource {{"
+        );
 
         if src.source_name_is_param {
             // name is a parameter
         } else {
-            out.push_str(&format!("  const name = \"{}\";\n", src.source_name));
+            let _ = writeln!(out, "  const name = \"{}\";", src.source_name);
         }
 
         if src.has_version_replace {
@@ -825,11 +837,11 @@ fn generate_ts_source(sources: &[ParsedSourceFn]) -> String {
             "name".to_string()
         };
 
-        out.push_str(&format!("  const path = {};\n\n", ts_path));
-        out.push_str(&format!(
-            "  return new ArtifactSourceBuilder({}, path).build();\n",
-            name_ref
-        ));
+        let _ = writeln!(out, "  const path = {ts_path};\n");
+        let _ = writeln!(
+            out,
+            "  return new ArtifactSourceBuilder({name_ref}, path).build();"
+        );
         out.push_str("}\n");
     }
 
@@ -855,13 +867,13 @@ fn generate_py_source(sources: &[ParsedSourceFn]) -> String {
             .collect::<Vec<_>>()
             .join(", ");
 
-        out.push_str(&format!(
-            "def {}({}) -> artifact_pb2.ArtifactSource:\n",
-            py_func_name, param_list
-        ));
+        let _ = writeln!(
+            out,
+            "def {py_func_name}({param_list}) -> artifact_pb2.ArtifactSource:"
+        );
 
         if !src.source_name_is_param {
-            out.push_str(&format!("    name = \"{}\"\n", src.source_name));
+            let _ = writeln!(out, "    name = \"{}\"", src.source_name);
         }
 
         if src.has_version_replace {
@@ -875,11 +887,8 @@ fn generate_py_source(sources: &[ParsedSourceFn]) -> String {
             "name".to_string()
         };
 
-        out.push_str(&format!("    path = {}\n\n", py_path));
-        out.push_str(&format!(
-            "    return ArtifactSource({}, path).build()\n",
-            name_ref
-        ));
+        let _ = writeln!(out, "    path = {py_path}\n");
+        let _ = writeln!(out, "    return ArtifactSource({name_ref}, path).build()");
     }
 
     out
@@ -904,7 +913,7 @@ fn build_ts_source_path(template: &str, has_version_replace: bool, _func_name: &
 
     // Check if we need template literal (has placeholders)
     if !template.contains('{') {
-        return format!("\"{}\"", template);
+        return format!("\"{template}\"");
     }
 
     // Convert {name} -> ${name}, {version} -> ${version} or ${versionClean}
@@ -925,7 +934,7 @@ fn build_ts_source_path(template: &str, has_version_replace: bool, _func_name: &
                     ts.push_str("${versionClean}");
                 }
                 other => {
-                    ts.push_str(&format!("${{{}}}", to_ts_camel(other)));
+                    let _ = write!(ts, "${{{}}}", to_ts_camel(other));
                 }
             }
             i = end + 1;
@@ -935,10 +944,10 @@ fn build_ts_source_path(template: &str, has_version_replace: bool, _func_name: &
         }
     }
 
-    format!("`{}`", ts)
+    format!("`{ts}`")
 }
 
-/// Convert source function name to Python snake_case with source_ prefix.
+/// Convert source function name to Python `snake_case` with source_ prefix.
 fn source_func_name_to_py(name: &str) -> String {
     format!("source_{}", to_py_name(name))
 }
@@ -950,7 +959,7 @@ fn build_py_source_path(template: &str, has_version_replace: bool) -> String {
     }
 
     if !template.contains('{') {
-        return format!("\"{}\"", template);
+        return format!("\"{template}\"");
     }
 
     let mut py = String::new();
@@ -967,7 +976,9 @@ fn build_py_source_path(template: &str, has_version_replace: bool) -> String {
             let placeholder: String = chars[start..end].iter().collect();
             match placeholder.as_str() {
                 "version" if has_version_replace => py.push_str("{version_clean}"),
-                other => py.push_str(&format!("{{{}}}", to_py_name(other))),
+                other => {
+                    let _ = write!(py, "{{{}}}", to_py_name(other));
+                }
             }
             i = end + 1;
         } else {
@@ -976,12 +987,12 @@ fn build_py_source_path(template: &str, has_version_replace: bool) -> String {
         }
     }
 
-    format!("f\"{}\"", py)
+    format!("f\"{py}\"")
 }
 
 // ─── Orchestration Generation ─────────────────────────────────────────────
 
-/// Parse linux_vorpal.rs to extract version constants, source calls, and step construction.
+/// Parse `linux_vorpal.rs` to extract version constants, source calls, and step construction.
 fn parse_orchestration_file(source: &str) -> (Vec<VersionConst>, Vec<SourceCall>, Vec<StepDef>) {
     let mut versions = Vec::new();
     let mut source_calls = Vec::new();
@@ -1104,7 +1115,7 @@ fn parse_orchestration_file(source: &str) -> (Vec<VersionConst>, Vec<SourceCall>
     (versions, source_calls, steps)
 }
 
-/// Generate Go linux_vorpal.go orchestration file.
+/// Generate Go `linux_vorpal.go` orchestration file.
 fn generate_go_orchestration(
     versions: &[VersionConst],
     source_calls: &[SourceCall],
@@ -1122,7 +1133,7 @@ fn generate_go_orchestration(
 
     // Version constants
     for v in versions {
-        out.push_str(&format!("\t{} := \"{}\"\n", to_go_camel(&v.name), v.value));
+        let _ = writeln!(out, "\t{} := \"{}\"", to_go_camel(&v.name), v.value);
     }
     out.push('\n');
 
@@ -1130,12 +1141,13 @@ fn generate_go_orchestration(
     for sc in source_calls {
         let go_func = source_func_name_to_go(&sc.func_name);
         let args = build_go_source_args(&sc.args, versions);
-        out.push_str(&format!(
-            "\t{} := {}({})\n",
+        let _ = writeln!(
+            out,
+            "\t{} := {}({})",
             to_go_camel(&sc.var_name),
             go_func,
             args
-        ));
+        );
     }
     out.push('\n');
 
@@ -1166,7 +1178,6 @@ fn generate_go_orchestration(
 
     for (i, step) in steps.iter().enumerate() {
         let bwrap_args = match step.bwrap_mode.as_str() {
-            "default" => "[]string{}",
             "custom_stage03" => {
                 "append(append([]string{}, bwrapArguments...), \"--bind\", \"$VORPAL_OUTPUT/tools\", \"/tools\")"
             }
@@ -1185,7 +1196,8 @@ fn generate_go_orchestration(
             to_go_camel(&step.script)
         };
 
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "\tstep{i}, err := Bwrap(\n\
              \t\t{bwrap_args},\n\
              \t\t[]*string{{}},\n\
@@ -1198,14 +1210,14 @@ fn generate_go_orchestration(
              \t\treturn nil, err\n\
              \t}}\n\
              \tsteps = append(steps, step{i})\n\n"
-        ));
+        );
     }
 
     // Sources list
     out.push_str("\tsources := []*api.ArtifactSource{\n");
     for sc in source_calls {
         let var = to_go_camel(&sc.var_name);
-        out.push_str(&format!("\t\t&{var},\n"));
+        let _ = writeln!(out, "\t\t&{var},");
     }
     out.push_str("\t}\n\n");
 
@@ -1232,7 +1244,7 @@ fn build_go_source_args(args: &[String], versions: &[VersionConst]) -> String {
                 to_go_camel(trimmed)
             } else {
                 // It's a string literal
-                format!("\"{}\"", trimmed)
+                format!("\"{trimmed}\"")
             }
         })
         .collect::<Vec<_>>()
@@ -1257,7 +1269,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "ncurses_version",
     ] {
         if version_names.contains(param) {
-            out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+            let _ = writeln!(out, "\t\t{},", to_go_camel(param));
         }
     }
     out.push_str("\t)\n\n");
@@ -1270,7 +1282,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "glibc_version",
         "linux_version",
     ] {
-        out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+        let _ = writeln!(out, "\t\t{},", to_go_camel(param));
     }
     out.push_str("\t)\n\n");
 
@@ -1295,7 +1307,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "tar_version",
         "xz_version",
     ] {
-        out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+        let _ = writeln!(out, "\t\t{},", to_go_camel(param));
     }
     out.push_str("\t)\n\n");
 
@@ -1309,7 +1321,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "texinfo_version",
         "util_linux_version",
     ] {
-        out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+        let _ = writeln!(out, "\t\t{},", to_go_camel(param));
     }
     out.push_str("\t)\n\n");
 
@@ -1322,7 +1334,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "openssl_version",
         "zlib_version",
     ] {
-        out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+        let _ = writeln!(out, "\t\t{},", to_go_camel(param));
     }
     out.push_str("\t)\n\n");
 
@@ -1336,14 +1348,14 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
         "libunistring_version",
         "unzip_version",
     ] {
-        out.push_str(&format!("\t\t{},\n", to_go_camel(param)));
+        let _ = writeln!(out, "\t\t{},", to_go_camel(param));
     }
     out.push_str("\t)\n");
 
     out
 }
 
-/// Generate Go bwrap_arguments definition.
+/// Generate Go `bwrap_arguments` definition.
 fn generate_go_bwrap_arguments() -> String {
     "\tbwrapArguments := []string{\n\
      \t\t// mount bin\n\
@@ -1387,7 +1399,7 @@ fn generate_go_bwrap_arguments() -> String {
         .to_string()
 }
 
-/// Generate TypeScript linux_vorpal.ts orchestration file.
+/// Generate TypeScript `linux_vorpal.ts` orchestration file.
 fn generate_ts_orchestration(
     versions: &[VersionConst],
     source_calls: &[SourceCall],
@@ -1417,10 +1429,10 @@ fn generate_ts_orchestration(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let mut sorted_names = source_func_names.clone();
+    let mut sorted_names = source_func_names;
     sorted_names.sort();
     for name in &sorted_names {
-        out.push_str(&format!("\t{},\n", name));
+        let _ = writeln!(out, "\t{name},");
     }
     out.push_str("} from \"./source.js\";\n\n");
 
@@ -1428,11 +1440,7 @@ fn generate_ts_orchestration(
 
     // Version constants
     for v in versions {
-        out.push_str(&format!(
-            "  const {} = \"{}\";\n",
-            to_ts_camel(&v.name),
-            v.value
-        ));
+        let _ = writeln!(out, "  const {} = \"{}\";", to_ts_camel(&v.name), v.value);
     }
     out.push('\n');
 
@@ -1440,12 +1448,13 @@ fn generate_ts_orchestration(
     for sc in source_calls {
         let ts_func = source_func_name_to_ts(&sc.func_name);
         let args = build_ts_source_args(&sc.args, versions);
-        out.push_str(&format!(
-            "  const {} = {}({});\n",
+        let _ = writeln!(
+            out,
+            "  const {} = {}({});",
             to_ts_camel(&sc.var_name),
             ts_func,
             args
-        ));
+        );
     }
     out.push('\n');
 
@@ -1471,7 +1480,6 @@ fn generate_ts_orchestration(
 
     for step in steps {
         let bwrap_args = match step.bwrap_mode.as_str() {
-            "default" => "[]".to_string(),
             "custom_stage03" => {
                 "[...bwrapArguments, \"--bind\", \"$VORPAL_OUTPUT/tools\", \"/tools\"]".to_string()
             }
@@ -1490,7 +1498,8 @@ fn generate_ts_orchestration(
             to_ts_camel(&step.script)
         };
 
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "    await bwrap(\n\
              \t\t{bwrap_args},\n\
              \t\t[],\n\
@@ -1499,14 +1508,14 @@ fn generate_ts_orchestration(
              \t\t[],\n\
              \t\t{script_expr},\n\
              \t),\n"
-        ));
+        );
     }
     out.push_str("  ];\n\n");
 
     // Sources list
     out.push_str("  const sources = [\n");
     for sc in source_calls {
-        out.push_str(&format!("    {},\n", to_ts_camel(&sc.var_name)));
+        let _ = writeln!(out, "    {},", to_ts_camel(&sc.var_name));
     }
     out.push_str("  ];\n\n");
 
@@ -1523,7 +1532,11 @@ fn generate_ts_orchestration(
     out
 }
 
-/// Generate Python linux_vorpal.py orchestration file.
+/// Generate Python `linux_vorpal.py` orchestration file.
+#[expect(
+    clippy::too_many_lines,
+    reason = "straight-line emission of one generated file's fixed sections; splitting it would only relocate the sequence, not simplify it"
+)]
 fn generate_py_orchestration(
     versions: &[VersionConst],
     source_calls: &[SourceCall],
@@ -1556,26 +1569,27 @@ fn generate_py_orchestration(
     let mut sorted_names = source_func_names;
     sorted_names.sort();
     for name in &sorted_names {
-        out.push_str(&format!("    {},\n", name));
+        let _ = writeln!(out, "    {name},");
     }
     out.push_str(")\n\nif TYPE_CHECKING:\n    from vorpal_sdk.context import ConfigContext\n\n\n");
 
     out.push_str("def linux_vorpal(context: ConfigContext) -> str:\n");
 
     for v in versions {
-        out.push_str(&format!("    {} = \"{}\"\n", to_py_name(&v.name), v.value));
+        let _ = writeln!(out, "    {} = \"{}\"", to_py_name(&v.name), v.value);
     }
     out.push('\n');
 
     for sc in source_calls {
         let py_func = source_func_name_to_py(&sc.func_name);
         let args = build_py_source_args(&sc.args, versions);
-        out.push_str(&format!(
-            "    {} = {}({})\n",
+        let _ = writeln!(
+            out,
+            "    {} = {}({})",
             to_py_name(&sc.var_name),
             py_func,
             args
-        ));
+        );
     }
     out.push('\n');
 
@@ -1590,7 +1604,6 @@ fn generate_py_orchestration(
     out.push_str("    steps = [\n");
     for step in steps {
         let bwrap_args = match step.bwrap_mode.as_str() {
-            "default" => "[]".to_string(),
             "custom_stage03" => {
                 "[*bwrap_arguments, \"--bind\", \"$VORPAL_OUTPUT/tools\", \"/tools\"]".to_string()
             }
@@ -1609,7 +1622,8 @@ fn generate_py_orchestration(
             to_py_name(&step.script)
         };
 
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             concat!(
                 "        bwrap(\n",
                 "            {bwrap_args},\n",
@@ -1623,13 +1637,13 @@ fn generate_py_orchestration(
             bwrap_args = bwrap_args,
             rootfs_expr = rootfs_expr,
             script_expr = script_expr,
-        ));
+        );
     }
     out.push_str("    ]\n\n");
 
     out.push_str("    sources = [\n");
     for sc in source_calls {
-        out.push_str(&format!("        {},\n", to_py_name(&sc.var_name)));
+        let _ = writeln!(out, "        {},", to_py_name(&sc.var_name));
     }
     out.push_str("    ]\n\n");
 
@@ -1654,7 +1668,7 @@ fn build_ts_source_args(args: &[String], versions: &[VersionConst]) -> String {
             if versions.iter().any(|v| v.name == trimmed) || trimmed.ends_with("_version") {
                 to_ts_camel(trimmed)
             } else {
-                format!("\"{}\"", trimmed)
+                format!("\"{trimmed}\"")
             }
         })
         .collect::<Vec<_>>()
@@ -1669,7 +1683,7 @@ fn build_py_source_args(args: &[String], versions: &[VersionConst]) -> String {
             if versions.iter().any(|v| v.name == trimmed) || trimmed.ends_with("_version") {
                 to_py_name(trimmed)
             } else {
-                format!("\"{}\"", trimmed)
+                format!("\"{trimmed}\"")
             }
         })
         .collect::<Vec<_>>()
@@ -1691,7 +1705,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "mpfr_version",
         "ncurses_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n\n");
 
@@ -1702,7 +1716,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "glibc_version",
         "linux_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n\n");
 
@@ -1726,7 +1740,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "tar_version",
         "xz_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n\n");
 
@@ -1739,7 +1753,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "texinfo_version",
         "util_linux_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n\n");
 
@@ -1751,7 +1765,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "openssl_version",
         "zlib_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n\n");
 
@@ -1764,7 +1778,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
         "libunistring_version",
         "unzip_version",
     ] {
-        out.push_str(&format!("    {},\n", to_ts_camel(param)));
+        let _ = writeln!(out, "    {},", to_ts_camel(param));
     }
     out.push_str("  );\n");
 
@@ -1786,7 +1800,7 @@ fn generate_py_script_calls() -> String {
         "mpfr_version",
         "ncurses_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n\n");
 
@@ -1797,7 +1811,7 @@ fn generate_py_script_calls() -> String {
         "glibc_version",
         "linux_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n\n");
 
@@ -1821,7 +1835,7 @@ fn generate_py_script_calls() -> String {
         "tar_version",
         "xz_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n\n");
 
@@ -1834,7 +1848,7 @@ fn generate_py_script_calls() -> String {
         "texinfo_version",
         "util_linux_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n\n");
 
@@ -1846,7 +1860,7 @@ fn generate_py_script_calls() -> String {
         "openssl_version",
         "zlib_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n\n");
 
@@ -1859,14 +1873,14 @@ fn generate_py_script_calls() -> String {
         "libunistring_version",
         "unzip_version",
     ] {
-        out.push_str(&format!("        {},\n", to_py_name(param)));
+        let _ = writeln!(out, "        {},", to_py_name(param));
     }
     out.push_str("    )\n");
 
     out
 }
 
-/// Generate TS bwrap_arguments definition.
+/// Generate TS `bwrap_arguments` definition.
 fn generate_ts_bwrap_arguments() -> String {
     "  const bwrapArguments = [\n\
      \t// mount bin\n\
@@ -1910,7 +1924,7 @@ fn generate_ts_bwrap_arguments() -> String {
         .to_string()
 }
 
-/// Generate Python bwrap_arguments definition.
+/// Generate Python `bwrap_arguments` definition.
 fn generate_py_bwrap_arguments() -> String {
     concat!(
         "    bwrap_arguments = [\n",
@@ -1952,13 +1966,13 @@ fn generate_py_scripts_module(script_files: &[(&str, &str)]) -> String {
 
     for (func_name, _) in script_files {
         let py_name = to_py_name(func_name);
-        out.push_str(&format!("from .script_{func_name} import {py_name}\n"));
+        let _ = writeln!(out, "from .script_{func_name} import {py_name}");
         names.push(py_name);
     }
 
     out.push_str("\n__all__ = [\n");
     for name in names {
-        out.push_str(&format!("    \"{name}\",\n"));
+        let _ = writeln!(out, "    \"{name}\",");
     }
     out.push_str("]\n");
 
@@ -1975,7 +1989,12 @@ fn generate_py_init_module() -> String {
 // ─── File writing and check mode ──────────────────────────────────────────
 
 /// Write a generated file, or check it in --check mode.
-fn write_or_check(path: &Path, content: &str, check_mode: bool, mismatches: &mut Vec<String>) {
+fn write_or_check(
+    path: &Path,
+    content: &str,
+    check_mode: bool,
+    mismatches: &mut Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if check_mode {
         match fs::read_to_string(path) {
             Ok(existing) => {
@@ -1992,18 +2011,26 @@ fn write_or_check(path: &Path, content: &str, check_mode: bool, mismatches: &mut
         }
     } else {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("Failed to create output directory");
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create output directory {}: {e}",
+                    parent.display()
+                )
+            })?;
         }
-        fs::write(path, content).unwrap_or_else(|e| {
-            panic!("Failed to write {}: {}", path.display(), e);
-        });
-        eprintln!("  wrote {}", path.display());
+        fs::write(path, content).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+        report(&format!("  wrote {}", path.display()));
     }
+    Ok(())
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────
 
-fn main() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "straight-line read-parse-generate-write sequence for scripts, sources, then orchestration; splitting it would only relocate the sequence, not simplify it"
+)]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let check_mode = args.iter().any(|a| a == "--check");
@@ -2013,7 +2040,7 @@ fn main() {
     let project_root = tool_dir
         .parent()
         .and_then(|p| p.parent())
-        .expect("Could not determine project root");
+        .ok_or("Could not determine project root")?;
 
     let rust_script_dir = project_root.join("sdk/rust/src/artifact/linux_vorpal/script");
     let rust_source_file = project_root.join("sdk/rust/src/artifact/linux_vorpal/source.rs");
@@ -2025,9 +2052,9 @@ fn main() {
 
     let mut mismatches: Vec<String> = Vec::new();
 
-    eprintln!("linux-vorpal-codegen: generating Go, TypeScript, and Python SDK files");
+    report("linux-vorpal-codegen: generating Go, TypeScript, and Python SDK files");
     if check_mode {
-        eprintln!("  mode: --check (comparing against existing files)");
+        report("  mode: --check (comparing against existing files)");
     }
 
     // ─── 1. Generate script files ─────────────────────────────────────
@@ -2043,28 +2070,29 @@ fn main() {
 
     for (func_name, filename) in &script_files {
         let source = fs::read_to_string(rust_script_dir.join(filename))
-            .unwrap_or_else(|e| panic!("Failed to read {}: {}", filename, e));
+            .map_err(|e| format!("Failed to read {filename}: {e}"))?;
 
-        let parsed = parse_script_file(&source);
+        let parsed =
+            parse_script_file(&source).map_err(|e| format!("Failed to parse {filename}: {e}"))?;
         let template = strip_indoc(&parsed.template);
 
         // Generate Go
         let go_content =
             generate_go_script(func_name, &template, &parsed.params, &parsed.named_args);
-        let go_path = go_output_dir.join(format!("linux_vorpal_script_{}.go", func_name));
-        write_or_check(&go_path, &go_content, check_mode, &mut mismatches);
+        let go_path = go_output_dir.join(format!("linux_vorpal_script_{func_name}.go"));
+        write_or_check(&go_path, &go_content, check_mode, &mut mismatches)?;
 
         // Generate TypeScript
         let ts_content =
             generate_ts_script(func_name, &template, &parsed.params, &parsed.named_args);
-        let ts_path = ts_output_dir.join(format!("script_{}.ts", func_name));
-        write_or_check(&ts_path, &ts_content, check_mode, &mut mismatches);
+        let ts_path = ts_output_dir.join(format!("script_{func_name}.ts"));
+        write_or_check(&ts_path, &ts_content, check_mode, &mut mismatches)?;
 
         // Generate Python
         let py_content =
             generate_py_script(func_name, &template, &parsed.params, &parsed.named_args);
-        let py_path = py_output_dir.join(format!("script_{}.py", func_name));
-        write_or_check(&py_path, &py_content, check_mode, &mut mismatches);
+        let py_path = py_output_dir.join(format!("script_{func_name}.py"));
+        write_or_check(&py_path, &py_content, check_mode, &mut mismatches)?;
     }
 
     let py_scripts = generate_py_scripts_module(&script_files);
@@ -2073,13 +2101,14 @@ fn main() {
         &py_scripts,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     // ─── 2. Generate source files ─────────────────────────────────────
 
     let source_content = fs::read_to_string(&rust_source_file)
-        .unwrap_or_else(|e| panic!("Failed to read source.rs: {}", e));
-    let parsed_sources = parse_source_file(&source_content);
+        .map_err(|e| format!("Failed to read source.rs: {e}"))?;
+    let parsed_sources = parse_source_file(&source_content)
+        .map_err(|e| format!("Failed to parse source.rs: {e}"))?;
 
     let go_source = generate_go_source(&parsed_sources);
     write_or_check(
@@ -2087,7 +2116,7 @@ fn main() {
         &go_source,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let ts_source = generate_ts_source(&parsed_sources);
     write_or_check(
@@ -2095,7 +2124,7 @@ fn main() {
         &ts_source,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let py_source = generate_py_source(&parsed_sources);
     write_or_check(
@@ -2103,12 +2132,12 @@ fn main() {
         &py_source,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     // ─── 3. Generate orchestration files ──────────────────────────────
 
     let orchestration_content = fs::read_to_string(&rust_orchestration_file)
-        .unwrap_or_else(|e| panic!("Failed to read linux_vorpal.rs: {}", e));
+        .map_err(|e| format!("Failed to read linux_vorpal.rs: {e}"))?;
     let (versions, source_calls, steps) = parse_orchestration_file(&orchestration_content);
 
     let go_orchestration = generate_go_orchestration(&versions, &source_calls, &steps);
@@ -2117,7 +2146,7 @@ fn main() {
         &go_orchestration,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let ts_orchestration = generate_ts_orchestration(&versions, &source_calls, &steps);
     write_or_check(
@@ -2125,7 +2154,7 @@ fn main() {
         &ts_orchestration,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let py_orchestration = generate_py_orchestration(&versions, &source_calls, &steps);
     write_or_check(
@@ -2133,7 +2162,7 @@ fn main() {
         &py_orchestration,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let py_init = generate_py_init_module();
     write_or_check(
@@ -2141,30 +2170,31 @@ fn main() {
         &py_init,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     // ─── 4. Report results ────────────────────────────────────────────
 
     if check_mode {
         if mismatches.is_empty() {
-            eprintln!("linux-vorpal-codegen: all generated files are up to date");
-            process::exit(0);
+            report("linux-vorpal-codegen: all generated files are up to date");
         } else {
-            eprintln!(
+            report(&format!(
                 "linux-vorpal-codegen: {} file(s) out of date:",
                 mismatches.len()
-            );
+            ));
             for m in &mismatches {
-                eprintln!("  {}", m);
+                report(&format!("  {m}"));
             }
             process::exit(1);
         }
     } else {
-        eprintln!(
+        report(&format!(
             "linux-vorpal-codegen: generated {} Go files, {} TypeScript files, and {} Python files",
             script_files.len() + 2, // scripts + source + orchestration
             script_files.len() + 2,
             script_files.len() + 4, // scripts + scripts.py + source + orchestration + __init__.py
-        );
+        ));
     }
+
+    Ok(())
 }
