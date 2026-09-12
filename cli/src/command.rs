@@ -6,8 +6,8 @@ use crate::command::{
     store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
-use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap::parser::ValueSource;
+use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand};
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
     StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
