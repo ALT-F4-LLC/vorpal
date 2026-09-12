@@ -46,7 +46,14 @@ pub fn script(
         mkdir -p $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
         pushd $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
 
+        # Pin the build-machine C++ dialect to gnu++17: gcc's own libcody uses
+        # u8\"...\" literals as plain char*, which stop compiling once the host
+        # compiler defaults to C++20 (char8_t) or later. The flag must ride in
+        # CXX, not CXXFLAGS: libcody's configure appends -std=c++11 to CXX and
+        # requires that append to win, and CXXFLAGS comes later on the command
+        # line and would override it (\"configure: error: C++11 is required\").
         ../configure \
+        CXX=\"g++ -std=gnu++17\" \
         --target=\"$VORPAL_TARGET\" \
         --prefix=\"$VORPAL_OUTPUT/tools\" \
         --with-glibc-version=\"2.42\" \
