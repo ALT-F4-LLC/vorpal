@@ -5,14 +5,23 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `rust-std` component of the Rust toolchain.
 #[derive(Default)]
 pub struct RustStd {}
 
 impl RustStd {
+    /// Creates a new `rust-std` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `rust-std` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known Rust toolchain release, or if
+    /// registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "rust-std";
         let system = context.get_system();

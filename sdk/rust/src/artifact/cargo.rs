@@ -5,14 +5,23 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `cargo` toolchain component, sourced from the pinned Rust toolchain release.
 #[derive(Default)]
 pub struct Cargo {}
 
 impl Cargo {
+    /// Creates a builder for the `cargo` toolchain component.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `cargo` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `rust-toolchain` release, or if
+    /// registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "cargo";
         let system = context.get_system();

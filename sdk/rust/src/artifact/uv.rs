@@ -39,15 +39,26 @@ impl Default for Uv {
 }
 
 impl Uv {
+    /// Creates a builder pinned to [`DEFAULT_UV_VERSION`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Overrides the `uv` release version to fetch.
+    #[must_use]
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
     }
 
+    /// Builds the `uv` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `CPython` target triple (via
+    /// [`cpython::target`]), or if registering the source or artifact with the build context
+    /// fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "uv";
 

@@ -2,7 +2,7 @@ use crate::{
     api,
     api::artifact::{
         ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux},
     },
     artifact::{
         get_env_key, git::Git, go::Go as GoDist, goimports::Goimports, gopls::Gopls,
@@ -14,6 +14,7 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Builds a Go binary artifact from source using the pinned `go` toolchain.
 pub struct Go<'a> {
     aliases: Vec<String>,
     artifacts: Vec<String>,
@@ -30,27 +31,38 @@ pub struct Go<'a> {
     system_error: Option<anyhow::Error>,
 }
 
+/// Maps a Vorpal `ArtifactSystem` to the `GOOS` value `go build` expects.
+///
+/// # Errors
+///
+/// Returns an error if `target` is [`UnknownSystem`].
 pub fn get_goos(target: ArtifactSystem) -> Result<String> {
     let goos = match target {
         Aarch64Darwin | X8664Darwin => "darwin",
         Aarch64Linux | X8664Linux => "linux",
-        _ => bail!("unsupported 'go' system: {:?}", target),
+        UnknownSystem => bail!("unsupported 'go' system: {target:?}"),
     };
 
     Ok(goos.to_string())
 }
 
+/// Maps a Vorpal `ArtifactSystem` to the `GOARCH` value `go build` expects.
+///
+/// # Errors
+///
+/// Returns an error if `target` is [`UnknownSystem`].
 pub fn get_goarch(target: ArtifactSystem) -> Result<String> {
     let goarch = match target {
         Aarch64Darwin | Aarch64Linux => "arm64",
         X8664Darwin | X8664Linux => "amd64",
-        _ => bail!("unsupported 'go' system: {:?}", target),
+        UnknownSystem => bail!("unsupported 'go' system: {target:?}"),
     };
 
     Ok(goarch.to_string())
 }
 
 impl<'a> Go<'a> {
+    /// Creates a builder for a Go binary artifact named `name`, targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -75,6 +87,8 @@ impl<'a> Go<'a> {
         }
     }
 
+    /// Adds an alias the built artifact will also be registered under, if not already present.
+    #[must_use]
     pub fn with_alias(mut self, alias: String) -> Self {
         if !self.aliases.contains(&alias) {
             self.aliases.push(alias);
@@ -82,36 +96,50 @@ impl<'a> Go<'a> {
         self
     }
 
+    /// Sets the dependency artifacts made available to the build step.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
         self
     }
 
+    /// Overrides the directory `go build -C` runs from (default: the source root).
+    #[must_use]
     pub fn with_build_directory(mut self, directory: &'a str) -> Self {
         self.build_directory = Some(directory);
         self
     }
 
+    /// Sets extra flags passed to `go build`.
+    #[must_use]
     pub fn with_build_flags(mut self, flags: &'a str) -> Self {
         self.build_flags = Some(flags);
         self
     }
 
+    /// Overrides the package path passed to `go build` (default: the source root).
+    #[must_use]
     pub fn with_build_path(mut self, path: &'a str) -> Self {
         self.build_path = Some(path);
         self
     }
 
+    /// Sets extra environment variables for the build step.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
         self.environments = environments;
         self
     }
 
+    /// Restricts the registered source to these paths (default: the whole source directory).
+    #[must_use]
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
         self
     }
 
+    /// Adds build-step secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
@@ -123,11 +151,16 @@ impl<'a> Go<'a> {
         self
     }
 
+    /// Overrides the registered source (default: the whole source directory, filtered by
+    /// [`Self::with_includes`]).
+    #[must_use]
     pub fn with_source(mut self, source: api::artifact::ArtifactSource) -> Self {
         self.source = Some(source);
         self
     }
 
+    /// Adds a shell script fragment to run before `go build`, skipping duplicates.
+    #[must_use]
     pub fn with_source_script(mut self, script: &'a str) -> Self {
         if !self.source_scripts.contains(&script.to_string()) {
             self.source_scripts.push(script.to_string());
@@ -135,6 +168,13 @@ impl<'a> Go<'a> {
         self
     }
 
+    /// Builds the Go binary artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the `git`
+    /// or `go` toolchain dependency fails, if the target system has no known `GOOS`/`GOARCH`
+    /// mapping, or if registering the source or artifact with the build context fails.
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 
@@ -146,7 +186,11 @@ impl<'a> Go<'a> {
         let mut source_builder = ArtifactSource::new(self.name, source_path);
 
         if !self.includes.is_empty() {
-            let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
+            let source_includes = self
+                .includes
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
             source_builder = source_builder.with_includes(source_includes);
         }
 
@@ -158,19 +202,19 @@ impl<'a> Go<'a> {
 
         let source_dir = format!("./source/{}", source.name);
 
-        let mut step_script = formatdoc! {r#"
+        let mut step_script = formatdoc! {r"
             pushd {source_dir}
 
-            mkdir -p $VORPAL_OUTPUT/bin"#,
+            mkdir -p $VORPAL_OUTPUT/bin",
         };
 
         if !self.source_scripts.is_empty() {
             let source_scripts = self.source_scripts.join("\n");
 
-            step_script = formatdoc! {r#"
+            step_script = formatdoc! {r"
                 {step_script}
 
-                {source_scripts}"#,
+                {source_scripts}",
             };
         }
 
@@ -178,12 +222,12 @@ impl<'a> Go<'a> {
         let build_flags = self.build_flags.unwrap_or("");
         let build_path = self.build_path.unwrap_or(source_path);
 
-        step_script = formatdoc! {r#"
+        step_script = formatdoc! {r"
             {step_script}
 
             go build -C {build_directory} -o $VORPAL_OUTPUT/bin/{name} {build_flags} {build_path}
 
-            go clean -modcache"#,
+            go clean -modcache",
             name = self.name,
         };
 
@@ -207,7 +251,7 @@ impl<'a> Go<'a> {
         let steps = vec![
             step::shell(
                 context,
-                [vec![git.clone(), go.clone()], self.artifacts].concat(),
+                [vec![git, go], self.artifacts].concat(),
                 step_environments,
                 step_script,
                 self.secrets,
@@ -227,6 +271,9 @@ impl<'a> Go<'a> {
 // Go Development Environment
 // ---------------------------------------------------------------------------
 
+/// Development environment preloaded with the Go toolchain and its companion tools
+/// (`goimports`, `gopls`, `staticcheck`, and by default `protoc`/`protoc-gen-go`/
+/// `protoc-gen-go-grpc`).
 pub struct GoDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
     environments: Vec<String>,
@@ -240,6 +287,7 @@ pub struct GoDevelopmentEnvironment<'a> {
 }
 
 impl<'a> GoDevelopmentEnvironment<'a> {
+    /// Creates a builder for a Go development environment named `name`, targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -260,16 +308,22 @@ impl<'a> GoDevelopmentEnvironment<'a> {
         }
     }
 
+    /// Adds dependency artifacts made available in the environment.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts.extend(artifacts);
         self
     }
 
+    /// Adds extra environment variables.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<String>) -> Self {
         self.environments.extend(environments);
         self
     }
 
+    /// Excludes `protoc`, `protoc-gen-go`, and `protoc-gen-go-grpc` from the environment.
+    #[must_use]
     pub fn without_protoc(mut self) -> Self {
         self.include_protoc = false;
         self.include_protoc_gen_go = false;
@@ -277,6 +331,8 @@ impl<'a> GoDevelopmentEnvironment<'a> {
         self
     }
 
+    /// Adds environment secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
         for secret in secrets {
             if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
@@ -286,6 +342,15 @@ impl<'a> GoDevelopmentEnvironment<'a> {
         self
     }
 
+    /// Builds the Go development environment artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building any
+    /// toolchain dependency (`git`, `go`, `goimports`, `gopls`, `staticcheck`, and unless
+    /// excluded via [`Self::without_protoc`], `protoc`/`protoc-gen-go`/`protoc-gen-go-grpc`)
+    /// fails, if the target system has no known `GOOS`/`GOARCH` mapping, or if registering the
+    /// environment artifact with the build context fails.
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 

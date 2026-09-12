@@ -5,14 +5,23 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `goimports` tool, built from the Go tooling source tree.
 #[derive(Default)]
 pub struct Goimports {}
 
 impl Goimports {
+    /// Creates a builder for the `goimports` tool.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `goimports` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `Go` toolchain build fails, or if registering the source or
+    /// artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "goimports";
 

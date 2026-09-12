@@ -5,14 +5,24 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `protoc-gen-go-grpc` protobuf gRPC Go code generator plugin, built from
+/// source with the Go toolchain.
 #[derive(Default)]
 pub struct ProtocGenGoGrpc {}
 
 impl ProtocGenGoGrpc {
+    /// Creates a builder for the pinned `protoc-gen-go-grpc` release.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `protoc-gen-go-grpc` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if registering the source with the build context fails, or if the
+    /// underlying Go build fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "protoc-gen-go-grpc";
 

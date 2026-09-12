@@ -5,14 +5,22 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `rust-src` component of the Rust toolchain.
 #[derive(Default)]
 pub struct RustSrc {}
 
 impl RustSrc {
+    /// Creates a new `rust-src` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `rust-src` artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "rust-src";
         let source_version = rust_toolchain::version();

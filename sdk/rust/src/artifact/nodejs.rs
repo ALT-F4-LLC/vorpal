@@ -1,18 +1,29 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{
+        Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
+    },
     artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 
+/// Build-target `Node.js` JavaScript runtime, fetched as a prebuilt binary release.
 #[derive(Default)]
 pub struct NodeJS {}
 
 impl NodeJS {
+    /// Creates a builder for the pinned `Node.js` release.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `Node.js` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `Node.js` release, or if
+    /// registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "nodejs";
 
@@ -23,7 +34,7 @@ impl NodeJS {
             Aarch64Linux => "linux-arm64",
             X8664Darwin => "darwin-x64",
             X8664Linux => "linux-x64",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_version = "22.22.0";

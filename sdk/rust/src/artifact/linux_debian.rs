@@ -154,14 +154,25 @@ fn generate_dockerfile() -> String {
     "}
 }
 
+/// Debian-based container rootfs used as the sandbox base for `linux-vorpal` builds.
 #[derive(Default)]
 pub struct LinuxDebian {}
 
 impl LinuxDebian {
+    /// Creates a new `LinuxDebian` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `linux-debian` rootfs artifact by running the Dockerfile through buildx and
+    /// exporting the resulting container filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the intermediate `linux-debian-dockerfile` artifact fails to build,
+    /// or if any `docker buildx build`, `container create`, `container export`, `container
+    /// stop`, or `container rm` step fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let systems = vec![Aarch64Linux, X8664Linux];
 
@@ -182,11 +193,17 @@ impl LinuxDebian {
             },
         )];
 
-        let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
-            .build(context)
-            .await?;
+        let dockerfile = Artifact::new(
+            "linux-debian-dockerfile",
+            steps,
+            vec![Aarch64Linux, X8664Linux],
+        )
+        .build(context)
+        .await?;
 
         let image = format!("altf4llc/debin:{dockerfile}");
+
+        let dockerfile_artifacts = vec![dockerfile.clone()];
 
         let steps = vec![
             step::docker(
@@ -197,7 +214,7 @@ impl LinuxDebian {
                     format!("--tag={image}").as_str(),
                     &get_env_key(&dockerfile),
                 ],
-                vec![dockerfile.clone()],
+                dockerfile_artifacts,
             ),
             step::docker(
                 vec!["container", "create", "--name", &dockerfile, &image],

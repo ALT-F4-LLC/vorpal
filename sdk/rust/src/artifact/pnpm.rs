@@ -1,19 +1,30 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{
+        Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
+    },
     artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Build-target `pnpm` package manager, fetched as a prebuilt binary release.
 #[derive(Default)]
 pub struct Pnpm {}
 
 impl Pnpm {
+    /// Creates a builder for the pinned `pnpm` release.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `pnpm` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `pnpm` release, or if
+    /// registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "pnpm";
 
@@ -24,7 +35,7 @@ impl Pnpm {
             Aarch64Linux => "linux-arm64",
             X8664Darwin => "macos-x64",
             X8664Linux => "linux-x64",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_version = "10.30.3";

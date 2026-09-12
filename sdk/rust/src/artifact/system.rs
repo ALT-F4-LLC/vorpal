@@ -5,7 +5,13 @@ use crate::api::artifact::{
 use anyhow::Result;
 use std::env::consts::{ARCH, OS};
 
+/// Converts a value identifying a target system into an [`ArtifactSystem`].
 pub trait ArtifactSystemInput {
+    /// Resolves `self` to a supported [`ArtifactSystem`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value does not identify a supported system.
     fn into_artifact_system(self) -> Result<ArtifactSystem>;
 }
 
@@ -41,6 +47,9 @@ where
     }
 }
 
+/// Returns the `arch-os` string for the current host platform, using
+/// `darwin` in place of Rust's `macos` to match Vorpal's system naming.
+#[must_use]
 pub fn get_system_default_str() -> String {
     let os = match OS {
         "macos" => "darwin",
@@ -50,22 +59,39 @@ pub fn get_system_default_str() -> String {
     format!("{ARCH}-{os}")
 }
 
+/// Resolves the current host platform to a supported [`ArtifactSystem`].
+///
+/// # Errors
+///
+/// Returns an error if the host platform is not a supported system.
 pub fn get_system_default() -> Result<ArtifactSystem> {
     let platform = get_system_default_str();
 
     get_system(&platform)
 }
 
+/// Parses a canonical `arch-os` string (for example `x86_64-linux`) into a
+/// supported [`ArtifactSystem`].
+///
+/// # Errors
+///
+/// Returns an error if the string does not match a supported system.
 pub fn get_system(system: &str) -> Result<ArtifactSystem> {
     match system {
         "aarch64-darwin" => Ok(Aarch64Darwin),
         "aarch64-linux" => Ok(Aarch64Linux),
         "x86_64-darwin" => Ok(X8664Darwin),
         "x86_64-linux" => Ok(X8664Linux),
-        _ => Err(anyhow::anyhow!("unsupported system: {}", system)),
+        _ => Err(anyhow::anyhow!("unsupported system: {system}")),
     }
 }
 
+/// Converts a collection of system inputs into [`ArtifactSystem`] values,
+/// preserving order.
+///
+/// # Errors
+///
+/// Returns an error if any input does not identify a supported system.
 pub fn normalize_systems<I, S>(systems: I) -> Result<Vec<ArtifactSystem>>
 where
     I: IntoIterator<Item = S>,
@@ -73,10 +99,15 @@ where
 {
     systems
         .into_iter()
-        .map(|system| system.into_artifact_system())
+        .map(ArtifactSystemInput::into_artifact_system)
         .collect()
 }
 
+/// Converts a collection of system inputs into [`ArtifactSystem`] values.
+///
+/// # Errors
+///
+/// Returns an error if any input does not identify a supported system.
 pub fn get_systems<I, S>(systems: I) -> Result<Vec<ArtifactSystem>>
 where
     I: IntoIterator<Item = S>,
@@ -121,17 +152,21 @@ mod tests {
     }
 
     #[test]
-    fn get_system_rejects_enum_labels() {
+    fn get_system_rejects_enum_labels() -> Result<()> {
         for system in [
             "AARCH64_DARWIN",
             "AARCH64_LINUX",
             "X8664_DARWIN",
             "X8664_LINUX",
         ] {
-            let err = get_system(system).unwrap_err();
+            let Err(err) = get_system(system) else {
+                anyhow::bail!("expected {system} to be rejected");
+            };
 
             assert_eq!(err.to_string(), format!("unsupported system: {system}"));
         }
+
+        Ok(())
     }
 
     #[test]
@@ -165,17 +200,21 @@ mod tests {
     }
 
     #[test]
-    fn normalize_systems_rejects_unknown_system_enum() {
-        let err = ArtifactSystem::UnknownSystem
-            .into_artifact_system()
-            .unwrap_err();
+    fn normalize_systems_rejects_unknown_system_enum() -> Result<()> {
+        let Err(err) = ArtifactSystem::UnknownSystem.into_artifact_system() else {
+            anyhow::bail!("expected UnknownSystem to be rejected");
+        };
 
         assert_eq!(err.to_string(), "unsupported system: UNKNOWN_SYSTEM");
 
         let system = ArtifactSystem::UnknownSystem;
-        let err = (&system).into_artifact_system().unwrap_err();
+        let Err(err) = (&system).into_artifact_system() else {
+            anyhow::bail!("expected UnknownSystem to be rejected");
+        };
 
         assert_eq!(err.to_string(), "unsupported system: UNKNOWN_SYSTEM");
+
+        Ok(())
     }
 
     #[test]
@@ -188,16 +227,24 @@ mod tests {
     }
 
     #[test]
-    fn get_system_rejects_invalid_strings() {
-        let err = get_system("loongarch64-linux").unwrap_err();
+    fn get_system_rejects_invalid_strings() -> Result<()> {
+        let Err(err) = get_system("loongarch64-linux") else {
+            anyhow::bail!("expected loongarch64-linux to be rejected");
+        };
 
         assert_eq!(err.to_string(), "unsupported system: loongarch64-linux");
+
+        Ok(())
     }
 
     #[test]
-    fn normalize_systems_rejects_sentinel_string_labels() {
-        let err = normalize_systems(["UNKNOWN_SYSTEM"]).unwrap_err();
+    fn normalize_systems_rejects_sentinel_string_labels() -> Result<()> {
+        let Err(err) = normalize_systems(["UNKNOWN_SYSTEM"]) else {
+            anyhow::bail!("expected UNKNOWN_SYSTEM to be rejected");
+        };
 
         assert_eq!(err.to_string(), "unsupported system: UNKNOWN_SYSTEM");
+
+        Ok(())
     }
 }

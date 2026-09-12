@@ -1,5 +1,12 @@
 use indoc::formatdoc;
 
+/// Generates the `linux_vorpal` cross-toolchain stage shell script: builds the
+/// pass-01 `binutils` and `gcc`, the Linux kernel headers, pass-01 `glibc`, and
+/// `libstdc++` against the target sysroot.
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear shell-script assembly for one LFS cross-toolchain build stage; splitting the formatdoc! would fragment a single sequential script"
+)]
 pub fn script(
     binutils_version: &str,
     gcc_version: &str,

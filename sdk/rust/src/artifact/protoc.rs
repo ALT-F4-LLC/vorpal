@@ -1,19 +1,30 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{
+        Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
+    },
     artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Build-target `protoc` Protocol Buffers compiler, fetched as a prebuilt binary release.
 #[derive(Default)]
 pub struct Protoc {}
 
 impl Protoc {
+    /// Creates a builder for the pinned `protoc` release.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `protoc` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `protoc` release, or if
+    /// registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "protoc";
         let system = context.get_system();
@@ -23,7 +34,7 @@ impl Protoc {
             Aarch64Linux => "linux-aarch_64",
             X8664Darwin => "osx-x86_64",
             X8664Linux => "linux-x86_64",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_version = "34.0";

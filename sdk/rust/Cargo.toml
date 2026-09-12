@@ -31,3 +31,6 @@ tonic-prost-build = { version = "0.14.3" }
 
 [package.metadata.cargo-machete]
 ignored = ["prost", "serde", "tonic-build"]
+
+[lints]
+workspace = true

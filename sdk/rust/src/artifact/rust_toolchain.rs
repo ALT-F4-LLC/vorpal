@@ -1,7 +1,7 @@
 use crate::{
     api::artifact::{
         ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux},
     },
     artifact::{
         cargo::Cargo, clippy::Clippy, get_env_key, rust_analyzer::RustAnalyzer, rust_src::RustSrc,
@@ -12,22 +12,34 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Maps a Vorpal `ArtifactSystem` to the upstream Rust release target triple.
+///
+/// # Errors
+///
+/// Returns an error if `system` has no known Rust toolchain release target.
 pub fn target(system: ArtifactSystem) -> Result<String> {
     let target = match system {
         Aarch64Darwin => "aarch64-apple-darwin",
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         X8664Darwin => "x86_64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
-        _ => bail!("unsupported 'rust-toolchain' system: {:?}", system),
+        UnknownSystem => bail!("unsupported 'rust-toolchain' system: {system:?}"),
     };
 
     Ok(target.to_string())
 }
 
+/// Canonical pin for the build-target Rust toolchain version.
+#[must_use]
 pub fn version() -> String {
     "1.93.1".to_string()
 }
 
+/// Assembles the build-target Rust toolchain (`cargo`, `clippy`, `rust-analyzer`, `rust-src`,
+/// `rust-std`, `rustc`, `rustfmt`) into a single rustup-compatible toolchain directory.
+///
+/// Each component can be supplied as a pre-built artifact digest via the `with_*` methods to
+/// avoid rebuilding it; any component left unset is built with its default settings.
 #[derive(Default)]
 pub struct RustToolchain<'a> {
     cargo: Option<&'a str>,
@@ -40,45 +52,67 @@ pub struct RustToolchain<'a> {
 }
 
 impl<'a> RustToolchain<'a> {
+    /// Creates a builder with every toolchain component left to be built with defaults.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Reuses a pre-built `cargo` artifact digest instead of building one.
+    #[must_use]
     pub fn with_cargo(mut self, cargo: &'a str) -> Self {
         self.cargo = Some(cargo);
         self
     }
 
+    /// Reuses a pre-built `clippy` artifact digest instead of building one.
+    #[must_use]
     pub fn with_clippy(mut self, clippy: &'a str) -> Self {
         self.clippy = Some(clippy);
         self
     }
 
+    /// Reuses a pre-built `rust-analyzer` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rust_analyzer(mut self, rust_analyzer: &'a str) -> Self {
         self.rust_analyzer = Some(rust_analyzer);
         self
     }
 
+    /// Reuses a pre-built `rust-src` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rust_src(mut self, rust_src: &'a str) -> Self {
         self.rust_src = Some(rust_src);
         self
     }
 
+    /// Reuses a pre-built `rust-std` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rust_std(mut self, rust_std: &'a str) -> Self {
         self.rust_std = Some(rust_std);
         self
     }
 
+    /// Reuses a pre-built `rustc` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rustc(mut self, rustc: &'a str) -> Self {
         self.rustc = Some(rustc);
         self
     }
 
+    /// Reuses a pre-built `rustfmt` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rustfmt(mut self, rustfmt: &'a str) -> Self {
         self.rustfmt = Some(rustfmt);
         self
     }
 
+    /// Builds the assembled Rust toolchain artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any unset component fails to build, if the context's target system
+    /// has no known Rust toolchain release, or if registering the artifact fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let cargo = match self.cargo {
             Some(digest) => digest.to_string(),

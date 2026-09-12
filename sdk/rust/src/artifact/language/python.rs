@@ -15,6 +15,8 @@ use indoc::formatdoc;
 /// invalid wheel. This is the zip epoch (1980-01-01T00:00:00Z).
 const SOURCE_DATE_EPOCH: &str = "315532800";
 
+/// Builds a Python artifact (an app with a launcher, or a library wheel) using the pinned
+/// `CPython` interpreter and `uv`.
 pub struct Python<'a> {
     aliases: Vec<String>,
     artifacts: Vec<String>,
@@ -83,6 +85,7 @@ fn step_build_command(name: &str, entrypoint: Option<&str>, python_bin: &str) ->
 }
 
 impl<'a> Python<'a> {
+    /// Creates a builder for a Python artifact named `name`, targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -105,6 +108,8 @@ impl<'a> Python<'a> {
         }
     }
 
+    /// Adds aliases the built artifact will also be registered under, skipping duplicates.
+    #[must_use]
     pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
         for alias in aliases {
             if !self.aliases.contains(&alias) {
@@ -114,26 +119,37 @@ impl<'a> Python<'a> {
         self
     }
 
+    /// Sets the dependency artifacts made available to the build step.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
         self
     }
 
+    /// Switches the build to app mode: emits a launcher at `$VORPAL_OUTPUT/bin/<name>` that
+    /// execs this entrypoint script, instead of building a library wheel.
+    #[must_use]
     pub fn with_entrypoint(mut self, entrypoint: &'a str) -> Self {
         self.entrypoint = Some(entrypoint);
         self
     }
 
+    /// Sets extra environment variables for the build step.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
         self.environments = environments;
         self
     }
 
+    /// Restricts the registered source to these paths (default: the whole source directory).
+    #[must_use]
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.source_includes = includes;
         self
     }
 
+    /// Adds build-step secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
@@ -145,6 +161,8 @@ impl<'a> Python<'a> {
         self
     }
 
+    /// Adds shell script fragments to run before `uv sync`, skipping duplicates.
+    #[must_use]
     pub fn with_source_scripts(mut self, scripts: Vec<String>) -> Self {
         for script in scripts {
             if !self.source_scripts.contains(&script) {
@@ -154,11 +172,20 @@ impl<'a> Python<'a> {
         self
     }
 
+    /// Runs the build from `dir`, relative to the registered source root.
+    #[must_use]
     pub fn with_working_dir(mut self, dir: &str) -> Self {
         self.working_dir = Some(dir.to_string());
         self
     }
 
+    /// Builds the Python artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the
+    /// `CPython` or `uv` toolchain dependency fails, or if registering the source or artifact
+    /// with the build context fails.
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 
@@ -177,8 +204,12 @@ impl<'a> Python<'a> {
         let mut source_builder = ArtifactSource::new(self.name, source_path);
 
         if !self.source_includes.is_empty() {
-            source_builder = source_builder
-                .with_includes(self.source_includes.iter().map(|s| s.to_string()).collect());
+            source_builder = source_builder.with_includes(
+                self.source_includes
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect(),
+            );
         }
 
         let source = source_builder.build();
@@ -187,9 +218,9 @@ impl<'a> Python<'a> {
 
         let step_source_dir = format!("{}/source/{}", source_path, source.name);
 
-        let step_source_dir = match &self.working_dir {
-            Some(working_dir) => format!("{}/{}", step_source_dir, working_dir),
-            None => step_source_dir.clone(),
+        let step_source_dir = match self.working_dir {
+            Some(ref working_dir) => format!("{step_source_dir}/{working_dir}"),
+            None => step_source_dir,
         };
 
         // Build step script
@@ -205,14 +236,14 @@ impl<'a> Python<'a> {
         // Not for untrusted or registry-derived input; see go.rs / typescript.rs for precedent.
         let step_build_command = step_build_command(self.name, self.entrypoint, &cpython_bin);
 
-        let step_script = formatdoc! {r#"
+        let step_script = formatdoc! {r"
             pushd {step_source_dir}
 
             {step_source_scripts}
 
             uv sync --frozen --no-dev --no-editable
 
-            {step_build_command}"#,
+            {step_build_command}",
             step_source_scripts = self.source_scripts.join("\n")
         };
 
@@ -229,7 +260,7 @@ impl<'a> Python<'a> {
             step_environments.push(env.to_string());
         }
 
-        let mut step_artifacts = vec![cpython.clone(), uv.clone()];
+        let mut step_artifacts = vec![cpython, uv];
 
         step_artifacts.extend(self.artifacts);
 
@@ -256,6 +287,7 @@ impl<'a> Python<'a> {
     }
 }
 
+/// Development environment preloaded with the pinned `CPython` interpreter and `uv`.
 pub struct PythonDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
     environments: Vec<String>,
@@ -266,6 +298,8 @@ pub struct PythonDevelopmentEnvironment<'a> {
 }
 
 impl<'a> PythonDevelopmentEnvironment<'a> {
+    /// Creates a builder for a Python development environment named `name`, targeting
+    /// `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -283,16 +317,22 @@ impl<'a> PythonDevelopmentEnvironment<'a> {
         }
     }
 
+    /// Adds dependency artifacts made available in the environment.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts.extend(artifacts);
         self
     }
 
+    /// Adds extra environment variables.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<String>) -> Self {
         self.environments.extend(environments);
         self
     }
 
+    /// Adds environment secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
         for secret in secrets {
             if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
@@ -302,6 +342,13 @@ impl<'a> PythonDevelopmentEnvironment<'a> {
         self
     }
 
+    /// Builds the Python development environment artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the
+    /// `CPython` or `uv` toolchain dependency fails, or if registering the environment
+    /// artifact with the build context fails.
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 

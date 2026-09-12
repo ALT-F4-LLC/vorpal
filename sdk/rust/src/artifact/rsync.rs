@@ -6,14 +6,22 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
+/// Build-target `rsync` file-copying tool, built from source.
 #[derive(Default)]
 pub struct Rsync;
 
 impl Rsync {
+    /// Creates a builder for the pinned `rsync` release.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
+    /// Builds the `rsync` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "rsync";
         let version = "3.4.1";

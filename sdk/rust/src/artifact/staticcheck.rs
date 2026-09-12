@@ -5,14 +5,23 @@ use crate::{
 };
 use anyhow::Result;
 
+/// Build-target `staticcheck` Go linter, built from source via the `Go` builder.
 #[derive(Default)]
 pub struct Staticcheck {}
 
 impl Staticcheck {
+    /// Creates a new `staticcheck` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `staticcheck` artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying `Go` build fails, including an unsupported target
+    /// system or a failure to register the source or artifact with the build context.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "staticcheck";
         let source_version = "2026.1";

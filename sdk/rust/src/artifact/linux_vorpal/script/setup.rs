@@ -1,6 +1,12 @@
 use indoc::formatdoc;
 
-#[allow(clippy::too_many_arguments)]
+/// Generates the `linux_vorpal` toolchain-setup stage shell script: patches the
+/// cross-toolchain sources (`gcc`, `ncurses`, `gawk`, `glibc`) and lays out the
+/// pass-01/02/03 source directory copies the later build stages consume.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each parameter is an independent version pin threaded into the generated shell script; bundling them into a struct adds no clarity"
+)]
 pub fn script(
     binutils_version: &str,
     gawk_version: &str,

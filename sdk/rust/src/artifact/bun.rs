@@ -1,13 +1,17 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{
+        Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
+    },
     artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Canonical pin for the build-target `bun` runtime.
 pub const DEFAULT_BUN_VERSION: &str = "1.3.10";
 
+/// Build-target `bun` JavaScript runtime, fetched as a prebuilt binary release.
 pub struct Bun {
     version: String,
 }
@@ -21,15 +25,25 @@ impl Default for Bun {
 }
 
 impl Bun {
+    /// Creates a builder pinned to [`DEFAULT_BUN_VERSION`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Overrides the `bun` release version to fetch.
+    #[must_use]
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
     }
 
+    /// Builds the `bun` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `bun` release, or if registering
+    /// the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "bun";
 
@@ -40,7 +54,7 @@ impl Bun {
             Aarch64Linux => "linux-aarch64",
             X8664Darwin => "darwin-x64",
             X8664Linux => "linux-x64-baseline",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_version = &self.version;
