@@ -1,3 +1,28 @@
 [workspace]
 members = ["cli", "config", "sdk/codegen", "sdk/rust"]
 resolver = "2"
+
+# Every lint below is enforced in CI: `make lint` passes `--deny warnings`,
+# so warn-level groups fail the build the same as deny-level lints. The
+# restriction lints target patterns that slip through review most often:
+# silent panics, stubbed code, debug output, and unexplained suppressions.
+# Suppress a lint with `#[expect(..., reason = "...")]`; a bare `#[allow]`
+# is itself a lint failure.
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+expect_used = "warn"
+panic = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
