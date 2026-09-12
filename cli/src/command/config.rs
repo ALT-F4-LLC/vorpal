@@ -19,7 +19,7 @@ use tonic::transport::Channel;
 use tracing::{info, warn};
 use vorpal_sdk::{
     api::{artifact::Artifact, context::context_service_client::ContextServiceClient},
-    artifact::system::get_system_default_str,
+    artifact::{get_default_address, system::get_system_default_str},
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -102,14 +102,20 @@ impl VorpalConfig {
     ];
 
     /// Returns the built-in defaults for settings fields.
+    ///
+    /// `registry` and `worker` are derived from `get_default_address()` so they
+    /// agree with the `VORPAL_SOCKET_PATH` env var, matching the same clap
+    /// default used for the `--registry`/`--worker` flags. A hardcoded literal
+    /// here would silently ignore `VORPAL_SOCKET_PATH` whenever a CLI flag is
+    /// omitted and settings/project config don't override it.
     pub fn defaults() -> Self {
         Self {
-            registry: Some("unix:///var/lib/vorpal/vorpal.sock".to_string()),
+            registry: Some(get_default_address()),
             namespace: Some("library".to_string()),
             language: Some("rust".to_string()),
             name: Some("vorpal".to_string()),
             system: Some(get_system_default_str()),
-            worker: Some("unix:///var/lib/vorpal/vorpal.sock".to_string()),
+            worker: Some(get_default_address()),
             environments: None,
             source: None,
         }

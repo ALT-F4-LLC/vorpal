@@ -6,7 +6,8 @@ use crate::command::{
     store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::parser::ValueSource;
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
     StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
@@ -696,15 +697,80 @@ mod unlock_parse_tests {
     }
 }
 
-/// If the parsed value matches the hardcoded clap default, substitute the
-/// resolved settings value. This ensures explicit CLI flags always win, while
-/// config-file values override built-in defaults.
-fn apply_default(parsed: &str, clap_default: &str, resolved_value: &str) -> String {
-    if parsed == clap_default {
-        resolved_value.to_string()
-    } else {
-        parsed.to_string()
+#[cfg(test)]
+mod apply_default_tests {
+    use super::*;
+
+    fn sub_matches_for(args: &[&str]) -> ArgMatches {
+        let mut full = vec!["vorpal"];
+        full.extend_from_slice(args);
+        let matches = Cli::command()
+            .try_get_matches_from(full)
+            .expect("should parse");
+        let (_, sub_matches) = matches.subcommand().expect("expected a subcommand");
+        sub_matches.clone()
     }
+
+    #[test]
+    fn is_explicit_false_when_flag_omitted() {
+        let sub_matches = sub_matches_for(&["build", "foo"]);
+        assert!(!is_explicit(&sub_matches, "registry"));
+    }
+
+    #[test]
+    fn is_explicit_true_when_flag_passed_with_a_value_different_from_default() {
+        let sub_matches = sub_matches_for(&["build", "foo", "--registry", "unix:///other.sock"]);
+        assert!(is_explicit(&sub_matches, "registry"));
+    }
+
+    /// Regression: a user-supplied value that happens to equal the (possibly
+    /// env-derived) clap default must still be treated as explicit. String
+    /// comparison against the default cannot tell these apart; this is what
+    /// silently discarded `--registry`/`--worker` overrides that matched
+    /// `VORPAL_SOCKET_PATH`-derived defaults.
+    #[test]
+    fn is_explicit_true_when_flag_value_equals_the_clap_default() {
+        let default_addr = get_default_address();
+        let sub_matches = sub_matches_for(&["build", "foo", "--registry", &default_addr]);
+        assert!(is_explicit(&sub_matches, "registry"));
+    }
+
+    #[test]
+    fn apply_default_keeps_explicit_value_even_when_it_equals_the_resolved_value() {
+        let result = apply_default("unix:///same.sock", true, "unix:///same.sock");
+        assert_eq!(result, "unix:///same.sock");
+    }
+
+    #[test]
+    fn apply_default_substitutes_resolved_value_when_not_explicit() {
+        let result = apply_default("unix:///clap-default.sock", false, "unix:///resolved.sock");
+        assert_eq!(result, "unix:///resolved.sock");
+    }
+}
+
+/// If the flag was not explicitly passed on the command line, substitute the
+/// resolved settings value; otherwise keep the parsed (explicit) value. This
+/// ensures explicit CLI flags always win, while config-file values override
+/// built-in defaults.
+///
+/// `was_explicit` must come from `ArgMatches::value_source(id) ==
+/// Some(ValueSource::CommandLine)` rather than comparing `parsed` against the
+/// clap default string: a user-supplied value that happens to equal the
+/// (possibly env-derived) default is indistinguishable from an omitted flag
+/// under string comparison, silently discarding the user's explicit choice.
+fn apply_default(parsed: &str, was_explicit: bool, resolved_value: &str) -> String {
+    if was_explicit {
+        parsed.to_string()
+    } else {
+        resolved_value.to_string()
+    }
+}
+
+/// Returns true if `arg_id` was explicitly supplied on the command line for
+/// the given subcommand's `ArgMatches`, as opposed to falling back to its
+/// clap default value.
+fn is_explicit(sub_matches: &ArgMatches, arg_id: &str) -> bool {
+    sub_matches.value_source(arg_id) == Some(ValueSource::CommandLine)
 }
 
 struct BuildFlags {
@@ -723,11 +789,12 @@ struct BuildFlags {
 /// surface is build-output-specific and not exposed on the `prepare` subcommand).
 #[expect(
     clippy::too_many_arguments,
-    reason = "11 params after grouping the 6 bools; non-bool params kept as distinct typed args"
+    reason = "12 params after grouping the 6 bools; non-bool params kept as distinct typed args"
 )]
 async fn run_build_or_prepare(
     resolved: &config::ResolvedSettings,
     project_config: &config::VorpalConfig,
+    sub_matches: &ArgMatches,
     name: &str,
     agent: &str,
     context: &Path,
@@ -738,18 +805,29 @@ async fn run_build_or_prepare(
     variable: &[String],
     worker: &str,
 ) -> Result<()> {
-    // Apply resolved settings as fallbacks for hardcoded clap defaults
-    let default_addr = get_default_address();
-    let default_ns = get_default_namespace();
-
     // Agent is a local service — it should NOT inherit the `registry`
     // setting. Only override it when the user passes an explicit --agent flag.
     let effective_agent = agent.to_string();
-    let effective_registry = apply_default(registry, &default_addr, &resolved.registry.value);
-    let effective_worker = apply_default(worker, &default_addr, &resolved.worker.value);
-    let effective_namespace = apply_default(namespace, &default_ns, &resolved.namespace.value);
-    let default_system = get_system_default_str();
-    let effective_system = apply_default(system, &default_system, &resolved.system.value);
+    let effective_registry = apply_default(
+        registry,
+        is_explicit(sub_matches, "registry"),
+        &resolved.registry.value,
+    );
+    let effective_worker = apply_default(
+        worker,
+        is_explicit(sub_matches, "worker"),
+        &resolved.worker.value,
+    );
+    let effective_namespace = apply_default(
+        namespace,
+        is_explicit(sub_matches, "namespace"),
+        &resolved.namespace.value,
+    );
+    let effective_system = apply_default(
+        system,
+        is_explicit(sub_matches, "system"),
+        &resolved.system.value,
+    );
 
     if name.is_empty() {
         error!("no name specified");
@@ -912,9 +990,19 @@ pub async fn run() -> Result<()> {
         .install_default()
         .expect("failed to install ring as default crypto provider");
 
-    let cli = Cli::parse();
+    // Parsed via raw ArgMatches (rather than `Cli::parse()`) so call sites can
+    // later query `ArgMatches::value_source()` on the matched subcommand to
+    // tell an explicit CLI flag apart from one that fell back to its clap
+    // default — see `apply_default`.
+    let arg_matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&arg_matches).unwrap_or_else(|err| err.exit());
 
     let Cli { command, level } = cli;
+
+    let sub_matches = arg_matches
+        .subcommand()
+        .map(|(_, matches)| matches)
+        .expect("clap subcommand is required");
 
     // Per-layer filtering: the main fmt layer stays at the user-selected
     // `--level` (default info), while the h2 relay layer is scoped to the
@@ -989,6 +1077,7 @@ pub async fn run() -> Result<()> {
             run_build_or_prepare(
                 &resolved,
                 &project_config,
+                sub_matches,
                 name,
                 agent,
                 context,
@@ -1024,6 +1113,7 @@ pub async fn run() -> Result<()> {
             run_build_or_prepare(
                 &resolved,
                 &project_config,
+                sub_matches,
                 name,
                 agent,
                 context,
@@ -1063,11 +1153,14 @@ pub async fn run() -> Result<()> {
             namespace,
             registry,
         } => {
-            let effective_registry =
-                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            let effective_registry = apply_default(
+                registry,
+                is_explicit(sub_matches, "registry"),
+                &resolved.registry.value,
+            );
             let effective_namespace = apply_default(
                 namespace,
-                &get_default_namespace(),
+                is_explicit(sub_matches, "namespace"),
                 &resolved.namespace.value,
             );
             inspect::run(digest, &effective_namespace, &effective_registry).await
@@ -1081,8 +1174,11 @@ pub async fn run() -> Result<()> {
         } => {
             let effective_issuer = issuer.clone();
             let effective_issuer_client_id = issuer_client_id.clone();
-            let effective_registry =
-                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            let effective_registry = apply_default(
+                registry,
+                is_explicit(sub_matches, "registry"),
+                &resolved.registry.value,
+            );
 
             let discovery_url = format!(
                 "{}/.well-known/openid-configuration",
@@ -1218,8 +1314,11 @@ pub async fn run() -> Result<()> {
             bin,
             registry,
         } => {
-            let effective_registry =
-                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            let effective_registry = apply_default(
+                registry,
+                is_explicit(sub_matches, "registry"),
+                &resolved.registry.value,
+            );
             run::run(alias, args, bin.as_deref(), &effective_registry).await
         }
 
