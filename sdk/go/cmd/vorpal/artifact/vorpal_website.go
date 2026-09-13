@@ -3,8 +3,8 @@ package artifact
 import (
 	"fmt"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
@@ -47,7 +47,7 @@ cp -r dist/* $VORPAL_OUTPUT/
 		return nil, fmt.Errorf("failed to create shell step: %w", err)
 	}
 
-	return artifact.NewArtifact(name, []*api.ArtifactStep{step}, SYSTEMS).
+	return artifact.NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)
 }

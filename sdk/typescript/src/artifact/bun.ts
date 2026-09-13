@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
+import { getSystemStr, SYSTEMS } from "../system.js";
 
 export const DEFAULT_BUN_VERSION = "1.3.10";
 
@@ -25,21 +25,21 @@ export class Bun {
 
   async build(context: ConfigContext): Promise<string> {
     const name = "bun";
-    const system = context.getSystem();
+    const system = getSystemStr(context.getSystem());
 
     let sourceTarget: string;
 
     switch (system) {
-      case ArtifactSystem.AARCH64_DARWIN:
+      case "aarch64-darwin":
         sourceTarget = "darwin-aarch64";
         break;
-      case ArtifactSystem.AARCH64_LINUX:
+      case "aarch64-linux":
         sourceTarget = "linux-aarch64";
         break;
-      case ArtifactSystem.X8664_DARWIN:
+      case "x86_64-darwin":
         sourceTarget = "darwin-x64";
         break;
-      case ArtifactSystem.X8664_LINUX:
+      case "x86_64-linux":
         sourceTarget = "linux-x64-baseline";
         break;
       default:
@@ -56,14 +56,8 @@ cp -p "./source/${name}/bun-${sourceTarget}/bun" "$VORPAL_OUTPUT/bin/bun"
 chmod +x "$VORPAL_OUTPUT/bin/bun"
 `;
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

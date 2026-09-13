@@ -13,17 +13,17 @@ mod artifact;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let context = &mut get_context().await?;
+    let mut context = get_context().await?;
 
     match context.get_artifact_name() {
-        "vorpal" => Vorpal::new().build(context).await?,
-        "vorpal-container-image" => VorpalContainerImage::new().build(context).await?,
-        "vorpal-job" => VorpalJob::new().build(context).await?,
-        "vorpal-process" => VorpalProcess::new().build(context).await?,
-        "vorpal-release" => VorpalRelease::new().build(context).await?,
-        "vorpal-shell" => VorpalShell::new().build(context).await?,
-        "vorpal-user" => VorpalUser::new().build(context).await?,
-        "vorpal-website" => VorpalWebsite::new().build(context).await?,
+        "vorpal" => Vorpal::new().build(&mut context).await?,
+        "vorpal-container-image" => VorpalContainerImage::new().build(&mut context).await?,
+        "vorpal-job" => VorpalJob::new().build(&mut context).await?,
+        "vorpal-process" => VorpalProcess::new().build(&mut context).await?,
+        "vorpal-release" => VorpalRelease::new().build(&mut context).await?,
+        "vorpal-shell" => VorpalShell::new().build(&mut context).await?,
+        "vorpal-user" => VorpalUser::new().build(&mut context).await?,
+        "vorpal-website" => VorpalWebsite::new().build(&mut context).await?,
         _ => String::new(),
     };
 

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [0.4.1] - 2026-09-12
 
+### Changed
+
+- **Rust SDK**: remove internal `.clone()` usage from `sdk/rust` by
+  changing `artifact::step::{bash, bwrap, shell, docker}` and
+  `artifact::get_env_key` to borrow instead of taking owned values,
+  `ConfigContext::add_artifact` to take the artifact by value, and
+  `ConfigContext::run` to consume `self`. `ConfigContext::get_artifact_store`
+  now returns a reference. These are breaking changes for callers of the
+  published crate; update `let ctx = &mut get_context().await?;` to
+  `let mut ctx = get_context().await?;` and pass `&mut ctx` to `.build(...)`.
+
 ### Fixed
 
 - **CLI sockets**: honor `VORPAL_SOCKET_PATH` and explicit socket flags by

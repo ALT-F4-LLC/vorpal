@@ -10,25 +10,17 @@ use indoc::formatdoc;
 /// Builds a plain `bash` step that runs `script` with the given artifacts on
 /// `PATH` and the given extra environment variables set.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "public SDK API; changing the signature is a breaking change"
-)]
 pub fn bash(
-    artifacts: Vec<String>,
-    environments: Vec<String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
-    script: String,
+    artifacts: &[String],
+    environments: &[String],
+    secrets: &[api::artifact::ArtifactStepSecret],
+    script: &str,
 ) -> api::artifact::ArtifactStep {
-    let mut step_environments = vec![];
-
-    for environment in &environments {
-        if environment.starts_with("PATH=") {
-            continue;
-        }
-
-        step_environments.push(environment.clone());
-    }
+    let mut step_environments: Vec<String> = environments
+        .iter()
+        .filter(|environment| !environment.starts_with("PATH="))
+        .cloned()
+        .collect();
 
     let step_path_bins = artifacts
         .iter()
@@ -57,9 +49,9 @@ pub fn bash(
     "};
 
     artifact::ArtifactStep::new("bash")
-        .with_artifacts(artifacts)
+        .with_artifacts(artifacts.to_vec())
         .with_environments(step_environments)
-        .with_secrets(secrets)
+        .with_secrets(secrets.to_vec())
         .with_script(step_script)
         .build()
 }
@@ -80,11 +72,11 @@ pub fn bash(
     reason = "assembles one flat bwrap argument list; splitting it would scatter one linear construction across helpers without adding clarity"
 )]
 pub async fn bwrap(
-    arguments: Vec<&str>,
-    artifacts: Vec<String>,
-    environments: Vec<String>,
-    rootfs: Option<String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    arguments: &[&str],
+    artifacts: &[String],
+    environments: &[String],
+    rootfs: Option<&str>,
+    secrets: &[api::artifact::ArtifactStepSecret],
     script: String,
 ) -> Result<api::artifact::ArtifactStep> {
     // Setup arguments
@@ -124,10 +116,10 @@ pub async fn bwrap(
 
     // Setup artifacts
 
-    let mut step_artifacts = vec![];
+    let mut step_artifacts: Vec<String> = vec![];
 
     if let Some(rootfs) = rootfs {
-        let rootfs_env = artifact::get_env_key(&rootfs);
+        let rootfs_env = artifact::get_env_key(rootfs);
 
         let rootfs_args = vec![
             "--ro-bind".to_string(),
@@ -151,14 +143,12 @@ pub async fn bwrap(
         ];
 
         step_arguments.extend(rootfs_args);
-        step_artifacts.push(rootfs);
+        step_artifacts.push(rootfs.to_string());
     }
 
     // Setup artifact arguments
 
-    for artifact in artifacts {
-        step_artifacts.push(artifact);
-    }
+    step_artifacts.extend_from_slice(artifacts);
 
     for artifact in &step_artifacts {
         step_arguments.push("--ro-bind".to_string());
@@ -189,7 +179,7 @@ pub async fn bwrap(
     step_arguments.push("PATH".to_string());
     step_arguments.push(step_path);
 
-    for env in &environments {
+    for env in environments {
         let Some((key, value)) = env.split_once('=') else {
             continue;
         };
@@ -206,7 +196,7 @@ pub async fn bwrap(
     // Setup arguments
 
     for argument in arguments {
-        step_arguments.push(argument.to_string());
+        step_arguments.push((*argument).to_string());
     }
 
     // Setup script
@@ -231,7 +221,7 @@ pub async fn bwrap(
         .with_environments(vec![
             "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
         ])
-        .with_secrets(secrets)
+        .with_secrets(secrets.to_vec())
         .with_script(step_script)
         .build();
 
@@ -248,10 +238,10 @@ pub async fn bwrap(
 /// or if building the `linux-vorpal` root filesystem for a Linux target fails.
 pub async fn shell(
     context: &mut ConfigContext,
-    artifacts: Vec<String>,
-    environments: Vec<String>,
+    artifacts: &[String],
+    environments: &[String],
     script: String,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    secrets: &[api::artifact::ArtifactStepSecret],
 ) -> Result<api::artifact::ArtifactStep> {
     // Setup target
 
@@ -260,16 +250,16 @@ pub async fn shell(
     // Setup step
 
     let step = match step_system {
-        Aarch64Darwin | X8664Darwin => bash(artifacts, environments, secrets, script),
+        Aarch64Darwin | X8664Darwin => bash(artifacts, environments, secrets, &script),
 
         Aarch64Linux | X8664Linux => {
             let linux_vorpal = LinuxVorpal::new().build(context).await?;
 
             bwrap(
-                vec![],
+                &[],
                 artifacts,
                 environments,
-                Some(linux_vorpal),
+                Some(linux_vorpal.as_str()),
                 secrets,
                 script,
             )
@@ -289,10 +279,10 @@ pub async fn shell(
 /// Builds a `docker` step that runs the given `docker` CLI arguments against
 /// the given artifacts.
 #[must_use]
-pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> api::artifact::ArtifactStep {
+pub fn docker(arguments: &[&str], artifacts: &[String]) -> api::artifact::ArtifactStep {
     artifact::ArtifactStep::new("docker")
-        .with_arguments(arguments)
-        .with_artifacts(artifacts)
+        .with_arguments(arguments.to_vec())
+        .with_artifacts(artifacts.to_vec())
         .with_environments(vec![
             "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
         ])

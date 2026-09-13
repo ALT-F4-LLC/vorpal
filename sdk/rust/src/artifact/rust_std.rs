@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{rust_toolchain, step, Artifact, ArtifactSource},
+    artifact::{rust_toolchain, step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -35,10 +34,9 @@ impl RustStd {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = format!("cp -pr \"./source/{name}/{name}-{source_version}-{source_target}/{name}-{source_target}/.\" \"$VORPAL_OUTPUT\"");
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_sources(vec![source])
             .build(context)
             .await

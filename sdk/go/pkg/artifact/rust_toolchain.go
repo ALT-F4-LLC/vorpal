@@ -9,17 +9,17 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-func RustToolchainTarget(system api.ArtifactSystem) (*string, error) {
+func RustToolchainTarget(system string) (*string, error) {
 	var target string
 
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN:
+	case "aarch64-darwin":
 		target = "aarch64-apple-darwin"
-	case api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-linux":
 		target = "aarch64-unknown-linux-gnu"
-	case api.ArtifactSystem_X8664_DARWIN:
+	case "x86_64-darwin":
 		target = "x86_64-apple-darwin"
-	case api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-linux":
 		target = "x86_64-unknown-linux-gnu"
 	default:
 		return nil, errors.New("unsupported 'rust-toolchain' system")
@@ -75,7 +75,7 @@ func RustToolchain(context *config.ConfigContext) (*string, error) {
 		componentPaths[i] = GetEnvKey(*a)
 	}
 
-	toolchainTarget, err := RustToolchainTarget(context.GetTarget())
+	toolchainTarget, err := RustToolchainTarget(context.GetTargetStr())
 	if err != nil {
 		return nil, err
 	}
@@ -123,14 +123,7 @@ EOF`, toolchainVersion, *toolchainTarget, strings.Join(componentPaths, " "))
 
 	name := "rust-toolchain"
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:%s", name, toolchainVersion)}).
 		Build(context)
 }

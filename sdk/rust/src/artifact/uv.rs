@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{cpython, step, Artifact, ArtifactSource},
+    artifact::{cpython, step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -77,10 +76,9 @@ impl Uv {
             chmod +x \"$VORPAL_OUTPUT/bin/uv\"
         "};
 
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{source_version}")])
             .with_sources(vec![source])
             .build(context)

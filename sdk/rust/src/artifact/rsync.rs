@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{step, Artifact, ArtifactSource},
+    artifact::{step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -42,10 +41,9 @@ impl Rsync {
             make install",
         };
 
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{version}")])
             .with_sources(vec![source])
             .build(context)

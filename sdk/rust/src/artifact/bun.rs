@@ -2,7 +2,7 @@ use crate::{
     api::artifact::ArtifactSystem::{
         Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
     },
-    artifact::{step, Artifact, ArtifactSource},
+    artifact::{step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -68,10 +68,9 @@ impl Bun {
             cp -p \"./source/{name}/bun-{source_target}/bun\" \"$VORPAL_OUTPUT/bin/bun\"
             chmod +x \"$VORPAL_OUTPUT/bin/bun\"
         "};
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{source_version}")])
             .with_sources(vec![source])
             .build(context)

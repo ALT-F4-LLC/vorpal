@@ -345,12 +345,12 @@ async fn build_artifacts(
     artifact_namespace: &str,
     artifact_selected: Option<&Artifact>,
     artifact_selected_aliases: Vec<String>,
-    build_store: HashMap<String, Artifact>,
+    build_store: &HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
     registry: &str,
 ) -> Result<()> {
-    let artifact_order = get_order(&build_store).await?;
+    let artifact_order = get_order(build_store).await?;
 
     let mut build_complete = std::collections::HashSet::<String>::new();
 
@@ -978,7 +978,7 @@ pub async fn run(
         &artifact.namespace,
         Some(selected_artifact),
         artifact.aliases,
-        build_store,
+        &build_store,
         &mut client_archive,
         &mut client_worker,
         &service.registry,

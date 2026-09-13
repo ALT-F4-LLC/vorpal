@@ -11,6 +11,17 @@ type ArtifactSystemInput interface {
 	string | api.ArtifactSystem
 }
 
+// SYSTEMS is the canonical list of every system Vorpal supports. Callers
+// must treat it as read-only: it backs a single shared slice reused across
+// artifact builders, so mutating it (append, sort, index assignment) would
+// affect every caller.
+var SYSTEMS = []string{
+	"aarch64-darwin",
+	"aarch64-linux",
+	"x86_64-darwin",
+	"x86_64-linux",
+}
+
 func GetSystemDefaultStr() string {
 	goarch := runtime.GOARCH
 	goos := runtime.GOOS

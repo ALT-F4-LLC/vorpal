@@ -1,8 +1,8 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
 import { cpythonTarget } from "./cpython.js";
+import { SYSTEMS } from "../system.js";
 
 /// Canonical conforming copy of the build-target uv toolchain pin (Astral release).
 ///
@@ -57,14 +57,8 @@ cp -p "./source/${name}/uv-${sourceTarget}/uv" "$VORPAL_OUTPUT/bin/uv"
 chmod +x "$VORPAL_OUTPUT/bin/uv"
 `;
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

@@ -5,6 +5,17 @@ use crate::api::artifact::{
 use anyhow::Result;
 use std::env::consts::{ARCH, OS};
 
+/// Canonical list of all systems Vorpal supports, in the order
+/// `aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`, `x86_64-linux`.
+/// String-typed (not [`ArtifactSystem`]) for parity with the Go, Python, and
+/// TypeScript SDKs' own `SYSTEMS` constants.
+pub const SYSTEMS: [&str; 4] = [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
+];
+
 /// Converts a value identifying a target system into an [`ArtifactSystem`].
 pub trait ArtifactSystemInput {
     /// Resolves `self` to a supported [`ArtifactSystem`].

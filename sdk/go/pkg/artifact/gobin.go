@@ -16,20 +16,20 @@ func sourceTools(name string) api.ArtifactSource {
 func GoBin(context *config.ConfigContext) (*string, error) {
 	name := "go"
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	var sourceTarget string
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN:
+	case "aarch64-darwin":
 		sourceTarget = "darwin-arm64"
-	case api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-linux":
 		sourceTarget = "linux-arm64"
-	case api.ArtifactSystem_X8664_DARWIN:
+	case "x86_64-darwin":
 		sourceTarget = "darwin-amd64"
-	case api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-linux":
 		sourceTarget = "linux-amd64"
 	default:
-		return nil, fmt.Errorf("unsupported %s system: %s", name, system.String())
+		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
 	sourceVersion := "1.26.0"
@@ -44,14 +44,7 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:%s", name, sourceVersion)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)

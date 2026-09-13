@@ -54,14 +54,7 @@ use vorpal_sdk::context::get_context;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
-
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let mut ctx = get_context().await?;
 
     // Define your artifacts here
 
@@ -69,7 +62,7 @@ async fn main() -> Result<()> {
 }
 ```
 
-Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context. Target systems are canonical system strings, available as `system::SYSTEMS` for every supported platform. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -86,25 +79,18 @@ Use the `Rust` builder to compile a Rust project into a cross-platform artifact:
 ```rust title="src/vorpal.rs" {4,14-18}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::language::rust::Rust,
+    artifact::{language::rust::Rust, system},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
-
-    Rust::new("my-app", systems)
+    Rust::new("my-app", system::SYSTEMS)
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     ctx.run().await
@@ -145,28 +131,21 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 ```rust title="src/vorpal.rs" {4,14,17}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{language::rust::Rust, protoc::Protoc},
+    artifact::{language::rust::Rust, protoc::Protoc, system},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let protoc = Protoc::new().build(&mut ctx).await?;
 
-    let protoc = Protoc::new().build(ctx).await?;
-
-    Rust::new("my-app", systems)
+    Rust::new("my-app", system::SYSTEMS)
         .with_artifacts(vec![protoc])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     ctx.run().await
 }
@@ -183,27 +162,20 @@ Create a portable development shell with pinned tools, environment variables, an
 ```rust title="src/vorpal.rs" {4,16-19}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc},
+    artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, system},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let protoc = Protoc::new().build(&mut ctx).await?;
 
-    let protoc = Protoc::new().build(ctx).await?;
-
-    RustDevelopmentEnvironment::new("my-project-shell", systems)
+    RustDevelopmentEnvironment::new("my-project-shell", system::SYSTEMS)
         .with_artifacts(vec![protoc])
         .with_environments(vec!["RUST_LOG=debug".into(), "RUST_BACKTRACE=1".into()])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     ctx.run().await
 }
@@ -242,34 +214,27 @@ Jobs run scripts that never cache by default — ideal for CI tasks, tests, and 
 ```rust title="src/vorpal.rs" {4,22,24-26}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, Job},
+    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Job},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let protoc = Protoc::new().build(&mut ctx).await?;
 
-    let protoc = Protoc::new().build(ctx).await?;
-
-    let my_app = Rust::new("my-app", systems)
+    let my_app = Rust::new("my-app", system::SYSTEMS)
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     let script = format!("{}/bin/my-app --version", get_env_key(&my_app));
 
-    Job::new("my-job", script, systems)
+    Job::new("my-job", script, system::SYSTEMS)
         .with_artifacts(vec![my_app])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     ctx.run().await
 }
@@ -291,37 +256,30 @@ Processes wrap long-running binaries with start, stop, and logs lifecycle script
 ```rust title="src/vorpal.rs" {4,22-29}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, Process},
+    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Process},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let protoc = Protoc::new().build(&mut ctx).await?;
 
-    let protoc = Protoc::new().build(ctx).await?;
-
-    let my_app = Rust::new("my-app", systems)
+    let my_app = Rust::new("my-app", system::SYSTEMS)
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     Process::new(
         "my-server",
         &format!("{}/bin/my-server", get_env_key(&my_app)),
-        systems,
+        system::SYSTEMS,
     )
     .with_arguments(vec!["--port", "8080"])
     .with_artifacts(vec![my_app])
-    .build(ctx).await?;
+    .build(&mut ctx).await?;
 
     ctx.run().await
 }
@@ -344,30 +302,23 @@ Install tools into your user-wide environment with symlinks:
 ```rust title="src/vorpal.rs" {4,19-22}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{get_env_key, language::rust::Rust, UserEnvironment},
+    artifact::{get_env_key, language::rust::Rust, system, UserEnvironment},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
-
-    let my_app = Rust::new("my-app", systems)
+    let my_app = Rust::new("my-app", system::SYSTEMS)
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
-    UserEnvironment::new("my-home", systems)
+    UserEnvironment::new("my-home", system::SYSTEMS)
         .with_artifacts(vec![my_app.clone()])
         .with_symlinks(vec![(&format!("{}/bin/my-app", get_env_key(&my_app)), "$HOME/.vorpal/bin/my-app")])
-        .build(ctx).await?;
+        .build(&mut ctx).await?;
 
     ctx.run().await
 }
@@ -392,20 +343,13 @@ Replace the default Bash executor with Docker or any custom binary:
 ```rust title="src/vorpal.rs" {4,14-19,21-22}
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{Artifact, ArtifactStep},
+    artifact::{system, Artifact, ArtifactStep},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
-
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let mut ctx = get_context().await?;
 
     let step = ArtifactStep::new("docker")
         .with_arguments(vec![
@@ -414,8 +358,8 @@ async fn main() -> Result<()> {
         ])
         .build();
 
-    Artifact::new("example-docker", vec![step], systems)
-        .build(ctx).await?;
+    Artifact::new("example-docker", vec![step], system::SYSTEMS)
+        .build(&mut ctx).await?;
 
     ctx.run().await
 }

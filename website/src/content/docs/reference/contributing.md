@@ -127,7 +127,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   </TabItem>
   <TabItem label="Rust">
     ```rust
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
     ```
   </TabItem>
   <TabItem label="Go">

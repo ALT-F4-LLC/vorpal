@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
+import { getSystemStr, SYSTEMS } from "../system.js";
 
 export const DEFAULT_GH_VERSION = "2.87.3";
 
@@ -14,25 +14,25 @@ export const DEFAULT_GH_VERSION = "2.87.3";
 export class Gh {
   async build(context: ConfigContext): Promise<string> {
     const name = "gh";
-    const system = context.getSystem();
+    const system = getSystemStr(context.getSystem());
 
     let sourceTarget: string;
     let sourceExtension: string;
 
     switch (system) {
-      case ArtifactSystem.AARCH64_DARWIN:
+      case "aarch64-darwin":
         sourceTarget = "macOS_arm64";
         sourceExtension = "zip";
         break;
-      case ArtifactSystem.AARCH64_LINUX:
+      case "aarch64-linux":
         sourceTarget = "linux_arm64";
         sourceExtension = "tar.gz";
         break;
-      case ArtifactSystem.X8664_DARWIN:
+      case "x86_64-darwin":
         sourceTarget = "macOS_amd64";
         sourceExtension = "zip";
         break;
-      case ArtifactSystem.X8664_LINUX:
+      case "x86_64-linux":
         sourceTarget = "linux_amd64";
         sourceExtension = "tar.gz";
         break;
@@ -51,14 +51,8 @@ cp -pr "source/${name}/gh_${sourceVersion}_${sourceTarget}/bin/gh" "$VORPAL_OUTP
 
 chmod +x "$VORPAL_OUTPUT/bin/gh"`;
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

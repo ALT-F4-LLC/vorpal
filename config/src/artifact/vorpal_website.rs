@@ -40,13 +40,13 @@ impl VorpalWebsite {
         let steps = vec![
             step::shell(
                 context,
-                vec![bun],
-                vec![
+                &[bun],
+                &[
                     "ASTRO_TELEMETRY_DISABLED=1".to_string(),
                     format!("PATH={bun_bin}"),
                 ],
                 step_script,
-                vec![],
+                &[],
             )
             .await?,
         ];

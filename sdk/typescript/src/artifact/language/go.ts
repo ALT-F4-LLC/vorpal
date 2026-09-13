@@ -1,7 +1,7 @@
 import type {
   ArtifactSource as ArtifactSourceMsg,
 } from "../../api/artifact/artifact.js";
-import { ArtifactSystem } from "../../api/artifact/artifact.js";
+import type { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
   Artifact,
@@ -19,24 +19,28 @@ import { ProtocGenGo } from "../protoc_gen_go.js";
 import { ProtocGenGoGrpc } from "../protoc_gen_go_grpc.js";
 import { Staticcheck } from "../staticcheck.js";
 import { shell } from "../step.js";
-import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
+import {
+  type ArtifactSystemInput,
+  getSystemStr,
+  tryNormalizeSystems,
+} from "../../system.js";
 
 // ---------------------------------------------------------------------------
 // System mapping helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Maps an ArtifactSystem enum to the Go `GOOS` value.
+ * Maps a target system to the Go `GOOS` value.
  * Matches `get_goos()` in `sdk/rust/src/artifact/language/go.rs`
  * and `GetGOOS()` in `sdk/go/pkg/artifact/language/go.go`.
  */
-export function getGoos(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
-    case ArtifactSystem.X8664_DARWIN:
+export function getGoos(system: ArtifactSystemInput): string {
+  switch (getSystemStr(system)) {
+    case "aarch64-darwin":
+    case "x86_64-darwin":
       return "darwin";
-    case ArtifactSystem.AARCH64_LINUX:
-    case ArtifactSystem.X8664_LINUX:
+    case "aarch64-linux":
+    case "x86_64-linux":
       return "linux";
     default:
       throw new Error(`unsupported 'go' system: ${system}`);
@@ -44,17 +48,17 @@ export function getGoos(system: ArtifactSystem): string {
 }
 
 /**
- * Maps an ArtifactSystem enum to the Go `GOARCH` value.
+ * Maps a target system to the Go `GOARCH` value.
  * Matches `get_goarch()` in `sdk/rust/src/artifact/language/go.rs`
  * and `GetGOARCH()` in `sdk/go/pkg/artifact/language/go.go`.
  */
-export function getGoarch(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
-    case ArtifactSystem.AARCH64_LINUX:
+export function getGoarch(system: ArtifactSystemInput): string {
+  switch (getSystemStr(system)) {
+    case "aarch64-darwin":
+    case "aarch64-linux":
       return "arm64";
-    case ArtifactSystem.X8664_DARWIN:
-    case ArtifactSystem.X8664_LINUX:
+    case "x86_64-darwin":
+    case "x86_64-linux":
       return "amd64";
     default:
       throw new Error(`unsupported 'go' system: ${system}`);

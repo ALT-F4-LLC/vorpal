@@ -1,4 +1,3 @@
-import { ArtifactSystem } from "./api/artifact/artifact.js";
 import {
   Artifact,
   ArtifactSource,
@@ -28,39 +27,8 @@ import { Rsync } from "./artifact/rsync.js";
 import { Staticcheck } from "./artifact/staticcheck.js";
 import { Uv } from "./artifact/uv.js";
 import { ConfigContext } from "./context.js";
-
-const SYSTEMS: ArtifactSystem[] = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
-];
-
-function getGoarch(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
-    case ArtifactSystem.AARCH64_LINUX:
-      return "arm64";
-    case ArtifactSystem.X8664_DARWIN:
-    case ArtifactSystem.X8664_LINUX:
-      return "amd64";
-    default:
-      throw new Error(`unsupported system for GOARCH: ${system}`);
-  }
-}
-
-function getGoos(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
-    case ArtifactSystem.X8664_DARWIN:
-      return "darwin";
-    case ArtifactSystem.AARCH64_LINUX:
-    case ArtifactSystem.X8664_LINUX:
-      return "linux";
-    default:
-      throw new Error(`unsupported system for GOOS: ${system}`);
-  }
-}
+import { getGoarch, getGoos } from "./artifact/language/go.js";
+import { SYSTEMS } from "./system.js";
 
 async function buildVorpal(context: ConfigContext): Promise<string> {
   return new Rust("vorpal", SYSTEMS)

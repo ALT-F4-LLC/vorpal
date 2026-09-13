@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { ArtifactSource } from "../artifact.js";
 import { Go } from "./language/go.js";
+import { SYSTEMS } from "../system.js";
 
 /**
  * Builder for the protoc-gen-go-grpc artifact.
@@ -19,14 +19,8 @@ export class ProtocGenGoGrpc {
     const source = new ArtifactSource(name, sourcePath).build();
 
     const buildDirectory = `grpc-go-${sourceVersion}/cmd/${name}`;
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Go(name, systems)
+    return new Go(name, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withBuildDirectory(buildDirectory)
       .withSource(source)

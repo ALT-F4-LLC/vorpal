@@ -5,7 +5,7 @@ use crate::{
     },
     artifact::{
         cargo::Cargo, clippy::Clippy, get_env_key, rust_analyzer::RustAnalyzer, rust_src::RustSrc,
-        rust_std::RustStd, rustc::Rustc, rustfmt::Rustfmt, step, Artifact,
+        rust_std::RustStd, rustc::Rustc, rustfmt::Rustfmt, step, system, Artifact,
     },
     context::ConfigContext,
 };
@@ -205,11 +205,10 @@ impl<'a> RustToolchain<'a> {
             component_paths = toolchain_component_paths.join(" "),
         };
 
-        let steps = vec![step::shell(context, artifacts, vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &artifacts, &[], step_script, &[]).await?];
         let name = "rust-toolchain";
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{toolchain_version}")])
             .build(context)
             .await

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import Artifact, ArtifactSource
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import SYSTEMS, get_system_str
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -21,14 +21,15 @@ class NodeJS:
     def build(self, context: ConfigContext) -> str:
         name = "nodejs"
         system = context.get_system()
+        system_str = get_system_str(system)
 
-        if system == artifact_pb2.AARCH64_DARWIN:
+        if system_str == "aarch64-darwin":
             source_target = "darwin-arm64"
-        elif system == artifact_pb2.AARCH64_LINUX:
+        elif system_str == "aarch64-linux":
             source_target = "linux-arm64"
-        elif system == artifact_pb2.X8664_DARWIN:
+        elif system_str == "x86_64-darwin":
             source_target = "darwin-x64"
-        elif system == artifact_pb2.X8664_LINUX:
+        elif system_str == "x86_64-linux":
             source_target = "linux-x64"
         else:
             raise ValueError(f"unsupported {name} system: {system}")
@@ -46,15 +47,9 @@ class NodeJS:
             f'{source_target}/." "$VORPAL_OUTPUT"'
         )
         steps = [shell(context, [], [], step_script, [])]
-        systems = [
-            artifact_pb2.AARCH64_DARWIN,
-            artifact_pb2.AARCH64_LINUX,
-            artifact_pb2.X8664_DARWIN,
-            artifact_pb2.X8664_LINUX,
-        ]
 
         return (
-            Artifact(name, steps, systems)
+            Artifact(name, steps, SYSTEMS)
             .with_aliases([f"{name}:{source_version}"])
             .with_sources([source])
             .build(context)

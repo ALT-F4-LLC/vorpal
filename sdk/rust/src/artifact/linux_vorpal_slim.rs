@@ -1,7 +1,7 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{
-        get_env_key, linux_vorpal::LinuxVorpal, rsync::Rsync, step, Artifact, ArtifactSource,
+        get_env_key, linux_vorpal::LinuxVorpal, rsync::Rsync, step, system, Artifact,
+        ArtifactSource,
     },
     context::ConfigContext,
 };
@@ -71,17 +71,15 @@ impl<'a> LinuxVorpalSlim<'a> {
             pushd ./source
 
             ./{name}/script/linux-vorpal-slim.sh --execute --no-confirm $VORPAL_OUTPUT",
-            linux_vorpal = get_env_key(&linux_vorpal.to_string()),
-            rsync = get_env_key(&rsync.to_string()),
+            linux_vorpal = get_env_key(linux_vorpal),
+            rsync = get_env_key(rsync),
         };
 
         let artifacts = vec![linux_vorpal.to_string(), rsync.to_string()];
 
-        let steps = vec![step::shell(context, artifacts, vec![], step_script, vec![]).await?];
+        let steps = vec![step::shell(context, &artifacts, &[], step_script, &[]).await?];
 
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{version}")])
             .with_sources(vec![source])
             .build(context)

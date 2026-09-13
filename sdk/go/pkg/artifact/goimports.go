@@ -12,13 +12,6 @@ func Goimports(context *config.ConfigContext) (*string, error) {
 
 	buildDirectory := "cmd/goimports"
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
 	source := sourceTools(name)
 
 	sourceDir := fmt.Sprintf("./source/%s", source.Name)
@@ -41,13 +34,13 @@ go clean -modcache`, sourceDir, buildDirectory, name)
 		return nil, err
 	}
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	var goarch string
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-darwin", "aarch64-linux":
 		goarch = "arm64"
-	case api.ArtifactSystem_X8664_DARWIN, api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-darwin", "x86_64-linux":
 		goarch = "amd64"
 	default:
 		return nil, fmt.Errorf("unsupported target system: %s", system)
@@ -55,9 +48,9 @@ go clean -modcache`, sourceDir, buildDirectory, name)
 
 	var goos string
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_X8664_DARWIN:
+	case "aarch64-darwin", "x86_64-darwin":
 		goos = "darwin"
-	case api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX:
+	case "aarch64-linux", "x86_64-linux":
 		goos = "linux"
 	default:
 		return nil, fmt.Errorf("unsupported target system: %s", system)
@@ -76,7 +69,7 @@ go clean -modcache`, sourceDir, buildDirectory, name)
 		return nil, err
 	}
 
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:0.42.0", name)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)

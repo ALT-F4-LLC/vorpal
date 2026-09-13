@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { ArtifactSystem } from "../../api/artifact/artifact.js";
+import type { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
   Artifact,
@@ -13,7 +13,11 @@ import {
 import { Protoc } from "../protoc.js";
 import { RustToolchain } from "../rust_toolchain.js";
 import { shell } from "../step.js";
-import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
+import {
+  type ArtifactSystemInput,
+  getSystemStr,
+  tryNormalizeSystems,
+} from "../../system.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -123,18 +127,18 @@ function parseCargo(path: string): CargoToml {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps an ArtifactSystem enum to the Rust target triple.
+ * Maps a target system to the Rust target triple.
  * Matches `sdk/go/pkg/artifact/rust_toolchain.go` RustToolchainTarget().
  */
-export function rustToolchainTarget(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
+export function rustToolchainTarget(system: ArtifactSystemInput): string {
+  switch (getSystemStr(system)) {
+    case "aarch64-darwin":
       return "aarch64-apple-darwin";
-    case ArtifactSystem.AARCH64_LINUX:
+    case "aarch64-linux":
       return "aarch64-unknown-linux-gnu";
-    case ArtifactSystem.X8664_DARWIN:
+    case "x86_64-darwin":
       return "x86_64-apple-darwin";
-    case ArtifactSystem.X8664_LINUX:
+    case "x86_64-linux":
       return "x86_64-unknown-linux-gnu";
     default:
       throw new Error(`unsupported 'rust-toolchain' system: ${system}`);

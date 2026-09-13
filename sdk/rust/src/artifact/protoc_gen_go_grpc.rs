@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{language::go::Go, ArtifactSource},
+    artifact::{language::go::Go, system, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -33,9 +32,8 @@ impl ProtocGenGoGrpc {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let build_directory = format!("grpc-go-{source_version}/cmd/{name}");
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-        Go::new(name, systems)
+        Go::new(name, system::SYSTEMS)
             .with_alias(format!("{name}:{source_version}"))
             .with_build_directory(build_directory.as_str())
             .with_source(source)

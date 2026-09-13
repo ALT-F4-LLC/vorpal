@@ -7,7 +7,7 @@ import (
 
 func BuildVorpalUser(context *config.ConfigContext) (*string, error) {
 	return artifact.
-		NewUserEnvironment("vorpal-user", SYSTEMS).
+		NewUserEnvironment("vorpal-user", config.SYSTEMS).
 		WithArtifacts([]*string{}).
 		WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
 		WithSymlinks(map[string]string{

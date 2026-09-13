@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import Artifact, get_env_key
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import SYSTEMS, get_system_str
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -30,13 +31,14 @@ def rust_toolchain_target(system: artifact_pb2.ArtifactSystem) -> str:
 
     Matches Go ``RustToolchainTarget()`` in rust_toolchain.go.
     """
-    if system == artifact_pb2.AARCH64_DARWIN:
+    system_str = get_system_str(system)
+    if system_str == "aarch64-darwin":
         return "aarch64-apple-darwin"
-    if system == artifact_pb2.AARCH64_LINUX:
+    if system_str == "aarch64-linux":
         return "aarch64-unknown-linux-gnu"
-    if system == artifact_pb2.X8664_DARWIN:
+    if system_str == "x86_64-darwin":
         return "x86_64-apple-darwin"
-    if system == artifact_pb2.X8664_LINUX:
+    if system_str == "x86_64-linux":
         return "x86_64-unknown-linux-gnu"
     raise ValueError(f"unsupported 'rust-toolchain' system: {system}")
 
@@ -178,16 +180,10 @@ version = "12"
 EOF"""
 
         steps = [shell(context, artifacts, [], step_script, [])]
-        systems = [
-            artifact_pb2.AARCH64_DARWIN,
-            artifact_pb2.AARCH64_LINUX,
-            artifact_pb2.X8664_DARWIN,
-            artifact_pb2.X8664_LINUX,
-        ]
         name = "rust-toolchain"
 
         return (
-            Artifact(name, steps, systems)
+            Artifact(name, steps, SYSTEMS)
             .with_aliases([f"{name}:{toolchain_version}"])
             .build(context)
         )

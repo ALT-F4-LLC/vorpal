@@ -1,4 +1,3 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import { Artifact, getEnvKey } from "../artifact.js";
 import { bash, docker } from "./step.js";
 import type { ConfigContext } from "../context.js";
@@ -115,7 +114,7 @@ function generateDockerfile(): string {
 
 export class LinuxDebian {
   async build(context: ConfigContext): Promise<string> {
-    const systems = [ArtifactSystem.AARCH64_LINUX, ArtifactSystem.X8664_LINUX];
+    const systems = ["aarch64-linux", "x86_64-linux"];
 
     const versionScript = generateVersionScript();
     const dockerfile = generateDockerfile();

@@ -213,7 +213,7 @@ impl<'a> OciImage<'a> {
             step_artifacts.push(artifact.to_string());
         }
 
-        let step = step::shell(context, step_artifacts, vec![], step_script, vec![]).await?;
+        let step = step::shell(context, &step_artifacts, &[], step_script, &[]).await?;
 
         let systems = vec![Aarch64Linux, X8664Linux];
 

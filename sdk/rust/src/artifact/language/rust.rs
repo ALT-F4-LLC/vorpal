@@ -407,10 +407,10 @@ impl<'a> Rust<'a> {
         let vendor_steps = vec![
             step::shell(
                 context,
-                step_artifacts.clone(),
-                step_environments.clone(),
+                &step_artifacts,
+                &step_environments,
                 vendor_step_script,
-                self.secrets.clone(),
+                &self.secrets,
             )
             .await?,
         ];
@@ -421,7 +421,7 @@ impl<'a> Rust<'a> {
             .with_includes(vendor_cargo_paths)
             .build();
 
-        let vendor = Artifact::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
+        let vendor = Artifact::new(vendor_name.as_str(), vendor_steps, &self.systems)
             .with_sources(vec![vendor_source])
             .build(context)
             .await?;
@@ -533,10 +533,10 @@ impl<'a> Rust<'a> {
         let steps = vec![
             step::shell(
                 context,
-                [step_artifacts, self.artifacts].concat(),
-                step_environments,
+                &[step_artifacts, self.artifacts].concat(),
+                &step_environments,
                 step_script,
-                self.secrets,
+                &self.secrets,
             )
             .await?,
         ];

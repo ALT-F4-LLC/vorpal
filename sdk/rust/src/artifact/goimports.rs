@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{go, language::go::Go},
+    artifact::{go, language::go::Go, system},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -27,9 +26,7 @@ impl Goimports {
 
         let build_directory = format!("cmd/{name}");
 
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-
-        Go::new(name, systems)
+        Go::new(name, system::SYSTEMS)
             .with_alias(format!("{name}:0.42.0"))
             .with_build_directory(build_directory.as_str())
             .with_source(go::source_tools(name))

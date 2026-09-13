@@ -214,10 +214,10 @@ impl<'a> TypeScript<'a> {
         let steps = vec![
             step::shell(
                 context,
-                step_artifacts,
-                step_environments,
+                &step_artifacts,
+                &step_environments,
                 step_script,
-                self.secrets,
+                &self.secrets,
             )
             .await?,
         ];

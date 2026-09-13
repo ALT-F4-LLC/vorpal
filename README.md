@@ -104,7 +104,7 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
     let systems = [
         "aarch64-darwin",
         "aarch64-linux",
@@ -115,13 +115,13 @@ async fn main() -> Result<()> {
     // Artifacts
 
     RustDevelopmentEnvironment::new("example-shell", systems)
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     Rust::new("example", systems)
         .with_bins(vec!["example"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     ctx.run().await
@@ -226,7 +226,7 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-  let ctx = &mut get_context().await?;
+  let mut ctx = get_context().await?;
   let systems = [
     "aarch64-darwin",
     "aarch64-linux",
@@ -236,11 +236,11 @@ async fn main() -> Result<()> {
 
   DevelopmentEnvironment::new("my-project", systems)
     .with_environments(vec!["FOO=bar".into()])
-    .build(ctx).await?;
+    .build(&mut ctx).await?;
 
   UserEnvironment::new("my-home", systems)
     .with_symlinks(vec![("/path/to/local/bin/app", "$HOME/.vorpal/bin/app")])
-    .build(ctx).await?;
+    .build(&mut ctx).await?;
 
   ctx.run().await
 }
@@ -341,7 +341,7 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
     let systems = [
         "aarch64-darwin",
         "aarch64-linux",
@@ -356,7 +356,7 @@ async fn main() -> Result<()> {
         ])
         .build();
 
-    Artifact::new("example-docker", vec![step], systems).build(ctx).await?;
+    Artifact::new("example-docker", vec![step], systems).build(&mut ctx).await?;
 
     ctx.run().await
 }

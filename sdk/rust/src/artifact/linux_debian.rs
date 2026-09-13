@@ -177,10 +177,10 @@ impl LinuxDebian {
         let systems = vec![Aarch64Linux, X8664Linux];
 
         let steps = vec![step::bash(
-            vec![],
-            vec![],
-            vec![],
-            formatdoc! {"
+            &[],
+            &[],
+            &[],
+            &formatdoc! {"
                 cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
                 {version_script}
                 EOF
@@ -203,38 +203,33 @@ impl LinuxDebian {
 
         let image = format!("altf4llc/debin:{dockerfile}");
 
-        let dockerfile_artifacts = vec![dockerfile.clone()];
-
         let steps = vec![
             step::docker(
-                vec![
+                &[
                     "buildx",
                     "build",
                     "--progress=plain",
                     format!("--tag={image}").as_str(),
                     &get_env_key(&dockerfile),
                 ],
-                dockerfile_artifacts,
+                std::slice::from_ref(&dockerfile),
             ),
+            step::docker(&["container", "create", "--name", &dockerfile, &image], &[]),
             step::docker(
-                vec!["container", "create", "--name", &dockerfile, &image],
-                vec![],
-            ),
-            step::docker(
-                vec![
+                &[
                     "container",
                     "export",
                     "--output",
                     "$VORPAL_WORKSPACE/debian.tar",
                     &dockerfile,
                 ],
-                vec![],
+                &[],
             ),
             step::bash(
-                vec![],
-                vec![],
-                vec![],
-                formatdoc! {"
+                &[],
+                &[],
+                &[],
+                &formatdoc! {"
                     ## extract files
                     tar -xf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
 
@@ -242,8 +237,8 @@ impl LinuxDebian {
                     echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
                 "},
             ),
-            step::docker(vec!["container", "stop", &dockerfile], vec![]),
-            step::docker(vec!["container", "rm", "--force", &dockerfile], vec![]),
+            step::docker(&["container", "stop", &dockerfile], &[]),
+            step::docker(&["container", "rm", "--force", &dockerfile], &[]),
         ];
 
         let name = "linux-debian";

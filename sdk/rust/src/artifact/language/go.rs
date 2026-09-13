@@ -251,10 +251,10 @@ impl<'a> Go<'a> {
         let steps = vec![
             step::shell(
                 context,
-                [vec![git, go], self.artifacts].concat(),
-                step_environments,
+                &[vec![git, go], self.artifacts].concat(),
+                &step_environments,
                 step_script,
-                self.secrets,
+                &self.secrets,
             )
             .await?,
         ];

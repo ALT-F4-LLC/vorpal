@@ -363,7 +363,7 @@ impl ConfigContext {
     /// authenticate or the agent service returns an error other than "not
     /// found"; or if the agent service does not return a prepared artifact
     /// and its digest.
-    pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
+    pub async fn add_artifact(&mut self, artifact: Artifact) -> Result<String> {
         if artifact.name.is_empty() {
             bail!("name cannot be empty");
         }
@@ -408,8 +408,12 @@ impl ConfigContext {
 
         // TODO: make this run in parallel
 
+        // The request owns the artifact once sent; only the name is kept for
+        // progress output.
+        let artifact_name = artifact.name.clone();
+
         let request = PrepareArtifactRequest {
-            artifact: Some(artifact.clone()),
+            artifact: Some(artifact),
             artifact_context: self.artifact_context.display().to_string(),
             artifact_namespace: self.artifact_namespace.clone(),
             artifact_unlock: self.artifact_unlock,
@@ -438,9 +442,9 @@ impl ConfigContext {
                 Ok(Some(message)) => {
                     if let Some(artifact_output) = message.artifact_output {
                         if self.port == 0 {
-                            info!("{} |> {}", artifact.name, artifact_output);
+                            info!("{artifact_name} |> {artifact_output}");
                         } else {
-                            emit(format!("{} |> {}", artifact.name, artifact_output));
+                            emit(format!("{artifact_name} |> {artifact_output}"));
                         }
                     }
 
@@ -486,16 +490,26 @@ impl ConfigContext {
     /// artifact is not found in the registry, or the registry returns an
     /// error other than "not found".
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
-        self.fetch_artifact_in_namespace(digest, &self.artifact_namespace.clone())
-            .await
+        Self::fetch_artifact_in_namespace(
+            &mut self.store,
+            &mut self.client_artifact,
+            &self.registry,
+            digest,
+            &self.artifact_namespace,
+        )
+        .await
     }
 
+    /// Takes the store and client as separate borrows so callers can pass a
+    /// namespace borrowed from another field of `self` while recursing.
     async fn fetch_artifact_in_namespace(
-        &mut self,
+        store: &mut ConfigContextStore,
+        client_artifact: &mut ArtifactServiceClient<Channel>,
+        registry: &str,
         digest: &str,
         namespace: &str,
     ) -> Result<String> {
-        if self.store.artifact.contains_key(digest) {
+        if store.artifact.contains_key(digest) {
             return Ok(digest.to_string());
         }
 
@@ -507,13 +521,13 @@ impl ConfigContext {
         };
 
         let mut request = Request::new(request);
-        let request_auth = client_auth_header(&self.registry).await?;
+        let request_auth = client_auth_header(registry).await?;
 
         if let Some(header) = request_auth {
             request.metadata_mut().insert("authorization", header);
         }
 
-        match self.client_artifact.get_artifact(request).await {
+        match client_artifact.get_artifact(request).await {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("artifact service error: {status:?}");
@@ -525,15 +539,24 @@ impl ConfigContext {
             Ok(response) => {
                 let artifact = response.into_inner();
 
-                self.store
-                    .artifact
-                    .insert(digest.to_string(), artifact.clone());
-
+                // Dependencies are fetched before the artifact is stored so the
+                // artifact can be moved into the store afterwards. Digests are
+                // content-addressed, so the dependency graph cannot cycle back
+                // to `digest` and the store's final contents are unchanged.
                 for step in &artifact.steps {
                     for dep in &step.artifacts {
-                        Box::pin(self.fetch_artifact_in_namespace(dep, namespace)).await?;
+                        Box::pin(Self::fetch_artifact_in_namespace(
+                            store,
+                            client_artifact,
+                            registry,
+                            dep,
+                            namespace,
+                        ))
+                        .await?;
                     }
                 }
+
+                store.artifact.insert(digest.to_string(), artifact);
 
                 Ok(digest.to_string())
             }
@@ -589,15 +612,21 @@ impl ConfigContext {
             return Ok(digest);
         }
 
-        self.fetch_artifact_in_namespace(&digest, &alias_parsed.namespace)
-            .await?;
+        Self::fetch_artifact_in_namespace(
+            &mut self.store,
+            &mut self.client_artifact,
+            &self.registry,
+            &digest,
+            &alias_parsed.namespace,
+        )
+        .await?;
 
         Ok(digest)
     }
 
-    /// Returns a clone of all artifacts resolved into the local store so far.
-    pub fn get_artifact_store(&self) -> HashMap<String, Artifact> {
-        self.store.artifact.clone()
+    /// Returns all artifacts resolved into the local store so far.
+    pub fn get_artifact_store(&self) -> &HashMap<String, Artifact> {
+        &self.store.artifact
     }
 
     /// Returns the artifact resolved into the local store under `digest`, if
@@ -634,12 +663,13 @@ impl ConfigContext {
 
     /// Runs the `ContextService` gRPC server, serving this context's
     /// resolved artifact store to the `vorpal` CLI until the server exits.
+    /// Consumes the context: the store moves into the server.
     ///
     /// # Errors
     ///
     /// Returns an error if the server fails to serve on the configured port.
-    pub async fn run(&self) -> Result<()> {
-        let service = ContextServiceServer::new(ConfigServer::new(self.store.clone()));
+    pub async fn run(self) -> Result<()> {
+        let service = ContextServiceServer::new(ConfigServer::new(self.store));
 
         let service_addr_str = format!("[::]:{}", self.port);
         let service_addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, self.port));
@@ -893,9 +923,10 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     let credentials_data = read(&credentials_path).await?;
     let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
 
-    let registry_issuer = match credentials.registry.get(registry) {
-        Some(issuer) => issuer.clone(),
-        None => return Ok(None),
+    // Borrowed from `credentials.registry`; the refresh below only mutates
+    // `credentials.issuer`, so the borrow stays valid across it.
+    let Some(registry_issuer) = credentials.registry.get(registry) else {
+        return Ok(None);
     };
 
     // Check if token needs refresh
@@ -903,52 +934,36 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
 
-    let needs_refresh = {
-        let issuer_creds = credentials
-            .issuer
-            .get(&registry_issuer)
-            .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
+    let issuer_creds = credentials
+        .issuer
+        .get(registry_issuer)
+        .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
-        let token_age = now - issuer_creds.issued_at;
-        let expires_in = issuer_creds.expires_in;
+    let token_age = now - issuer_creds.issued_at;
 
-        // Refresh if token has less than 5 minutes left
-        token_age + 300 >= expires_in
-    };
+    // Refresh if token has less than 5 minutes left
+    let needs_refresh = token_age + 300 >= issuer_creds.expires_in;
 
     if needs_refresh {
-        // Clone values needed for refresh
-        let (audience, client_id, refresh_token) = {
-            let issuer_creds = credentials
-                .issuer
-                .get(&registry_issuer)
-                .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
-            (
-                issuer_creds.audience.clone(),
-                issuer_creds.client_id.clone(),
-                issuer_creds.refresh_token.clone(),
-            )
-        };
-
         // Skip refresh if no refresh token available (user must re-login)
-        if refresh_token.is_empty() {
+        if issuer_creds.refresh_token.is_empty() {
             return Err(anyhow!(
                 "Access token expired and no refresh token available. Please run: vorpal login --issuer {registry_issuer}"
             ));
         }
 
         let (new_token, new_expires, new_issued_at, rotated_refresh) = refresh_access_token(
-            audience.as_deref(),
-            &client_id,
-            &registry_issuer,
-            &refresh_token,
+            issuer_creds.audience.as_deref(),
+            &issuer_creds.client_id,
+            registry_issuer,
+            &issuer_creds.refresh_token,
         )
         .await?;
 
         // Now update the credentials
         let issuer_creds = credentials
             .issuer
-            .get_mut(&registry_issuer)
+            .get_mut(registry_issuer)
             .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
         apply_token_refresh(
@@ -965,12 +980,11 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     }
 
     // Get the access token
-    let access_token = credentials
+    let access_token = &credentials
         .issuer
-        .get(&registry_issuer)
+        .get(registry_issuer)
         .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?
-        .access_token
-        .clone();
+        .access_token;
 
     let header = format!("Bearer {access_token}")
         .parse()

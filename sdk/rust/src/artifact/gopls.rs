@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{go, language::go::Go},
+    artifact::{go, language::go::Go, system},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -25,9 +24,7 @@ impl Gopls {
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "gopls";
 
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-
-        Go::new(name, systems)
+        Go::new(name, system::SYSTEMS)
             .with_alias(format!("{name}:0.42.0"))
             .with_build_directory(name)
             .with_source(go::source_tools(name))

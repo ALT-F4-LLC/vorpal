@@ -377,7 +377,7 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 
 	// Get rust toolchain artifact
 
-	contextTarget := context.GetTarget()
+	contextTarget := context.GetTargetStr()
 
 	rustToolchain, err := artifact.RustToolchain(context)
 	if err != nil {
@@ -630,7 +630,7 @@ func (b *RustDevelopmentEnvironment) Build(context *config.ConfigContext) (*stri
 	artifacts = append(artifacts, rustToolchain)
 	artifacts = append(artifacts, b.artifacts...)
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	toolchainTarget, err := artifact.RustToolchainTarget(system)
 	if err != nil {

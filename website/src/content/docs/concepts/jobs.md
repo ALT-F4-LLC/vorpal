@@ -31,26 +31,20 @@ If your task needs to run continuously (a server, a watcher, a daemon), use a [P
 
 ```rust
 use vorpal_sdk::{
-    artifact::{get_env_key, Job},
+    artifact::{get_env_key, system, Job},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = &mut get_context().await?;
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let mut ctx = get_context().await?;
 
-    let tool = build_my_tool(ctx).await?;
+    let tool = build_my_tool(&mut ctx).await?;
     let script = format!("{}/bin/my-tool --version", get_env_key(&tool));
 
-    Job::new("my-job", script, systems)
+    Job::new("my-job", script, system::SYSTEMS)
         .with_artifacts(vec![tool])
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     ctx.run().await
@@ -62,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
 ```go
 script := fmt.Sprintf("%s/bin/my-tool --version", artifact.GetEnvKey(*tool))
 
-artifact.NewJob("my-job", script, systems).
+artifact.NewJob("my-job", script, config.SYSTEMS).
     WithArtifacts([]*string{tool}).
     Build(ctx)
 ```
@@ -73,15 +67,9 @@ artifact.NewJob("my-job", script, systems).
 import {
   ConfigContext,
   Job,
+  SYSTEMS,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
-
-const SYSTEMS = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
 
 const context = ConfigContext.create();
 

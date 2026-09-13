@@ -258,36 +258,36 @@ impl LinuxVorpal {
 
         let steps = vec![
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_setup_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_stage_01_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_stage_02_script,
             )
             .await?,
             step::bwrap(
-                [
-                    bwrap_arguments.clone(),
-                    vec![
+                &[
+                    bwrap_arguments.as_slice(),
+                    &[
                         // mount tools
                         "--bind",
                         "$VORPAL_OUTPUT/tools",
@@ -295,39 +295,39 @@ impl LinuxVorpal {
                     ],
                 ]
                 .concat(),
-                vec![],
-                step_environments.clone(),
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_03_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 formatdoc! {"
                     rm -rf $VORPAL_OUTPUT/tools",
                 },
             )
             .await?,
             step::bwrap(
-                bwrap_arguments.clone(),
-                vec![],
-                step_environments.clone(),
+                &bwrap_arguments,
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_04_script,
             )
             .await?,
             step::bwrap(
-                bwrap_arguments.clone(),
-                vec![],
-                step_environments.clone(),
+                &bwrap_arguments,
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_05_script,
             )
             .await?,

@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
+import { getSystemStr, SYSTEMS } from "../system.js";
 
 /**
  * Builder for the protoc (Protocol Buffers compiler) artifact.
@@ -12,21 +12,21 @@ import { shell } from "./step.js";
 export class Protoc {
   async build(context: ConfigContext): Promise<string> {
     const name = "protoc";
-    const system = context.getSystem();
+    const system = getSystemStr(context.getSystem());
 
     let sourceTarget: string;
 
     switch (system) {
-      case ArtifactSystem.AARCH64_DARWIN:
+      case "aarch64-darwin":
         sourceTarget = "osx-aarch_64";
         break;
-      case ArtifactSystem.AARCH64_LINUX:
+      case "aarch64-linux":
         sourceTarget = "linux-aarch_64";
         break;
-      case ArtifactSystem.X8664_DARWIN:
+      case "x86_64-darwin":
         sourceTarget = "osx-x86_64";
         break;
-      case ArtifactSystem.X8664_LINUX:
+      case "x86_64-linux":
         sourceTarget = "linux-x86_64";
         break;
       default:
@@ -45,14 +45,8 @@ cp -pr "source/${name}/bin/protoc" "$VORPAL_OUTPUT/bin/protoc"
 chmod +x "$VORPAL_OUTPUT/bin/protoc"`;
 
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

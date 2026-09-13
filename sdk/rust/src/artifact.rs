@@ -416,7 +416,7 @@ impl<'a> Artifact<'a> {
             target: context.get_system().into(),
         };
 
-        context.add_artifact(&artifact).await
+        context.add_artifact(artifact).await
     }
 }
 
@@ -477,7 +477,7 @@ impl<'a> Job<'a> {
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let step = step::shell(context, self.artifacts, vec![], self.script, self.secrets).await?;
+        let step = step::shell(context, &self.artifacts, &[], self.script, &self.secrets).await?;
 
         Artifact::new(self.name, vec![step], self.systems)
             .build(context)
@@ -638,7 +638,7 @@ impl<'a> DevelopmentEnvironment<'a> {
         };
 
         let steps =
-            vec![step::shell(context, self.artifacts, vec![], step_script, self.secrets).await?];
+            vec![step::shell(context, &self.artifacts, &[], step_script, &self.secrets).await?];
 
         Artifact::new(self.name, steps, self.systems)
             .build(context)
@@ -776,9 +776,7 @@ impl<'a> Process<'a> {
             EOF
 
             chmod +x $VORPAL_OUTPUT/bin/{name}-start"#,
-            arguments = self
-                .arguments.clone()
-                .join(" "),
+            arguments = self.arguments.join(" "),
             artifacts = self
                 .artifacts
                 .iter()
@@ -789,7 +787,7 @@ impl<'a> Process<'a> {
             name = self.name,
         };
 
-        let step = step::shell(context, self.artifacts, vec![], script, self.secrets).await?;
+        let step = step::shell(context, &self.artifacts, &[], script, &self.secrets).await?;
 
         Artifact::new(self.name, vec![step], self.systems)
             .build(context)
@@ -945,7 +943,7 @@ impl<'a> UserEnvironment<'a> {
                 .join("\n"),
         };
 
-        let steps = vec![step::shell(context, self.artifacts, vec![], step_script, vec![]).await?];
+        let steps = vec![step::shell(context, &self.artifacts, &[], step_script, &[]).await?];
 
         Artifact::new(self.name, steps, self.systems)
             .build(context)
@@ -969,7 +967,7 @@ pub fn get_default_address() -> String {
 /// Returns the shell variable reference (`$VORPAL_ARTIFACT_<digest>`) an
 /// artifact's output directory is exposed under in a build step.
 #[must_use]
-pub fn get_env_key(digest: &String) -> String {
+pub fn get_env_key(digest: &str) -> String {
     format!("$VORPAL_ARTIFACT_{digest}")
 }
 
@@ -984,11 +982,13 @@ mod tests {
         },
     };
     use std::path::PathBuf;
-    use tonic::transport::Endpoint;
+    use tonic::transport::{Channel, Endpoint};
+
+    fn lazy_channel() -> Channel {
+        Endpoint::from_static("http://127.0.0.1:1").connect_lazy()
+    }
 
     fn test_context() -> Result<context::ConfigContext> {
-        let channel = Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
-
         context::ConfigContext::new(
             "test".to_string(),
             PathBuf::from("."),
@@ -996,8 +996,8 @@ mod tests {
             "aarch64-darwin".to_string(),
             false,
             vec![],
-            AgentServiceClient::new(channel.clone()),
-            ArtifactServiceClient::new(channel),
+            AgentServiceClient::new(lazy_channel()),
+            ArtifactServiceClient::new(lazy_channel()),
             0,
             "http://127.0.0.1:1".to_string(),
         )
