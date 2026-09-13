@@ -170,6 +170,10 @@ function buildVendorScript(
     lines.push(`[workspace]`);
     lines.push(`members = [${quotedPackages}]`);
     lines.push(`resolver = "2"`);
+    lines.push(``);
+    lines.push(`[workspace.lints.rust]`);
+    lines.push(``);
+    lines.push(`[workspace.lints.clippy]`);
     lines.push(`EOF`);
 
     lines.push(``);
@@ -244,6 +248,10 @@ function buildMainScript(opts: {
     lines.push(`[workspace]`);
     lines.push(`members = [${quotedPackages}]`);
     lines.push(`resolver = "2"`);
+    lines.push(``);
+    lines.push(`[workspace.lints.rust]`);
+    lines.push(``);
+    lines.push(`[workspace.lints.clippy]`);
     lines.push(`EOF`);
   }
 

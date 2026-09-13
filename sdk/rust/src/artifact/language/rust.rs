@@ -381,6 +381,10 @@ impl<'a> Rust<'a> {
                 [workspace]
                 members = [{packages}]
                 resolver = "2"
+
+                [workspace.lints.rust]
+
+                [workspace.lints.clippy]
                 EOF
 
                 target_paths=({target_paths})
@@ -472,6 +476,10 @@ impl<'a> Rust<'a> {
                 [workspace]
                 members = [{packages}]
                 resolver = "2"
+
+                [workspace.lints.rust]
+
+                [workspace.lints.clippy]
                 EOF"#,
                 packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
             };

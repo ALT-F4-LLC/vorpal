@@ -80,6 +80,10 @@ cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
 resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
 EOF
 
 target_paths=({{.TargetPaths}})
@@ -111,6 +115,10 @@ cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
 resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
 EOF
 {{end}}
 bin_names=({{.BinNames}})
