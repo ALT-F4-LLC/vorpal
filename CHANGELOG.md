@@ -15,6 +15,21 @@ All notable changes to this project will be documented in this file.
   published crate; update `let ctx = &mut get_context().await?;` to
   `let mut ctx = get_context().await?;` and pass `&mut ctx` to `.build(...)`.
 
+- **Go SDK**: change `language.GetGOOS` and `language.GetGOARCH` to take the
+  canonical system string instead of the `ArtifactSystem` enum, matching the
+  string-based dispatch used elsewhere in the SDK. Callers holding an enum
+  value can convert it first via `ConfigContext.GetTargetStr()` or the
+  equivalent canonical-string accessor.
+
+- **Cross-SDK**: add a `SYSTEMS` constant/export to the Rust, Go, Python, and
+  TypeScript SDKs, listing all four supported systems
+  (`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`, `x86_64-linux`) so
+  callers no longer need to declare that list themselves. Every built-in
+  artifact builder and the website's SDK examples now reference it instead of
+  a local literal. Exposed as `vorpal_sdk::artifact::system::SYSTEMS` in
+  Rust, `config.SYSTEMS` in Go, and a top-level `SYSTEMS` export in the
+  Python and TypeScript packages.
+
 ### Fixed
 
 - **CLI sockets**: honor `VORPAL_SOCKET_PATH` and explicit socket flags by
