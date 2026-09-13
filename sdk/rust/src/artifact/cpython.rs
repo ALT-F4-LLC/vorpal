@@ -1,17 +1,17 @@
 use crate::{
     api::artifact::{
         ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux},
     },
-    artifact::{step, Artifact, ArtifactSource},
+    artifact::{step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
-/// Canonical single source of truth for the build-target CPython interpreter pin.
+/// Canonical single source of truth for the build-target `CPython` interpreter pin.
 ///
-/// Operator rule: CPython 3.13, latest patch. Concrete pin: 3.13.14 from
+/// Operator rule: `CPython` 3.13, latest patch. Concrete pin: 3.13.14 from
 /// python-build-standalone release tag `20260623`, `install_only` (relocatable). Every
 /// other Python-version pin in the repo — the Go/TS builder constants, `sdk/python`'s
 /// `.python-version` and `requires-python` — is a conforming copy derived from THIS
@@ -19,13 +19,18 @@ use indoc::formatdoc;
 pub const DEFAULT_PYTHON_VERSION: &str = "3.13.14";
 
 /// Maps a Vorpal `ArtifactSystem` to the python-build-standalone target triple.
+///
+/// # Errors
+///
+/// Returns an error if `system` is [`ArtifactSystem::UnknownSystem`] or otherwise has no
+/// known python-build-standalone target triple.
 pub fn target(system: ArtifactSystem) -> Result<String> {
     let target = match system {
         Aarch64Darwin => "aarch64-apple-darwin",
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         X8664Darwin => "x86_64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
-        _ => bail!(
+        UnknownSystem => bail!(
             "unsupported toolchain target system: {}",
             system.as_str_name()
         ),
@@ -34,9 +39,9 @@ pub fn target(system: ArtifactSystem) -> Result<String> {
     Ok(target.to_string())
 }
 
-/// Build-target CPython interpreter (python-build-standalone, relocatable `install_only`).
+/// Build-target `CPython` interpreter (python-build-standalone, relocatable `install_only`).
 ///
-/// Source name is `cpython`, NOT `python` — the repo's existing linux_vorpal bootstrap
+/// Source name is `cpython`, NOT `python` — the repo's existing `linux_vorpal` bootstrap
 /// already owns a `python` source (compiled from source), and sources key by
 /// `(name, platform)`, so reusing `python` would collide (ADR 0001 / TDD §4, H1).
 ///
@@ -67,15 +72,25 @@ impl Default for Cpython {
 }
 
 impl Cpython {
+    /// Creates a builder pinned to [`DEFAULT_PYTHON_VERSION`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Overrides the `CPython` release version to fetch.
+    #[must_use]
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
     }
 
+    /// Builds the `CPython` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known python-build-standalone release,
+    /// or if registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "cpython";
 
@@ -94,10 +109,9 @@ impl Cpython {
             cp -prf \"./source/{name}/python/.\" \"$VORPAL_OUTPUT/\"
         "};
 
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{source_version}")])
             .with_sources(vec![source])
             .build(context)
@@ -111,23 +125,22 @@ mod tests {
     use crate::api::artifact::ArtifactSystem;
 
     #[test]
-    fn target_maps_supported_systems() {
+    fn target_maps_supported_systems() -> anyhow::Result<()> {
         assert_eq!(
-            target(ArtifactSystem::Aarch64Darwin).unwrap(),
+            target(ArtifactSystem::Aarch64Darwin)?,
             "aarch64-apple-darwin"
         );
         assert_eq!(
-            target(ArtifactSystem::Aarch64Linux).unwrap(),
+            target(ArtifactSystem::Aarch64Linux)?,
             "aarch64-unknown-linux-gnu"
         );
+        assert_eq!(target(ArtifactSystem::X8664Darwin)?, "x86_64-apple-darwin");
         assert_eq!(
-            target(ArtifactSystem::X8664Darwin).unwrap(),
-            "x86_64-apple-darwin"
-        );
-        assert_eq!(
-            target(ArtifactSystem::X8664Linux).unwrap(),
+            target(ArtifactSystem::X8664Linux)?,
             "x86_64-unknown-linux-gnu"
         );
+
+        Ok(())
     }
 
     #[test]

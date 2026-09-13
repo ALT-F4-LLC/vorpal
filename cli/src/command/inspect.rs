@@ -19,7 +19,7 @@ pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
     let mut request = Request::new(request);
     let request_auth_header = client_auth_header(registry)
         .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+        .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
     if let Some(header) = request_auth_header {
         request.metadata_mut().insert("authorization", header);
@@ -29,7 +29,7 @@ pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
     let artifact = artifact_response.into_inner();
     let artifact_data = serde_json::to_string_pretty(&artifact)?;
 
-    println!("{artifact_data}");
+    crate::output::line(artifact_data);
 
     Ok(())
 }

@@ -2,10 +2,10 @@ import type {
   ArtifactStep as ArtifactStepMsg,
   ArtifactStepSecret,
 } from "../api/artifact/artifact.js";
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { getEnvKey } from "../artifact.js";
 import { linuxVorpal } from "./linux_vorpal/linux_vorpal.js";
+import { getSystemStr } from "../system.js";
 
 /**
  * Creates a bash step. Matches Rust sdk/rust/src/artifact/step.rs bash().
@@ -239,19 +239,13 @@ export async function shell(
   script: string,
   secrets: ArtifactStepSecret[],
 ): Promise<ArtifactStepMsg> {
-  const stepSystem = context.getSystem();
+  const stepSystem = getSystemStr(context.getSystem());
 
-  if (
-    stepSystem === ArtifactSystem.AARCH64_DARWIN ||
-    stepSystem === ArtifactSystem.X8664_DARWIN
-  ) {
+  if (stepSystem === "aarch64-darwin" || stepSystem === "x86_64-darwin") {
     return bash(artifacts, environments, secrets, script);
   }
 
-  if (
-    stepSystem === ArtifactSystem.AARCH64_LINUX ||
-    stepSystem === ArtifactSystem.X8664_LINUX
-  ) {
+  if (stepSystem === "aarch64-linux" || stepSystem === "x86_64-linux") {
     const linuxVorpalDigest = await linuxVorpal(context);
 
     return bwrap([], artifacts, environments, linuxVorpalDigest, secrets, script);

@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
+import { type ArtifactSystemInput, getSystemStr, SYSTEMS } from "../system.js";
 
 /// Canonical conforming copy of the build-target CPython interpreter pin.
 ///
@@ -12,19 +12,19 @@ import { shell } from "./step.js";
 export const DEFAULT_PYTHON_VERSION = "3.13.14";
 
 /**
- * Maps a Vorpal ArtifactSystem to the python-build-standalone target triple.
+ * Maps a target system to the python-build-standalone target triple.
  *
  * Mirrors Rust `cpython::target()` — name-agnostic error message on unknown system.
  */
-export function cpythonTarget(system: ArtifactSystem): string {
-  switch (system) {
-    case ArtifactSystem.AARCH64_DARWIN:
+export function cpythonTarget(system: ArtifactSystemInput): string {
+  switch (getSystemStr(system)) {
+    case "aarch64-darwin":
       return "aarch64-apple-darwin";
-    case ArtifactSystem.AARCH64_LINUX:
+    case "aarch64-linux":
       return "aarch64-unknown-linux-gnu";
-    case ArtifactSystem.X8664_DARWIN:
+    case "x86_64-darwin":
       return "x86_64-apple-darwin";
-    case ArtifactSystem.X8664_LINUX:
+    case "x86_64-linux":
       return "x86_64-unknown-linux-gnu";
     default:
       throw new Error(`unsupported toolchain target system: ${system}`);
@@ -75,14 +75,8 @@ export class Cpython {
 cp -prf "./source/${name}/python/." "$VORPAL_OUTPUT/"
 `;
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

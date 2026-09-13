@@ -41,30 +41,24 @@ If your task runs to completion and exits, use a [Job](/concepts/jobs/) instead.
 
 ```rust
 use vorpal_sdk::{
-    artifact::{get_env_key, Process},
+    artifact::{get_env_key, system, Process},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = &mut get_context().await?;
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    let mut ctx = get_context().await?;
 
-    let server = build_my_server(ctx).await?;
+    let server = build_my_server(&mut ctx).await?;
 
     Process::new(
         "my-server",
         &format!("{}/bin/my-server", get_env_key(&server)),
-        systems,
+        system::SYSTEMS,
     )
     .with_arguments(vec!["--port", "8080"])
     .with_artifacts(vec![server])
-    .build(ctx)
+    .build(&mut ctx)
     .await?;
 
     ctx.run().await
@@ -77,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
 process, _ := artifact.NewProcess(
     "my-server",
     fmt.Sprintf("%s/bin/my-server", artifact.GetEnvKey(*server)),
-    systems,
+    config.SYSTEMS,
 ).
     WithArguments([]string{"--port", "8080"}).
     WithArtifacts([]*string{server}).
@@ -90,15 +84,9 @@ process, _ := artifact.NewProcess(
 import {
   ConfigContext,
   Process,
+  SYSTEMS,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
-
-const SYSTEMS = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
 
 const context = ConfigContext.create();
 

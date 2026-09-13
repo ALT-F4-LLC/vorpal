@@ -12,14 +12,30 @@ use indoc::formatdoc;
 mod script;
 mod source;
 
+/// Builds the `linux_vorpal` root filesystem: a Linux-From-Scratch-derived
+/// build environment assembled from source (cross-toolchain, temporary tools,
+/// and final chroot stages) rather than a distro package manager.
 #[derive(Default)]
 pub struct LinuxVorpal {}
 
 impl LinuxVorpal {
+    /// Creates a builder for the `linux_vorpal` artifact.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `linux_vorpal` root filesystem artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if building the `linux-debian` rootfs dependency fails, if
+    /// registering any of the GNU/Linux source artifacts fails, or if any of the
+    /// setup/cross-toolchain/temporary-tools/chroot `bwrap` build steps fails.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "sequential wiring of every linux_vorpal source artifact and build stage; splitting would fragment a single linear assembly"
+    )]
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let bash_version = "5.3";
         let bash = source::gnu("bash", bash_version);
@@ -242,36 +258,36 @@ impl LinuxVorpal {
 
         let steps = vec![
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_setup_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_stage_01_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 step_stage_02_script,
             )
             .await?,
             step::bwrap(
-                [
-                    bwrap_arguments.clone(),
-                    vec![
+                &[
+                    bwrap_arguments.as_slice(),
+                    &[
                         // mount tools
                         "--bind",
                         "$VORPAL_OUTPUT/tools",
@@ -279,39 +295,39 @@ impl LinuxVorpal {
                     ],
                 ]
                 .concat(),
-                vec![],
-                step_environments.clone(),
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_03_script,
             )
             .await?,
             step::bwrap(
-                vec![],
-                vec![],
-                step_environments.clone(),
-                Some(step_rootfs.clone()),
-                vec![],
+                &[],
+                &[],
+                &step_environments,
+                Some(step_rootfs.as_str()),
+                &[],
                 formatdoc! {"
                     rm -rf $VORPAL_OUTPUT/tools",
                 },
             )
             .await?,
             step::bwrap(
-                bwrap_arguments.clone(),
-                vec![],
-                step_environments.clone(),
+                &bwrap_arguments,
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_04_script,
             )
             .await?,
             step::bwrap(
-                bwrap_arguments.clone(),
-                vec![],
-                step_environments.clone(),
+                &bwrap_arguments,
+                &[],
+                &step_environments,
                 None,
-                vec![],
+                &[],
                 step_stage_05_script,
             )
             .await?,

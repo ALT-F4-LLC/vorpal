@@ -48,7 +48,7 @@ name = "example"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "vorpal-sdk>=0.4.0",
+    "vorpal-sdk>=0.4.1",
 ]
 
 [tool.uv]
@@ -62,19 +62,12 @@ from vorpal_sdk import ConfigContext
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 # Define your artifacts here
 
 ctx.run()
 ```
 
-Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context. Target systems are canonical system strings, available as `SYSTEMS` for every supported platform. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -89,19 +82,12 @@ Use the `Python` builder to package a Python project into a cross-platform artif
 :::
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Python
+from vorpal_sdk import SYSTEMS, ConfigContext, Python
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 (
-    Python("example", systems)
+    Python("example", SYSTEMS)
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
     .build(ctx)
@@ -138,21 +124,14 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 :::
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Protoc, Python
+from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, Python
 
 ctx = ConfigContext.create()
-
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
 
 protoc = Protoc().build(ctx)
 
 (
-    Python("example", systems)
+    Python("example", SYSTEMS)
     .with_artifacts([protoc])
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
@@ -171,21 +150,14 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 Create a portable development shell with pinned tools, environment variables, and more:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Protoc, PythonDevelopmentEnvironment
+from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, PythonDevelopmentEnvironment
 
 ctx = ConfigContext.create()
-
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
 
 protoc = Protoc().build(ctx)
 
 (
-    PythonDevelopmentEnvironment("my-project-shell", systems)
+    PythonDevelopmentEnvironment("my-project-shell", SYSTEMS)
     .with_artifacts([protoc])
     .with_environments(["PYTHONWARNINGS=default"])
     .build(ctx)
@@ -224,19 +196,12 @@ See [Environments](/concepts/environments/) to learn more.
 Jobs run scripts that never cache by default - ideal for CI tasks, tests, and automation.
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Job, Python, get_env_key
+from vorpal_sdk import SYSTEMS, ConfigContext, Job, Python, get_env_key
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 example = (
-    Python("example", systems)
+    Python("example", SYSTEMS)
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
     .build(ctx)
@@ -245,7 +210,7 @@ example = (
 script = f"{get_env_key(example)}/bin/example --version"
 
 (
-    Job("my-job", script, systems)
+    Job("my-job", script, SYSTEMS)
     .with_artifacts([example])
     .build(ctx)
 )
@@ -267,19 +232,12 @@ See [Jobs](/concepts/jobs/) to learn more.
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Process, Python, get_env_key
+from vorpal_sdk import SYSTEMS, ConfigContext, Process, Python, get_env_key
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 example = (
-    Python("example", systems)
+    Python("example", SYSTEMS)
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
     .build(ctx)
@@ -289,7 +247,7 @@ example = (
     Process(
         "my-server",
         f"{get_env_key(example)}/bin/example",
-        systems,
+        SYSTEMS,
     )
     .with_arguments(["--port", "8080"])
     .with_artifacts([example])
@@ -314,26 +272,19 @@ See [Processes](/concepts/processes/) to learn more.
 Install tools into your user-wide environment with symlinks:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Python, UserEnvironment, get_env_key
+from vorpal_sdk import SYSTEMS, ConfigContext, Python, UserEnvironment, get_env_key
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 example = (
-    Python("example", systems)
+    Python("example", SYSTEMS)
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
     .build(ctx)
 )
 
 (
-    UserEnvironment("my-home", systems)
+    UserEnvironment("my-home", SYSTEMS)
     .with_artifacts([example])
     .with_symlinks([
         (f"{get_env_key(example)}/bin/example", "$HOME/.vorpal/bin/example"),
@@ -361,16 +312,9 @@ See [Environments](/concepts/environments/) to learn more.
 Replace the default Bash executor with Docker or any custom binary:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import Artifact, ArtifactStep, ConfigContext
+from vorpal_sdk import SYSTEMS, Artifact, ArtifactStep, ConfigContext
 
 ctx = ConfigContext.create()
-
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
 
 step = (
     ArtifactStep("docker")
@@ -382,7 +326,7 @@ step = (
     .build()
 )
 
-Artifact("example-docker", [step], systems).build(ctx)
+Artifact("example-docker", [step], SYSTEMS).build(ctx)
 
 ctx.run()
 ```

@@ -10,7 +10,7 @@ use tonic::{
 };
 use tracing::error;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 struct OidcDiscovery {
     jwks_uri: String,
     issuer: String,
@@ -32,17 +32,28 @@ struct Jwk {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Claims {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors the JWT 'aud' claim for Deserialize; not read directly (jsonwebtoken validates audience internally)"
+    )]
     pub aud: Option<Value>,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors the JWT 'exp' claim for Deserialize; not read directly (jsonwebtoken validates expiry internally)"
+    )]
     pub exp: Option<u64>,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors the JWT 'iss' claim for Deserialize; not read directly (jsonwebtoken validates issuer internally)"
+    )]
     pub iss: Option<String>,
     pub sub: Option<String>,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors the JWT 'scope' claim for Deserialize; not currently read by any authorization path"
+    )]
     pub scope: Option<String>,
     pub azp: Option<String>,
-    #[allow(dead_code)]
     pub gty: Option<String>,
 
     // Namespace permissions
@@ -82,7 +93,10 @@ impl Claims {
     }
 
     /// Get grant type for audit logging
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "public accessor kept for callers doing audit logging; not yet called from this crate"
+    )]
     pub fn grant_type(&self) -> Option<&str> {
         self.gty.as_deref()
     }
@@ -125,7 +139,7 @@ impl OidcValidator {
         let normalized_issuer = issuer.trim_end_matches('/').to_string();
 
         // 1) Discover the realm (/.well-known/openid-configuration)
-        let discovery_url = format!("{}/.well-known/openid-configuration", normalized_issuer);
+        let discovery_url = format!("{normalized_issuer}/.well-known/openid-configuration");
         let disc: OidcDiscovery = reqwest::Client::new()
             .get(&discovery_url)
             .send()
@@ -177,10 +191,14 @@ impl OidcValidator {
         // Decode header to pick the right key (kid)
         let header = decode_header(token).map_err(|e| AuthError::Jwt(e.to_string()))?;
         let kid = header.kid.ok_or(AuthError::MissingKid)?;
-        let aud: Vec<&str> = self.issuer_audiences.iter().map(|s| s.as_str()).collect();
+        let aud: Vec<&str> = self
+            .issuer_audiences
+            .iter()
+            .map(std::string::String::as_str)
+            .collect();
 
         // Try current cache
-        if let Some(claims) = self.try_decode_with_kid(aud.clone(), &kid, token).await? {
+        if let Some(claims) = self.try_decode_with_kid(&aud, &kid, token).await? {
             // self.validate_claims(&claims)?;
             return Ok(claims);
         }
@@ -191,7 +209,7 @@ impl OidcValidator {
             .map_err(|e| AuthError::Jwt(format!("jwks refresh failed: {e}")))?;
         *self.jwks.write().await = fresh;
 
-        if let Some(claims) = self.try_decode_with_kid(aud, &kid, token).await? {
+        if let Some(claims) = self.try_decode_with_kid(&aud, &kid, token).await? {
             // self.validate_claims(&claims)?;
             return Ok(claims);
         }
@@ -201,10 +219,12 @@ impl OidcValidator {
 
     async fn try_decode_with_kid(
         &self,
-        aud: Vec<&str>,
+        aud: &[&str],
         kid: &str,
         token: &str,
     ) -> Result<Option<Claims>, AuthError> {
+        // Cloned to release the JWKS read lock before the (potentially slow) decode
+        // below runs, rather than holding the lock across it.
         let jwks = self.jwks.read().await.clone();
         let Some(jwk) = jwks.keys.iter().find(|k| k.kid.as_deref() == Some(kid)) else {
             return Ok(None);
@@ -216,18 +236,18 @@ impl OidcValidator {
         }
         let n = jwk
             .n
-            .clone()
+            .as_deref()
             .ok_or_else(|| AuthError::Jwt("missing n".into()))?;
         let e = jwk
             .e
-            .clone()
+            .as_deref()
             .ok_or_else(|| AuthError::Jwt("missing e".into()))?;
 
         let key =
-            DecodingKey::from_rsa_components(&n, &e).map_err(|e| AuthError::Jwt(e.to_string()))?;
+            DecodingKey::from_rsa_components(n, e).map_err(|e| AuthError::Jwt(e.to_string()))?;
 
         let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_audience(&aud);
+        validation.set_audience(aud);
         validation.validate_aud = true;
         // Accept issuer with or without trailing slash (Auth0 includes it, others may not)
         validation.set_issuer(&[&self.issuer, &format!("{}/", self.issuer)]);
@@ -309,7 +329,7 @@ pub fn new_interceptor(
         // `validator` Arc (captured by the `Fn` closure) remains usable afterward
         // via shared borrow for `trusted_service_client_ids` access — no second
         // clone needed.
-        let validator_for_validate = validator.clone();
+        let validator_for_validate = Arc::clone(&validator);
         let claims = tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current()
                 .block_on(async move { validator_for_validate.validate(&auth).await })
@@ -328,7 +348,7 @@ pub fn new_interceptor(
 
 // ===== OAuth2 Client Credentials Flow =====
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 struct TokenEndpointDiscovery {
     token_endpoint: String,
 }
@@ -346,11 +366,14 @@ struct ClientCredentialsRequest {
 struct ClientCredentialsResponse {
     access_token: String,
     expires_in: u64,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors the OAuth2 token endpoint response for Deserialize; the token type (always 'Bearer') is not read"
+    )]
     token_type: String,
 }
 
-/// Compose the OAuth2 scope string for a client_credentials request.
+/// Compose the `OAuth2` scope string for a `client_credentials` request.
 ///
 /// When `issuer_audience` is provided, appends Zitadel's project-audience-injection
 /// scope (`urn:zitadel:iam:org:project:id:{aud}:aud`). Zitadel v4 silently ignores
@@ -360,21 +383,21 @@ struct ClientCredentialsResponse {
 /// harmless against them.
 fn compose_client_credentials_scope(scope: &str, issuer_audience: Option<&str>) -> String {
     match issuer_audience {
-        Some(aud) => format!("{} urn:zitadel:iam:org:project:id:{}:aud", scope, aud),
+        Some(aud) => format!("{scope} urn:zitadel:iam:org:project:id:{aud}:aud"),
         None => scope.to_string(),
     }
 }
 
-/// Performs OAuth2 Client Credentials Flow token exchange for service-to-service authentication
+/// Performs `OAuth2` Client Credentials Flow token exchange for service-to-service authentication
 ///
 /// Args:
-/// - issuer: Base URL of the OIDC provider (e.g., http://localhost:8080/realms/vorpal)
-/// - client_id: Service account client ID
-/// - client_secret: Service account client secret
-/// - scope: OAuth2 scope to request
+/// - issuer: Base URL of the OIDC provider (e.g., <http://localhost:8080/realms/vorpal>)
+/// - `client_id`: Service account client ID
+/// - `client_secret`: Service account client secret
+/// - scope: `OAuth2` scope to request
 /// - audience: API identifier
 ///
-/// Returns: Bearer token as MetadataValue and expires_in suitable for gRPC requests
+/// Returns: Bearer token as `MetadataValue` and `expires_in` suitable for gRPC requests
 pub async fn exchange_client_credentials(
     issuer: &str,
     issuer_audience: Option<&str>,
@@ -383,7 +406,7 @@ pub async fn exchange_client_credentials(
     scope: &str,
 ) -> Result<(MetadataValue<Ascii>, u64)> {
     // 1) Discover the token endpoint via OIDC discovery
-    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
 
     let discovery_response = reqwest::Client::new()
         .get(&discovery_url)
@@ -402,16 +425,12 @@ pub async fn exchange_client_credentials(
             "auth |> failed to parse OIDC discovery response: {} - full response: {}",
             e, discovery_text
         );
-        anyhow!(
-            "failed to parse OIDC discovery response: {} - response was: {}",
-            e,
-            discovery_text
-        )
+        anyhow!("failed to parse OIDC discovery response: {e} - response was: {discovery_text}")
     })?;
 
     // 2) Exchange client credentials for access token
     let token_request = ClientCredentialsRequest {
-        audience: issuer_audience.map(|s| s.to_string()),
+        audience: issuer_audience.map(std::string::ToString::to_string),
         client_id: issuer_client_id.to_string(),
         client_secret: issuer_client_secret.to_string(),
         grant_type: "client_credentials".to_string(),
@@ -437,9 +456,7 @@ pub async fn exchange_client_credentials(
             token_status, token_text
         );
         return Err(anyhow!(
-            "token endpoint returned {}: {}",
-            token_status,
-            token_text
+            "token endpoint returned {token_status}: {token_text}"
         ));
     }
 
@@ -448,17 +465,13 @@ pub async fn exchange_client_credentials(
             "auth |> failed to parse token response: {} - full response: {}",
             e, token_text
         );
-        anyhow!(
-            "failed to parse token response: {} - response was: {}",
-            e,
-            token_text
-        )
+        anyhow!("failed to parse token response: {e} - response was: {token_text}")
     })?;
 
     // 3) Create Bearer token header
     let auth_header: MetadataValue<Ascii> = format!("Bearer {}", response.access_token)
         .parse()
-        .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+        .map_err(|e| anyhow!("failed to parse Bearer token: {e}"))?;
 
     Ok((auth_header, response.expires_in))
 }
@@ -478,8 +491,7 @@ pub fn require_namespace_permission<T>(
 
     if !claims.has_namespace_permission(namespace, permission) {
         return Err(Status::permission_denied(format!(
-            "insufficient permissions: no {} access to namespace: {}",
-            permission, namespace
+            "insufficient permissions: no {permission} access to namespace: {namespace}"
         )));
     }
 
@@ -616,13 +628,15 @@ mod tests {
     }
 
     #[test]
-    fn require_namespace_or_service_trust_human_without_permission_fails() {
+    fn require_namespace_or_service_trust_human_without_permission_fails(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut req = Request::new(());
         req.extensions_mut().insert(mk_claims(Some(HashMap::new())));
         req.extensions_mut().insert(PrincipalKind::Human);
 
-        let err = require_namespace_or_service_trust(&req, "library", "read")
-            .expect_err("should be denied");
+        let Err(err) = require_namespace_or_service_trust(&req, "library", "read") else {
+            return Err("should be denied".into());
+        };
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         // TDD §6 error taxonomy: the wire-format message must be EXACTLY
         // "insufficient permissions: no {perm} access to namespace: {ns}".
@@ -632,10 +646,12 @@ mod tests {
             err.message(),
             "insufficient permissions: no read access to namespace: library"
         );
+        Ok(())
     }
 
     #[test]
-    fn require_namespace_or_service_trust_human_partial_permission_other_namespace_fails() {
+    fn require_namespace_or_service_trust_human_partial_permission_other_namespace_fails(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // DKT-67 scenario 2 (regression): a human user with `library:write`
         // attempting to build into `other` must hit the EXACT TDD §6 error
         // string for `write` on `other`. Lock the message format here so any
@@ -647,13 +663,15 @@ mod tests {
         req.extensions_mut().insert(mk_claims(Some(ns)));
         req.extensions_mut().insert(PrincipalKind::Human);
 
-        let err = require_namespace_or_service_trust(&req, "other", "write")
-            .expect_err("should be denied");
+        let Err(err) = require_namespace_or_service_trust(&req, "other", "write") else {
+            return Err("should be denied".into());
+        };
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         assert_eq!(
             err.message(),
             "insufficient permissions: no write access to namespace: other"
         );
+        Ok(())
     }
 
     #[test]
@@ -684,12 +702,15 @@ mod tests {
     }
 
     #[test]
-    fn require_namespace_or_service_trust_no_principal_fails_unauthenticated() {
+    fn require_namespace_or_service_trust_no_principal_fails_unauthenticated(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let req: Request<()> = Request::new(());
 
-        let err = require_namespace_or_service_trust(&req, "library", "read")
-            .expect_err("should be unauthenticated");
+        let Err(err) = require_namespace_or_service_trust(&req, "library", "read") else {
+            return Err("should be unauthenticated".into());
+        };
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
+        Ok(())
     }
 
     // ===== End-to-end gate composition: classify + gate (DKT-67 scenarios) =====
@@ -739,7 +760,7 @@ mod tests {
             build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
         let result = require_namespace_or_service_trust(&req, "library", "write");
-        assert!(result.is_ok(), "trusted service must bypass: {:?}", result);
+        assert!(result.is_ok(), "trusted service must bypass: {result:?}");
     }
 
     #[test]
@@ -754,13 +775,13 @@ mod tests {
         let result = require_namespace_or_service_trust(&req, "library", "write");
         assert!(
             result.is_ok(),
-            "human with `library:write` must succeed in `library`: {:?}",
-            result
+            "human with `library:write` must succeed in `library`: {result:?}"
         );
     }
 
     #[test]
-    fn dkt67_scenario2_keycloak_regression_human_with_namespaces_fails_in_unowned_ns() {
+    fn dkt67_scenario2_keycloak_regression_human_with_namespaces_fails_in_unowned_ns(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Companion: same human, build in `other` → PERMISSION_DENIED with the
         // exact TDD §6 error string.
         let mut ns = HashMap::new();
@@ -768,17 +789,20 @@ mod tests {
         let claims = mk_claims_with_azp(Some("cli"), Some(ns));
         let req = build_request_with_claims_and_classification(claims, &[]);
 
-        let err = require_namespace_or_service_trust(&req, "other", "write")
-            .expect_err("human without `other:write` must be denied");
+        let Err(err) = require_namespace_or_service_trust(&req, "other", "write") else {
+            return Err("human without `other:write` must be denied".into());
+        };
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         assert_eq!(
             err.message(),
             "insufficient permissions: no write access to namespace: other"
         );
+        Ok(())
     }
 
     #[test]
-    fn dkt67_scenario4_unknown_azp_returns_permission_denied_with_exact_error_string() {
+    fn dkt67_scenario4_unknown_azp_returns_permission_denied_with_exact_error_string(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Negative — token from a service account whose `azp` is NOT in the
         // allow-list. The flag is set (worker-client trusted), but this token's
         // `azp` is `attacker-client`, which falls back to the Human path.
@@ -787,17 +811,20 @@ mod tests {
         let req =
             build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
-        let err = require_namespace_or_service_trust(&req, "library", "read")
-            .expect_err("unknown azp must be denied");
+        let Err(err) = require_namespace_or_service_trust(&req, "library", "read") else {
+            return Err("unknown azp must be denied".into());
+        };
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         assert_eq!(
             err.message(),
             "insufficient permissions: no read access to namespace: library"
         );
+        Ok(())
     }
 
     #[test]
-    fn dkt67_scenario4_unknown_azp_with_partial_namespaces_still_namespace_gated() {
+    fn dkt67_scenario4_unknown_azp_with_partial_namespaces_still_namespace_gated(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Variant: unknown azp + a `namespaces` claim that doesn't cover the
         // requested ns → still PERMISSION_DENIED. Confirms the bypass is NOT
         // triggered just because the token has an `azp` field; the allow-list
@@ -808,13 +835,15 @@ mod tests {
         let req =
             build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
-        let err = require_namespace_or_service_trust(&req, "library", "write")
-            .expect_err("unknown azp without `library:write` must be denied");
+        let Err(err) = require_namespace_or_service_trust(&req, "library", "write") else {
+            return Err("unknown azp without `library:write` must be denied".into());
+        };
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
         assert_eq!(
             err.message(),
             "insufficient permissions: no write access to namespace: library"
         );
+        Ok(())
     }
 
     #[test]
@@ -829,8 +858,7 @@ mod tests {
         let result = require_namespace_or_service_trust(&req, "any-ns", "write");
         assert!(
             result.is_ok(),
-            "trusted azp must bypass even with no namespaces claim: {:?}",
-            result
+            "trusted azp must bypass even with no namespaces claim: {result:?}"
         );
     }
 }

@@ -33,9 +33,9 @@ type ArtifactAlias struct {
 }
 
 type ConfigContextStore struct {
-	artifact          map[string]*artifact.Artifact
+	artifact           map[string]*artifact.Artifact
 	artifactInputCache map[string]string
-	variable          map[string]string
+	variable           map[string]string
 }
 
 type ConfigContext struct {
@@ -43,6 +43,7 @@ type ConfigContext struct {
 	artifactContext   string
 	artifactNamespace string
 	artifactSystem    artifact.ArtifactSystem
+	artifactSystemStr string
 	artifactUnlock    bool
 	clientAgent       agent.AgentServiceClient
 	clientArtifact    artifact.ArtifactServiceClient
@@ -325,9 +326,9 @@ func GetContext() *ConfigContext {
 	}
 
 	store := ConfigContextStore{
-		artifact:          make(map[string]*artifact.Artifact),
+		artifact:           make(map[string]*artifact.Artifact),
 		artifactInputCache: make(map[string]string),
-		variable:          cmd.ArtifactVariable,
+		variable:           cmd.ArtifactVariable,
 	}
 
 	system, err := GetSystem(cmd.ArtifactSystem)
@@ -352,6 +353,7 @@ func GetContext() *ConfigContext {
 		artifactContext:   cmd.ArtifactContext,
 		artifactNamespace: cmd.ArtifactNamespace,
 		artifactSystem:    *system,
+		artifactSystemStr: cmd.ArtifactSystem,
 		artifactUnlock:    cmd.ArtifactUnlock,
 		clientAgent:       agent.NewAgentServiceClient(clientConnAgent),
 		clientArtifact:    artifact.NewArtifactServiceClient(clientConnArtifact),
@@ -682,6 +684,12 @@ func (c *ConfigContext) GetArtifactNamespace() string {
 
 func (c *ConfigContext) GetTarget() artifact.ArtifactSystem {
 	return c.artifactSystem
+}
+
+// GetTargetStr returns the canonical "arch-os" spelling of the resolved
+// target system (e.g. "aarch64-darwin"), as validated by GetSystem.
+func (c *ConfigContext) GetTargetStr() string {
+	return c.artifactSystemStr
 }
 
 func (c *ConfigContext) GetVariable(name string) *string {

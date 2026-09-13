@@ -1,5 +1,13 @@
 use indoc::formatdoc;
 
+/// Generates the `linux_vorpal` chroot/final-system stage shell script: lays out
+/// the standard FHS directories, seeds `/etc/hosts`, `/etc/passwd`, `/etc/group`
+/// and the system locale, then builds `gettext`, `bison`, `perl`, `Python`,
+/// `texinfo`, and `util-linux` into the final root.
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear shell-script assembly for one LFS chroot/final-system build stage; splitting the formatdoc! would fragment a single sequential script"
+)]
 pub fn script(
     bison_version: &str,
     gettext_version: &str,

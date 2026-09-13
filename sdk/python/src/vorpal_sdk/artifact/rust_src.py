@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import Artifact, ArtifactSource
 from vorpal_sdk.artifact.rust_toolchain import RUST_TOOLCHAIN_VERSION
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import SYSTEMS
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -34,13 +34,7 @@ class RustSrc:
             f'{name}/." "$VORPAL_OUTPUT"'
         )
         steps = [shell(context, [], [], step_script, [])]
-        systems = [
-            artifact_pb2.AARCH64_DARWIN,
-            artifact_pb2.AARCH64_LINUX,
-            artifact_pb2.X8664_DARWIN,
-            artifact_pb2.X8664_LINUX,
-        ]
 
         return (
-            Artifact(name, steps, systems).with_sources([source]).build(context)
+            Artifact(name, steps, SYSTEMS).with_sources([source]).build(context)
         )

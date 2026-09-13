@@ -9,6 +9,8 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
+/// Builds a `TypeScript`/JavaScript artifact (a compiled binary or a `bun`-installed package)
+/// using the pinned `bun` runtime.
 pub struct TypeScript<'a> {
     aliases: Vec<String>,
     artifacts: Vec<String>,
@@ -24,6 +26,8 @@ pub struct TypeScript<'a> {
 }
 
 impl<'a> TypeScript<'a> {
+    /// Creates a builder for a `TypeScript`/JavaScript artifact named `name`, targeting
+    /// `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -46,6 +50,8 @@ impl<'a> TypeScript<'a> {
         }
     }
 
+    /// Adds aliases the built artifact will also be registered under, skipping duplicates.
+    #[must_use]
     pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
         for alias in aliases {
             if !self.aliases.contains(&alias) {
@@ -55,26 +61,37 @@ impl<'a> TypeScript<'a> {
         self
     }
 
+    /// Sets the dependency artifacts made available to the build step.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
         self
     }
 
+    /// Switches the build to compile a standalone binary via `bun build --compile` from this
+    /// entrypoint, instead of running `tsc`.
+    #[must_use]
     pub fn with_entrypoint(mut self, entrypoint: &'a str) -> Self {
         self.entrypoint = Some(entrypoint);
         self
     }
 
+    /// Sets extra environment variables for the build step.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
         self.environments = environments;
         self
     }
 
+    /// Restricts the registered source to these paths (default: the whole source directory).
+    #[must_use]
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.source_includes = includes;
         self
     }
 
+    /// Adds build-step secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
@@ -86,6 +103,8 @@ impl<'a> TypeScript<'a> {
         self
     }
 
+    /// Adds shell script fragments to run before `bun install`, skipping duplicates.
+    #[must_use]
     pub fn with_source_scripts(mut self, scripts: Vec<String>) -> Self {
         for script in scripts {
             if !self.source_scripts.contains(&script) {
@@ -95,11 +114,20 @@ impl<'a> TypeScript<'a> {
         self
     }
 
+    /// Runs the build from `dir`, relative to the registered source root.
+    #[must_use]
     pub fn with_working_dir(mut self, dir: &str) -> Self {
         self.working_dir = Some(dir.to_string());
         self
     }
 
+    /// Builds the `TypeScript`/JavaScript artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the `bun`
+    /// toolchain dependency fails, or if registering the source or artifact with the build
+    /// context fails.
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 
@@ -115,8 +143,12 @@ impl<'a> TypeScript<'a> {
         let mut source_builder = ArtifactSource::new(self.name, source_path);
 
         if !self.source_includes.is_empty() {
-            source_builder = source_builder
-                .with_includes(self.source_includes.iter().map(|s| s.to_string()).collect());
+            source_builder = source_builder.with_includes(
+                self.source_includes
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect(),
+            );
         }
 
         let source = source_builder.build();
@@ -125,43 +157,43 @@ impl<'a> TypeScript<'a> {
 
         let step_source_dir = format!("{}/source/{}", source_path, source.name);
 
-        let step_source_dir = match &self.working_dir {
-            Some(working_dir) => format!("{}/{}", step_source_dir, working_dir),
-            None => step_source_dir.clone(),
+        let step_source_dir = match self.working_dir {
+            Some(ref working_dir) => format!("{step_source_dir}/{working_dir}"),
+            None => step_source_dir,
         };
 
         // Setup build command
 
         let step_build_command = match self.entrypoint {
-            Some(entrypoint) => formatdoc! {r#"
+            Some(entrypoint) => formatdoc! {r"
                 mkdir -p $VORPAL_OUTPUT/bin
 
                 {bun_bin}/bun build --compile {entrypoint} --outfile {name}
 
-                cp {name} $VORPAL_OUTPUT/bin/{name}"#,
+                cp {name} $VORPAL_OUTPUT/bin/{name}",
                 name = self.name,
             },
-            None => formatdoc! {r#"
+            None => formatdoc! {r"
                 mkdir -p $VORPAL_OUTPUT
 
                 {bun_bin}/bun x tsc --project tsconfig.json --outDir dist
 
                 cp package.json $VORPAL_OUTPUT/
                 cp -r dist $VORPAL_OUTPUT/
-                cp -r node_modules $VORPAL_OUTPUT/"#,
+                cp -r node_modules $VORPAL_OUTPUT/",
             },
         };
 
         // Build step script
 
-        let step_script = formatdoc! {r#"
+        let step_script = formatdoc! {r"
             pushd {step_source_dir}
 
             {step_source_scripts}
 
             {bun_bin}/bun install --frozen-lockfile
 
-            {step_build_command}"#,
+            {step_build_command}",
             step_source_scripts = self.source_scripts.join("\n")
         };
 
@@ -171,7 +203,7 @@ impl<'a> TypeScript<'a> {
             step_environments.push(env.to_string());
         }
 
-        let mut step_artifacts = vec![bun.clone()];
+        let mut step_artifacts = vec![bun];
 
         step_artifacts.extend(self.artifacts);
 
@@ -182,10 +214,10 @@ impl<'a> TypeScript<'a> {
         let steps = vec![
             step::shell(
                 context,
-                step_artifacts,
-                step_environments,
+                &step_artifacts,
+                &step_environments,
                 step_script,
-                self.secrets,
+                &self.secrets,
             )
             .await?,
         ];
@@ -198,6 +230,7 @@ impl<'a> TypeScript<'a> {
     }
 }
 
+/// Development environment preloaded with the pinned `bun` runtime.
 pub struct TypeScriptDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
     environments: Vec<String>,
@@ -208,6 +241,8 @@ pub struct TypeScriptDevelopmentEnvironment<'a> {
 }
 
 impl<'a> TypeScriptDevelopmentEnvironment<'a> {
+    /// Creates a builder for a `TypeScript`/JavaScript development environment named `name`,
+    /// targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -225,16 +260,22 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         }
     }
 
+    /// Adds dependency artifacts made available in the environment.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts.extend(artifacts);
         self
     }
 
+    /// Adds extra environment variables.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<String>) -> Self {
         self.environments.extend(environments);
         self
     }
 
+    /// Adds environment secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
         for secret in secrets {
             if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
@@ -244,6 +285,13 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         self
     }
 
+    /// Builds the `TypeScript`/JavaScript development environment artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the `bun`
+    /// toolchain dependency fails, or if registering the environment artifact with the build
+    /// context fails.
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 

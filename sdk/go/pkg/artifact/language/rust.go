@@ -80,6 +80,10 @@ cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
 resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
 EOF
 
 target_paths=({{.TargetPaths}})
@@ -111,6 +115,10 @@ cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
 resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
 EOF
 {{end}}
 bin_names=({{.BinNames}})
@@ -377,7 +385,7 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 
 	// Get rust toolchain artifact
 
-	contextTarget := context.GetTarget()
+	contextTarget := context.GetTargetStr()
 
 	rustToolchain, err := artifact.RustToolchain(context)
 	if err != nil {
@@ -630,7 +638,7 @@ func (b *RustDevelopmentEnvironment) Build(context *config.ConfigContext) (*stri
 	artifacts = append(artifacts, rustToolchain)
 	artifacts = append(artifacts, b.artifacts...)
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	toolchainTarget, err := artifact.RustToolchainTarget(system)
 	if err != nil {

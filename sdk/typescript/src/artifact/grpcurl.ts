@@ -1,8 +1,8 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { ArtifactSource } from "../artifact.js";
 import { Go } from "./language/go.js";
 import { Protoc } from "./protoc.js";
+import { SYSTEMS } from "../system.js";
 
 /**
  * Builder for the grpcurl artifact.
@@ -38,14 +38,7 @@ export class Grpcurl {
     const buildDirectory = `${name}-${sourceVersion}`;
     const buildPath = `cmd/${name}/${name}.go`;
 
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
-
-    return new Go(name, systems)
+    return new Go(name, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withArtifacts([protoc])
       .withBuildDirectory(buildDirectory)

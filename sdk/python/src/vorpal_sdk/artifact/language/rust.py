@@ -111,6 +111,10 @@ def _build_vendor_script(
         lines.append("[workspace]")
         lines.append(f"members = [{quoted_packages}]")
         lines.append('resolver = "2"')
+        lines.append("")
+        lines.append("[workspace.lints.rust]")
+        lines.append("")
+        lines.append("[workspace.lints.clippy]")
         lines.append("EOF")
 
         lines.append("")
@@ -181,6 +185,10 @@ def _build_main_script(
         lines.append("[workspace]")
         lines.append(f"members = [{quoted_packages}]")
         lines.append('resolver = "2"')
+        lines.append("")
+        lines.append("[workspace.lints.rust]")
+        lines.append("")
+        lines.append("[workspace.lints.clippy]")
         lines.append("EOF")
 
     lines.append("")

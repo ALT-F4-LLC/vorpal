@@ -27,7 +27,7 @@ impl ArchiveBackend for LocalBackend {
     async fn pull(
         &self,
         request: &ArchivePullRequest,
-        tx: mpsc::Sender<Result<ArchivePullResponse, Status>>,
+        tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status> {
         let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
 

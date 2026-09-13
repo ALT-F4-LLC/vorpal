@@ -8,7 +8,7 @@ pub async fn create_sandbox_dir() -> Result<PathBuf> {
 
     create_dir_all(&dir_path)
         .await
-        .map_err(|e| anyhow!("failed to create temp dir: {}", e))?;
+        .map_err(|e| anyhow!("failed to create temp dir: {e}"))?;
 
     Ok(dir_path)
 }
@@ -22,7 +22,7 @@ pub async fn create_sandbox_file(extension: Option<&str>) -> Result<PathBuf> {
 
     File::create(&file_path)
         .await
-        .map_err(|e| anyhow!("failed to create temp file: {}", e))?;
+        .map_err(|e| anyhow!("failed to create temp file: {e}"))?;
 
     Ok(file_path)
 }

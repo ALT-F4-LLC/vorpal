@@ -128,6 +128,6 @@ pub fn script(
         find /usr/lib /usr/libexec -name \\*.la -delete
 
         find /usr -depth -name $VORPAL_TARGET\\* | xargs rm -rf",
-        unzip_version = unzip_version.replace(".", "").as_str(),
+        unzip_version = unzip_version.replace('.', "").as_str(),
     }
 }

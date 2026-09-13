@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use inquire::{InquireError, Select};
 use std::{collections::BTreeMap, path::Path};
 use tokio::fs::{create_dir_all, write};
@@ -87,7 +87,7 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
 
     for (template_path, content) in template {
         // Replace "example" with the provided name in file paths
-        let template_path = template_path.replace("cmd/example", &format!("cmd/{}", name));
+        let template_path = template_path.replace("cmd/example", &format!("cmd/{name}"));
 
         // Replace "example" with the provided name in file content
         let content = content.replace("example", name);
@@ -98,7 +98,7 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
         if let Some(parent) = file_path.parent() {
             create_dir_all(parent)
                 .await
-                .expect("failed to create directory");
+                .context("failed to create directory")?;
         }
 
         if file_path.exists() {
@@ -108,7 +108,7 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
 
         write(file_path, content)
             .await
-            .expect("failed to write file");
+            .context("failed to write file")?;
 
         info!("Created file: {}", template_path);
     }

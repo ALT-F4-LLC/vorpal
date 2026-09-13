@@ -16,7 +16,7 @@ func BuildVorpalProcess(context *config.ConfigContext) (*string, error) {
 	return artifact.NewProcess(
 		"vorpal-process",
 		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(*vorpal)),
-		SYSTEMS,
+		config.SYSTEMS,
 	).
 		WithArguments([]string{
 			"--registry",

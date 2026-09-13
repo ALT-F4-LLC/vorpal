@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from vorpal_sdk.api.artifact import artifact_pb2
+from vorpal_sdk.system import get_system_str
 
 _DEFAULT_PATH = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
 
@@ -214,17 +215,12 @@ def shell(
 ) -> artifact_pb2.ArtifactStep:
     """Dispatch to ``bash`` on Darwin, ``bwrap`` on Linux."""
     step_system = context.get_system()
+    step_system_str = get_system_str(step_system)
 
-    if step_system in (
-        artifact_pb2.AARCH64_DARWIN,
-        artifact_pb2.X8664_DARWIN,
-    ):
+    if step_system_str in ("aarch64-darwin", "x86_64-darwin"):
         return bash(artifacts, environments, secrets, script)
 
-    if step_system in (
-        artifact_pb2.AARCH64_LINUX,
-        artifact_pb2.X8664_LINUX,
-    ):
+    if step_system_str in ("aarch64-linux", "x86_64-linux"):
         from vorpal_sdk.artifact.linux_vorpal import linux_vorpal
 
         linux_vorpal_digest = linux_vorpal(context)

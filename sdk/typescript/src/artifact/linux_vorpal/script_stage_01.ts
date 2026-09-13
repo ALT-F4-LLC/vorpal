@@ -32,7 +32,13 @@ rm -rf \$VORPAL_SOURCE/binutils-pass-01
 mkdir -p \$VORPAL_SOURCE/gcc-pass-01/gcc-${gccVersion}/build
 pushd \$VORPAL_SOURCE/gcc-pass-01/gcc-${gccVersion}/build
 
-../configure --target="\$VORPAL_TARGET" --prefix="\$VORPAL_OUTPUT/tools" --with-glibc-version="2.42" --with-sysroot="\$VORPAL_OUTPUT" --with-newlib --without-headers --enable-default-pie --enable-default-ssp --disable-nls --disable-shared --disable-multilib --disable-threads --disable-libatomic --disable-libgomp --disable-libquadmath --disable-libssp --disable-libvtv --disable-libstdcxx --enable-languages="c,c++"
+# Pin the build-machine C++ dialect to gnu++17: gcc's own libcody uses
+# u8"..." literals as plain char*, which stop compiling once the host
+# compiler defaults to C++20 (char8_t) or later. The flag must ride in
+# CXX, not CXXFLAGS: libcody's configure appends -std=c++11 to CXX and
+# requires that append to win, and CXXFLAGS comes later on the command
+# line and would override it ("configure: error: C++11 is required").
+../configure CXX="g++ -std=gnu++17" --target="\$VORPAL_TARGET" --prefix="\$VORPAL_OUTPUT/tools" --with-glibc-version="2.42" --with-sysroot="\$VORPAL_OUTPUT" --with-newlib --without-headers --enable-default-pie --enable-default-ssp --disable-nls --disable-shared --disable-multilib --disable-threads --disable-libatomic --disable-libgomp --disable-libquadmath --disable-libssp --disable-libvtv --disable-libstdcxx --enable-languages="c,c++"
 
 make
 make install
