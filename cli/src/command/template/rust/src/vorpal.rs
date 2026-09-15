@@ -1,6 +1,9 @@
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::language::rust::{Rust, RustDevelopmentEnvironment},
+    artifact::{
+        language::rust::{Rust, RustDevelopmentEnvironment},
+        system::SYSTEMS,
+    },
     context::get_context,
 };
 
@@ -8,18 +11,17 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
+    // -> 1. Activate: `source "$(vorpal build --path 'example-dev')/bin/activate"`
+    // -> 2. Deactivate: `deactivate`
 
-    RustDevelopmentEnvironment::new("example-shell", systems)
+    RustDevelopmentEnvironment::new("example-dev", SYSTEMS)
         .build(&mut ctx)
         .await?;
 
-    Rust::new("example", systems)
+    // -> 1. Build: `vorpal build 'example'`
+    // -> 2. Run: `$(vorpal build --path 'example')/bin/example`
+
+    Rust::new("example", SYSTEMS)
         .with_bins(vec!["example"])
         .with_includes(vec!["src/main.rs", "Cargo.lock", "Cargo.toml"])
         .build(&mut ctx)

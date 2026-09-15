@@ -1,22 +1,22 @@
 import {
     ConfigContext,
+    SYSTEMS,
     TypeScript,
     TypeScriptDevelopmentEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-];
+// -> 1. Activate: `source "$(vorpal build --path 'example-dev')/bin/activate"`
+// -> 2. Deactivate: `deactivate`
 
-await new TypeScriptDevelopmentEnvironment("example-shell", systems)
+await new TypeScriptDevelopmentEnvironment("example-dev", SYSTEMS)
     .build(ctx);
 
-await new TypeScript("example", systems)
+// -> 1. Build: `vorpal build 'example'`
+// -> 2. Run: `$(vorpal build --path 'example')/bin/example`
+
+await new TypeScript("example", SYSTEMS)
     .withEntrypoint("src/main.ts")
     .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
     .build(ctx);

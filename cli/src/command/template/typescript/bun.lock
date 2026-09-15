@@ -5,7 +5,7 @@
     "": {
       "name": "example",
       "dependencies": {
-        "@altf4llc/vorpal-sdk": "0.4.0",
+        "@altf4llc/vorpal-sdk": "0.4.1",
       },
       "devDependencies": {
         "@types/bun": "1.3.14",
@@ -14,11 +14,11 @@
     },
   },
   "packages": {
-    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.4.0", "", { "dependencies": { "@bufbuild/protobuf": "2.12.0", "@grpc/grpc-js": "1.14.3", "smol-toml": "1.6.1" } }, "sha512-Lca+y23f2h/TUZ9fl3y+l5+riztvYQrWeiS0wIdm9sWW8crax+hcbSGWrm0z+IFNQvOjKFd0G7kIojC+GSwQkQ=="],
+    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.4.1", "", { "dependencies": { "@bufbuild/protobuf": "2.14.0", "@grpc/grpc-js": "1.14.4", "smol-toml": "1.6.1" } }, "sha512-4hitfvQlC9altVsVw4dOdGumYFnoyt0VeJiatihBUYOqwttT/M/uRZLC9Q/V/Mte1G7bp51gKLm9XftXKejEPw=="],
 
-    "@bufbuild/protobuf": ["@bufbuild/protobuf@2.12.0", "", {}, "sha512-B/XlCaFIP8LOwzo+bz5uFzATYokcwCKQcghqnlfwSmM5eX/qTkvDBnDPs+gXtX/RyjxJ4DRikECcPJbyALA8FA=="],
+    "@bufbuild/protobuf": ["@bufbuild/protobuf@2.14.0", "", {}, "sha512-C3UGsiCwSprE2NKIIFA3hCDlpXTMCAXRZuEVp88L1GY36Y41+rYL5fryE+nOFhp4p4JPQvdV8PQ4DWgHgeTE+w=="],
 
-    "@grpc/grpc-js": ["@grpc/grpc-js@1.14.3", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-Iq8QQQ/7X3Sac15oB6p0FmUg/klxQvXLeileoqrTRGJYLV+/9tubbr9ipz0GKHjmXVsgFPo/+W+2cA8eNcR+XA=="],
+    "@grpc/grpc-js": ["@grpc/grpc-js@1.14.4", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ=="],
 
     "@grpc/proto-loader": ["@grpc/proto-loader@0.8.1", "", { "dependencies": { "lodash.camelcase": "^4.3.0", "long": "^5.0.0", "protobufjs": "^7.5.5", "yargs": "^17.7.2" }, "bin": { "proto-loader-gen-types": "build/bin/proto-loader-gen-types.js" } }, "sha512-wtF6h+DY6M3YaDBPAmvuuA6jV8Sif9MjtOI5euKFWRgCDl5PeDpPsHR9u2l6St5ceY8AZgoNDww5+HvEsXFsGg=="],
 
