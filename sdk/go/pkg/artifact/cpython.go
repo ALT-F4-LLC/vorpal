@@ -11,18 +11,18 @@ const defaultPythonVersion = "3.13.14"
 
 // CpythonTarget maps a Vorpal ArtifactSystem to the python-build-standalone target triple.
 // Exported for reuse by uv and other python-toolchain artifacts.
-func CpythonTarget(system api.ArtifactSystem) (string, error) {
+func CpythonTarget(system string) (string, error) {
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN:
+	case "aarch64-darwin":
 		return "aarch64-apple-darwin", nil
-	case api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-linux":
 		return "aarch64-unknown-linux-gnu", nil
-	case api.ArtifactSystem_X8664_DARWIN:
+	case "x86_64-darwin":
 		return "x86_64-apple-darwin", nil
-	case api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-linux":
 		return "x86_64-unknown-linux-gnu", nil
 	default:
-		return "", fmt.Errorf("unsupported target system: %s", system.String())
+		return "", fmt.Errorf("unsupported target system: %s", system)
 	}
 }
 
@@ -40,7 +40,7 @@ func CpythonTarget(system api.ArtifactSystem) (string, error) {
 func Cpython(context *config.ConfigContext) (*string, error) {
 	name := "cpython"
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	sourceTarget, err := CpythonTarget(system)
 	if err != nil {
@@ -65,14 +65,7 @@ cp -prf "./source/%s/python/." "$VORPAL_OUTPUT/"
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:%s", name, sourceVersion)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)

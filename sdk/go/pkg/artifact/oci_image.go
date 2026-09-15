@@ -241,9 +241,9 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_LINUX,
+	systems := []string{
+		"aarch64-linux",
+		"x86_64-linux",
 	}
 
 	return NewArtifact(o.name, []*api.ArtifactStep{step}, systems).

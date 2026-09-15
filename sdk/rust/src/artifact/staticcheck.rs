@@ -1,18 +1,26 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{language::go::Go, ArtifactSource},
+    artifact::{language::go::Go, system, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
 
+/// Build-target `staticcheck` Go linter, built from source via the `Go` builder.
 #[derive(Default)]
 pub struct Staticcheck {}
 
 impl Staticcheck {
+    /// Creates a new `staticcheck` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `staticcheck` artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying `Go` build fails, including an unsupported target
+    /// system or a failure to register the source or artifact with the build context.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "staticcheck";
         let source_version = "2026.1";
@@ -23,9 +31,8 @@ impl Staticcheck {
 
         let build_directory = format!("go-tools-{source_version}");
         let build_path = format!("cmd/{name}/{name}.go");
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-        Go::new(name, systems)
+        Go::new(name, system::SYSTEMS)
             .with_alias(format!("{name}:{source_version}"))
             .with_build_directory(build_directory.as_str())
             .with_build_path(build_path.as_str())

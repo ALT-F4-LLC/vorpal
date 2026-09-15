@@ -154,22 +154,33 @@ fn generate_dockerfile() -> String {
     "}
 }
 
+/// Debian-based container rootfs used as the sandbox base for `linux-vorpal` builds.
 #[derive(Default)]
 pub struct LinuxDebian {}
 
 impl LinuxDebian {
+    /// Creates a new `LinuxDebian` builder.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `linux-debian` rootfs artifact by running the Dockerfile through buildx and
+    /// exporting the resulting container filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the intermediate `linux-debian-dockerfile` artifact fails to build,
+    /// or if any `docker buildx build`, `container create`, `container export`, `container
+    /// stop`, or `container rm` step fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let systems = vec![Aarch64Linux, X8664Linux];
 
         let steps = vec![step::bash(
-            vec![],
-            vec![],
-            vec![],
-            formatdoc! {"
+            &[],
+            &[],
+            &[],
+            &formatdoc! {"
                 cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
                 {version_script}
                 EOF
@@ -182,42 +193,43 @@ impl LinuxDebian {
             },
         )];
 
-        let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
-            .build(context)
-            .await?;
+        let dockerfile = Artifact::new(
+            "linux-debian-dockerfile",
+            steps,
+            vec![Aarch64Linux, X8664Linux],
+        )
+        .build(context)
+        .await?;
 
         let image = format!("altf4llc/debin:{dockerfile}");
 
         let steps = vec![
             step::docker(
-                vec![
+                &[
                     "buildx",
                     "build",
                     "--progress=plain",
                     format!("--tag={image}").as_str(),
                     &get_env_key(&dockerfile),
                 ],
-                vec![dockerfile.clone()],
+                std::slice::from_ref(&dockerfile),
             ),
+            step::docker(&["container", "create", "--name", &dockerfile, &image], &[]),
             step::docker(
-                vec!["container", "create", "--name", &dockerfile, &image],
-                vec![],
-            ),
-            step::docker(
-                vec![
+                &[
                     "container",
                     "export",
                     "--output",
                     "$VORPAL_WORKSPACE/debian.tar",
                     &dockerfile,
                 ],
-                vec![],
+                &[],
             ),
             step::bash(
-                vec![],
-                vec![],
-                vec![],
-                formatdoc! {"
+                &[],
+                &[],
+                &[],
+                &formatdoc! {"
                     ## extract files
                     tar -xf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
 
@@ -225,8 +237,8 @@ impl LinuxDebian {
                     echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
                 "},
             ),
-            step::docker(vec!["container", "stop", &dockerfile], vec![]),
-            step::docker(vec!["container", "rm", "--force", &dockerfile], vec![]),
+            step::docker(&["container", "stop", &dockerfile], &[]),
+            step::docker(&["container", "rm", "--force", &dockerfile], &[]),
         ];
 
         let name = "linux-debian";

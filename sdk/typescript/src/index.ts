@@ -54,6 +54,7 @@ export { TypeScriptDevelopmentEnvironment } from "./artifact/language/typescript
 
 // System utilities
 export {
+  SYSTEMS,
   getSystem,
   getSystemDefault,
   getSystemDefaultStr,

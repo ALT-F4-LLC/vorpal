@@ -1,6 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{cpython, step, Artifact, ArtifactSource},
+    artifact::{cpython, step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -39,15 +38,26 @@ impl Default for Uv {
 }
 
 impl Uv {
+    /// Creates a builder pinned to [`DEFAULT_UV_VERSION`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Overrides the `uv` release version to fetch.
+    #[must_use]
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
     }
 
+    /// Builds the `uv` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `CPython` target triple (via
+    /// [`cpython::target`]), or if registering the source or artifact with the build context
+    /// fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "uv";
 
@@ -66,10 +76,9 @@ impl Uv {
             chmod +x \"$VORPAL_OUTPUT/bin/uv\"
         "};
 
-        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];
 
-        Artifact::new(name, steps, systems)
+        Artifact::new(name, steps, system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{source_version}")])
             .with_sources(vec![source])
             .build(context)

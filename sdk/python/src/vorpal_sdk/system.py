@@ -17,6 +17,15 @@ if TYPE_CHECKING:
 else:
     ArtifactSystemInput: TypeAlias = str | int
 
+# Canonical list of every system string Vorpal supports, in a fixed order used
+# by callers that build artifacts/jobs/processes for all supported platforms.
+SYSTEMS: list[str] = [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
+]
+
 _STRING_TO_SYSTEM: dict[str, artifact_pb2.ArtifactSystem] = {
     "aarch64-darwin": artifact_pb2.AARCH64_DARWIN,
     "aarch64-linux": artifact_pb2.AARCH64_LINUX,

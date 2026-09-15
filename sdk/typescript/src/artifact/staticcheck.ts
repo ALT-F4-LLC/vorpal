@@ -1,7 +1,7 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import { ArtifactSource } from "../artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Go } from "./language/go.js";
+import { SYSTEMS } from "../system.js";
 
 /**
  * Builder for the staticcheck artifact.
@@ -20,14 +20,7 @@ export class Staticcheck {
     const buildDirectory = `go-tools-${sourceVersion}`;
     const buildPath = `cmd/${name}/${name}.go`;
 
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
-
-    return new Go(name, systems)
+    return new Go(name, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withBuildDirectory(buildDirectory)
       .withBuildPath(buildPath)

@@ -9,7 +9,7 @@ import (
 )
 
 func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
-	contextTarget := context.GetTarget()
+	contextTarget := context.GetTargetStr()
 
 	bun, err := artifact.Bun(context)
 	if err != nil {
@@ -102,7 +102,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	}
 
 	return artifact.
-		NewDevelopmentEnvironment("vorpal-shell", SYSTEMS).
+		NewDevelopmentEnvironment("vorpal-shell", config.SYSTEMS).
 		WithArtifacts([]*string{
 			bun,
 			cpython,

@@ -6,7 +6,7 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
     let systems = [
         "aarch64-darwin",
@@ -16,13 +16,13 @@ async fn main() -> Result<()> {
     ];
 
     RustDevelopmentEnvironment::new("example-shell", systems)
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     Rust::new("example", systems)
         .with_bins(vec!["example"])
         .with_includes(vec!["src/main.rs", "Cargo.lock", "Cargo.toml"])
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     ctx.run().await

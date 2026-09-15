@@ -265,9 +265,9 @@ func Shell(
 	script string,
 	secrets []*api.ArtifactStepSecret,
 ) (*api.ArtifactStep, error) {
-	stepSystem := context.GetTarget()
+	stepSystem := context.GetTargetStr()
 
-	if stepSystem == api.ArtifactSystem_AARCH64_DARWIN || stepSystem == api.ArtifactSystem_X8664_DARWIN {
+	if stepSystem == "aarch64-darwin" || stepSystem == "x86_64-darwin" {
 		return Bash(
 			artifacts,
 			environments,
@@ -276,7 +276,7 @@ func Shell(
 		)
 	}
 
-	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
+	if stepSystem == "aarch64-linux" || stepSystem == "x86_64-linux" {
 		linuxVorpal, err := linuxVorpalBuild(context)
 		if err != nil {
 			return nil, err

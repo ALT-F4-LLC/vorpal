@@ -1,4 +1,3 @@
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import { Artifact, getEnvKey } from "../artifact.js";
 import type { ConfigContext } from "../context.js";
 import { shell } from "./step.js";
@@ -9,6 +8,7 @@ import { RustSrc } from "./rust_src.js";
 import { RustStd } from "./rust_std.js";
 import { Rustc } from "./rustc.js";
 import { Rustfmt } from "./rustfmt.js";
+import { SYSTEMS } from "../system.js";
 
 import { rustToolchainTarget } from "./language/rust.js";
 export { rustToolchainTarget } from "./language/rust.js";
@@ -117,15 +117,9 @@ version = "12"
 EOF`;
 
     const steps = [await shell(context, artifacts, [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
     const name = "rust-toolchain";
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${toolchainVersion}`])
       .build(context);
   }

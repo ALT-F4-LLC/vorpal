@@ -6,6 +6,7 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
+/// Assembles a Vorpal-built rootfs and a set of artifact layers into an OCI container image.
 pub struct OciImage<'a> {
     aliases: Vec<&'a str>,
     artifacts: Vec<&'a str>,
@@ -16,6 +17,8 @@ pub struct OciImage<'a> {
 }
 
 impl<'a> OciImage<'a> {
+    /// Creates a builder for an OCI image named `name`, layered onto the artifact at `rootfs`.
+    #[must_use]
     pub fn new(name: &'a str, rootfs: &'a str) -> Self {
         Self {
             aliases: vec![],
@@ -27,26 +30,40 @@ impl<'a> OciImage<'a> {
         }
     }
 
+    /// Sets the image tag aliases to register alongside the built digest.
+    #[must_use]
     pub fn with_aliases(mut self, aliases: Vec<&'a str>) -> Self {
         self.aliases = aliases;
         self
     }
 
+    /// Sets the artifact digests to copy into the image as layers.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<&'a str>) -> Self {
         self.artifacts = artifacts;
         self
     }
 
+    /// Uses an existing `crane` artifact digest instead of building one.
+    #[must_use]
     pub fn with_crane(mut self, crane: &'a str) -> Self {
         self.crane = Some(crane);
         self
     }
 
+    /// Uses an existing `rsync` artifact digest instead of building one.
+    #[must_use]
     pub fn with_rsync(mut self, rsync: &'a str) -> Self {
         self.rsync = Some(rsync);
         self
     }
 
+    /// Builds the OCI image artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image name is not lowercase or contains characters outside
+    /// `a-z0-9/:.-_`, or if building `crane`, `rsync`, or the image artifact itself fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         if self.name != self.name.to_lowercase() {
             anyhow::bail!("container image name must be lowercase: '{}'", self.name);
@@ -196,7 +213,7 @@ impl<'a> OciImage<'a> {
             step_artifacts.push(artifact.to_string());
         }
 
-        let step = step::shell(context, step_artifacts, vec![], step_script, vec![]).await?;
+        let step = step::shell(context, &step_artifacts, &[], step_script, &[]).await?;
 
         let systems = vec![Aarch64Linux, X8664Linux];
 

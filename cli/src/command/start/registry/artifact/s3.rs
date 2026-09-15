@@ -10,17 +10,17 @@ use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 impl ArtifactBackend for S3Backend {
     async fn get_artifact(
         &self,
-        artifact_digest: String,
-        artifact_namespace: String,
+        artifact_digest: &str,
+        artifact_namespace: &str,
     ) -> Result<Artifact, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let artifact_key = get_artifact_config_key(&artifact_digest, &artifact_namespace);
+        let artifact_key = get_artifact_config_key(artifact_digest, artifact_namespace);
 
         client
             .head_object()
-            .bucket(bucket.clone())
+            .bucket(bucket)
             .key(&artifact_key)
             .send()
             .await
@@ -51,15 +51,15 @@ impl ArtifactBackend for S3Backend {
 
     async fn get_artifact_alias(
         &self,
-        name: String,
-        namespace: String,
+        name: &str,
+        namespace: &str,
         system: ArtifactSystem,
-        version: String,
+        version: &str,
     ) -> Result<String, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let alias_key = get_artifact_alias_key(&name, &namespace, system, &version);
+        let alias_key = get_artifact_alias_key(name, namespace, system, version);
 
         let mut alias_stream = client
             .get_object()
@@ -113,12 +113,12 @@ impl ArtifactBackend for S3Backend {
                 .map_err(|err| Status::internal(format!("failed to write config: {err}")))?;
         }
 
-        let aliases = [artifact.clone().aliases, artifact_aliases]
+        let artifact_system = artifact.target();
+
+        let aliases = [artifact.aliases, artifact_aliases]
             .concat()
             .into_iter()
             .collect::<Vec<String>>();
-
-        let artifact_system = artifact.target();
 
         for alias in aliases {
             let alias_name = alias.split(':').next().unwrap_or(&alias);
@@ -129,50 +129,43 @@ impl ArtifactBackend for S3Backend {
 
             if alias_name.len() > 255 {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' is too long (max 255 characters)",
-                    alias_name
+                    "alias name '{alias_name}' is too long (max 255 characters)"
                 )));
             }
 
             if alias_name.contains('/') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain '/'",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain '/'"
                 )));
             }
 
             if alias_name.contains('\\') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain '\\'",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain '\\'"
                 )));
             }
 
             if alias_name.contains('\0') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain null bytes",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain null bytes"
                 )));
             }
 
             if alias_name.starts_with('.') || alias_name.ends_with('.') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot start or end with '.'",
-                    alias_name
+                    "alias name '{alias_name}' cannot start or end with '.'"
                 )));
             }
 
             if alias_name.starts_with('-') || alias_name.ends_with('-') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot start or end with '-'",
-                    alias_name
+                    "alias name '{alias_name}' cannot start or end with '-'"
                 )));
             }
 
-            if alias_name.chars().any(|c| c.is_whitespace()) {
+            if alias_name.chars().any(char::is_whitespace) {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain whitespace",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain whitespace"
                 )));
             }
 
@@ -181,8 +174,7 @@ impl ArtifactBackend for S3Backend {
                 .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
             {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' can only contain alphanumeric characters, '_', '-', and '.'",
-                    alias_name
+                    "alias name '{alias_name}' can only contain alphanumeric characters, '_', '-', and '.'"
                 )));
             }
 

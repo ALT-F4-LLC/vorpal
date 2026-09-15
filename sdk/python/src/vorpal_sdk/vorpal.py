@@ -10,7 +10,6 @@ function mirrors its Rust/TS counterpart 1:1 for cross-SDK digest parity.
 
 from __future__ import annotations
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import (
     Argument,
     Artifact,
@@ -42,13 +41,7 @@ from vorpal_sdk.artifact.staticcheck import Staticcheck
 from vorpal_sdk.artifact.uv import Uv
 from vorpal_sdk.context import ConfigContext
 from vorpal_sdk.step import shell
-
-SYSTEMS = [
-    artifact_pb2.AARCH64_DARWIN,
-    artifact_pb2.AARCH64_LINUX,
-    artifact_pb2.X8664_DARWIN,
-    artifact_pb2.X8664_LINUX,
-]
+from vorpal_sdk.system import SYSTEMS
 
 
 def build_vorpal(context: ConfigContext) -> str:

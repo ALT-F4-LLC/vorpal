@@ -9,8 +9,8 @@ use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
-    async fn get_artifact(&self, digest: String, namespace: String) -> Result<Artifact, Status> {
-        let artifact_config_path = get_artifact_config_path(&digest, &namespace);
+    async fn get_artifact(&self, digest: &str, namespace: &str) -> Result<Artifact, Status> {
+        let artifact_config_path = get_artifact_config_path(digest, namespace);
 
         if !artifact_config_path.exists() {
             return Err(Status::not_found("config not found"));
@@ -28,12 +28,12 @@ impl ArtifactBackend for LocalBackend {
 
     async fn get_artifact_alias(
         &self,
-        name: String,
-        namespace: String,
+        name: &str,
+        namespace: &str,
         system: ArtifactSystem,
-        tag: String,
+        tag: &str,
     ) -> Result<String, Status> {
-        let artifact_alias_path = get_artifact_alias_path(&name, &namespace, system, &tag)
+        let artifact_alias_path = get_artifact_alias_path(name, namespace, system, tag)
             .map_err(|err| Status::internal(format!("failed to get artifact alias path: {err}")))?;
 
         if !artifact_alias_path.exists() {
@@ -44,7 +44,7 @@ impl ArtifactBackend for LocalBackend {
             .await
             .map_err(|err| Status::internal(format!("failed to read alias: {err}")))?;
 
-        let artifact_digest = String::from_utf8(artifact_digest.to_vec())
+        let artifact_digest = String::from_utf8(artifact_digest)
             .map_err(|err| Status::internal(format!("failed to parse alias: {err}")))?;
 
         Ok(artifact_digest)
@@ -79,12 +79,12 @@ impl ArtifactBackend for LocalBackend {
                 .map_err(|err| Status::internal(format!("failed to sanitize path: {err}")))?;
         }
 
-        let aliases = [artifact.clone().aliases, artifact_aliases]
+        let artifact_system = artifact.target();
+
+        let aliases = [artifact.aliases, artifact_aliases]
             .concat()
             .into_iter()
             .collect::<Vec<String>>();
-
-        let artifact_system = artifact.target();
 
         for alias in aliases {
             let alias_name = alias.split(':').next().unwrap_or(&alias);
@@ -97,50 +97,43 @@ impl ArtifactBackend for LocalBackend {
 
             if alias_name.len() > 255 {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' is too long (max 255 characters)",
-                    alias_name
+                    "alias name '{alias_name}' is too long (max 255 characters)"
                 )));
             }
 
             if alias_name.contains('/') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain '/'",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain '/'"
                 )));
             }
 
             if alias_name.contains('\\') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain '\\'",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain '\\'"
                 )));
             }
 
             if alias_name.contains('\0') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain null bytes",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain null bytes"
                 )));
             }
 
             if alias_name.starts_with('.') || alias_name.ends_with('.') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot start or end with '.'",
-                    alias_name
+                    "alias name '{alias_name}' cannot start or end with '.'"
                 )));
             }
 
             if alias_name.starts_with('-') || alias_name.ends_with('-') {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot start or end with '-'",
-                    alias_name
+                    "alias name '{alias_name}' cannot start or end with '-'"
                 )));
             }
 
-            if alias_name.chars().any(|c| c.is_whitespace()) {
+            if alias_name.chars().any(char::is_whitespace) {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' cannot contain whitespace",
-                    alias_name
+                    "alias name '{alias_name}' cannot contain whitespace"
                 )));
             }
 
@@ -149,8 +142,7 @@ impl ArtifactBackend for LocalBackend {
                 .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
             {
                 return Err(Status::invalid_argument(format!(
-                    "alias name '{}' can only contain alphanumeric characters, '_', '-', and '.'",
-                    alias_name
+                    "alias name '{alias_name}' can only contain alphanumeric characters, '_', '-', and '.'"
                 )));
             }
 
@@ -174,8 +166,7 @@ impl ArtifactBackend for LocalBackend {
 
             if alias_path.exists() {
                 return Err(Status::already_exists(format!(
-                    "alias '{}' already exists",
-                    alias
+                    "alias '{alias}' already exists"
                 )));
             }
 

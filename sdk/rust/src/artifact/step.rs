@@ -1,27 +1,26 @@
 use crate::{
     api,
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{self, Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{self, linux_vorpal::LinuxVorpal},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Builds a plain `bash` step that runs `script` with the given artifacts on
+/// `PATH` and the given extra environment variables set.
+#[must_use]
 pub fn bash(
-    artifacts: Vec<String>,
-    environments: Vec<String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
-    script: String,
+    artifacts: &[String],
+    environments: &[String],
+    secrets: &[api::artifact::ArtifactStepSecret],
+    script: &str,
 ) -> api::artifact::ArtifactStep {
-    let mut step_environments = vec![];
-
-    for environment in environments.iter() {
-        if environment.starts_with("PATH=") {
-            continue;
-        }
-
-        step_environments.push(environment.to_string());
-    }
+    let mut step_environments: Vec<String> = environments
+        .iter()
+        .filter(|environment| !environment.starts_with("PATH="))
+        .cloned()
+        .collect();
 
     let step_path_bins = artifacts
         .iter()
@@ -50,19 +49,34 @@ pub fn bash(
     "};
 
     artifact::ArtifactStep::new("bash")
-        .with_artifacts(artifacts)
+        .with_artifacts(artifacts.to_vec())
         .with_environments(step_environments)
-        .with_secrets(secrets)
+        .with_secrets(secrets.to_vec())
         .with_script(step_script)
         .build()
 }
 
+/// Builds a `bwrap` (bubblewrap) sandboxed step that runs `script` inside a
+/// minimal, isolated root filesystem assembled from `rootfs` and `artifacts`.
+///
+/// # Errors
+///
+/// Currently infallible; the `Result` is retained so callers can treat
+/// `bwrap` and [`shell`] uniformly.
+#[expect(
+    clippy::unused_async,
+    reason = "public SDK API called as `.await` from every artifact module; removing async is a breaking change"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "assembles one flat bwrap argument list; splitting it would scatter one linear construction across helpers without adding clarity"
+)]
 pub async fn bwrap(
-    arguments: Vec<&str>,
-    artifacts: Vec<String>,
-    environments: Vec<String>,
-    rootfs: Option<String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    arguments: &[&str],
+    artifacts: &[String],
+    environments: &[String],
+    rootfs: Option<&str>,
+    secrets: &[api::artifact::ArtifactStepSecret],
     script: String,
 ) -> Result<api::artifact::ArtifactStep> {
     // Setup arguments
@@ -102,54 +116,46 @@ pub async fn bwrap(
 
     // Setup artifacts
 
-    let mut step_artifacts = vec![];
+    let mut step_artifacts: Vec<String> = vec![];
 
     if let Some(rootfs) = rootfs {
-        let rootfs_env = artifact::get_env_key(&rootfs);
-        let rootfs_bin = format!("{rootfs_env}/bin");
-        let rootfs_etc = format!("{rootfs_env}/etc");
-        let rootfs_lib = format!("{rootfs_env}/lib");
-        let rootfs_lib64 = format!("{rootfs_env}/lib64");
-        let rootfs_sbin = format!("{rootfs_env}/sbin");
-        let rootfs_usr = format!("{rootfs_env}/usr");
+        let rootfs_env = artifact::get_env_key(rootfs);
 
         let rootfs_args = vec![
             "--ro-bind".to_string(),
-            rootfs_bin,
+            format!("{rootfs_env}/bin"),
             "/bin".to_string(),
             "--ro-bind".to_string(),
-            rootfs_etc,
+            format!("{rootfs_env}/etc"),
             "/etc".to_string(),
             "--ro-bind".to_string(),
-            rootfs_lib,
+            format!("{rootfs_env}/lib"),
             "/lib".to_string(),
             "--ro-bind-try".to_string(),
-            rootfs_lib64,
+            format!("{rootfs_env}/lib64"),
             "/lib64".to_string(),
             "--ro-bind".to_string(),
-            rootfs_sbin,
+            format!("{rootfs_env}/sbin"),
             "/sbin".to_string(),
             "--ro-bind".to_string(),
-            rootfs_usr,
+            format!("{rootfs_env}/usr"),
             "/usr".to_string(),
         ];
 
         step_arguments.extend(rootfs_args);
-        step_artifacts.push(rootfs);
+        step_artifacts.push(rootfs.to_string());
     }
 
     // Setup artifact arguments
 
-    for artifact in artifacts.into_iter() {
-        step_artifacts.push(artifact);
-    }
+    step_artifacts.extend_from_slice(artifacts);
 
-    for artifact in step_artifacts.iter() {
+    for artifact in &step_artifacts {
         step_arguments.push("--ro-bind".to_string());
         step_arguments.push(artifact::get_env_key(artifact));
         step_arguments.push(artifact::get_env_key(artifact));
         step_arguments.push("--setenv".to_string());
-        step_arguments.push(artifact::get_env_key(artifact).replace("$", ""));
+        step_arguments.push(artifact::get_env_key(artifact).replace('$', ""));
         step_arguments.push(artifact::get_env_key(artifact));
     }
 
@@ -173,7 +179,7 @@ pub async fn bwrap(
     step_arguments.push("PATH".to_string());
     step_arguments.push(step_path);
 
-    for env in environments.iter() {
+    for env in environments {
         let Some((key, value)) = env.split_once('=') else {
             continue;
         };
@@ -189,8 +195,8 @@ pub async fn bwrap(
 
     // Setup arguments
 
-    for argument in arguments.into_iter() {
-        step_arguments.push(argument.to_string());
+    for argument in arguments {
+        step_arguments.push((*argument).to_string());
     }
 
     // Setup script
@@ -205,24 +211,37 @@ pub async fn bwrap(
     // Setup step
 
     let step = artifact::ArtifactStep::new("bwrap")
-        .with_arguments(step_arguments.iter().map(|x| x.as_str()).collect())
+        .with_arguments(
+            step_arguments
+                .iter()
+                .map(std::string::String::as_str)
+                .collect(),
+        )
         .with_artifacts(step_artifacts)
         .with_environments(vec![
             "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
         ])
-        .with_secrets(secrets)
+        .with_secrets(secrets.to_vec())
         .with_script(step_script)
         .build();
 
     Ok(step)
 }
 
+/// Builds a step appropriate for the context's target system: a plain `bash`
+/// step on Darwin, or a `bwrap`-sandboxed step backed by `linux-vorpal` on
+/// Linux.
+///
+/// # Errors
+///
+/// Returns an error if the context's target system is [`ArtifactSystem::UnknownSystem`],
+/// or if building the `linux-vorpal` root filesystem for a Linux target fails.
 pub async fn shell(
     context: &mut ConfigContext,
-    artifacts: Vec<String>,
-    environments: Vec<String>,
+    artifacts: &[String],
+    environments: &[String],
     script: String,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    secrets: &[api::artifact::ArtifactStepSecret],
 ) -> Result<api::artifact::ArtifactStep> {
     // Setup target
 
@@ -231,25 +250,25 @@ pub async fn shell(
     // Setup step
 
     let step = match step_system {
-        Aarch64Darwin | X8664Darwin => {
-            bash(artifacts, environments.clone(), secrets, script.to_string())
-        }
+        Aarch64Darwin | X8664Darwin => bash(artifacts, environments, secrets, &script),
 
         Aarch64Linux | X8664Linux => {
             let linux_vorpal = LinuxVorpal::new().build(context).await?;
 
             bwrap(
-                vec![],
+                &[],
                 artifacts,
                 environments,
-                Some(linux_vorpal),
+                Some(linux_vorpal.as_str()),
                 secrets,
                 script,
             )
             .await?
         }
 
-        _ => bail!("unsupported system: {}", step_system.as_str_name()),
+        ArtifactSystem::UnknownSystem => {
+            bail!("unsupported system: {}", step_system.as_str_name())
+        }
     };
 
     Ok(step)
@@ -257,10 +276,13 @@ pub async fn shell(
 
 // TODO: Add support for secrets with docker step
 
-pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> api::artifact::ArtifactStep {
+/// Builds a `docker` step that runs the given `docker` CLI arguments against
+/// the given artifacts.
+#[must_use]
+pub fn docker(arguments: &[&str], artifacts: &[String]) -> api::artifact::ArtifactStep {
     artifact::ArtifactStep::new("docker")
-        .with_arguments(arguments)
-        .with_artifacts(artifacts)
+        .with_arguments(arguments.to_vec())
+        .with_artifacts(artifacts.to_vec())
         .with_environments(vec![
             "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
         ])

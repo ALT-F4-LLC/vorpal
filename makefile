@@ -44,7 +44,7 @@ format:
 	cargo fmt --all --check
 
 lint:
-	cargo clippy $(CARGO_FLAGS) -- --deny warnings
+	cargo clippy $(CARGO_FLAGS) --all-targets -- --deny warnings
 
 build:
 	cargo build $(CARGO_FLAGS)

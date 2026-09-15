@@ -113,7 +113,7 @@ pub fn unzip_patch_gcc14(version: &str) -> api::artifact::ArtifactSource {
 
 pub fn unzip(version: &str) -> api::artifact::ArtifactSource {
     let name = "unzip";
-    let version = version.replace(".", "");
+    let version = version.replace('.', "");
     let path = format!("https://sdk.vorpal.build/source/unzip{version}.tar.gz");
 
     ArtifactSource::new(name, path.as_str()).build()

@@ -1,9 +1,4 @@
-use vorpal_sdk::api::artifact::{
-    ArtifactSystem,
-    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-};
-
-pub const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+pub use vorpal_sdk::artifact::system::SYSTEMS;
 
 pub mod vorpal;
 pub mod vorpal_container_image;

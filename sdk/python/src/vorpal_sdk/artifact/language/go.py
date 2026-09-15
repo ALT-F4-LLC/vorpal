@@ -28,7 +28,7 @@ from vorpal_sdk.artifact.protoc_gen_go import ProtocGenGo
 from vorpal_sdk.artifact.protoc_gen_go_grpc import ProtocGenGoGrpc
 from vorpal_sdk.artifact.staticcheck import Staticcheck
 from vorpal_sdk.step import shell
-from vorpal_sdk.system import ArtifactSystemInput
+from vorpal_sdk.system import ArtifactSystemInput, get_system_str
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -36,18 +36,20 @@ if TYPE_CHECKING:
 
 def get_goos(system: artifact_pb2.ArtifactSystem) -> str:
     """Map an ArtifactSystem to the Go ``GOOS`` value."""
-    if system in (artifact_pb2.AARCH64_DARWIN, artifact_pb2.X8664_DARWIN):
+    system_str = get_system_str(system)
+    if system_str in ("aarch64-darwin", "x86_64-darwin"):
         return "darwin"
-    if system in (artifact_pb2.AARCH64_LINUX, artifact_pb2.X8664_LINUX):
+    if system_str in ("aarch64-linux", "x86_64-linux"):
         return "linux"
     raise ValueError(f"unsupported 'go' system: {system}")
 
 
 def get_goarch(system: artifact_pb2.ArtifactSystem) -> str:
     """Map an ArtifactSystem to the Go ``GOARCH`` value."""
-    if system in (artifact_pb2.AARCH64_DARWIN, artifact_pb2.AARCH64_LINUX):
+    system_str = get_system_str(system)
+    if system_str in ("aarch64-darwin", "aarch64-linux"):
         return "arm64"
-    if system in (artifact_pb2.X8664_DARWIN, artifact_pb2.X8664_LINUX):
+    if system_str in ("x86_64-darwin", "x86_64-linux"):
         return "amd64"
     raise ValueError(f"unsupported 'go' system: {system}")
 

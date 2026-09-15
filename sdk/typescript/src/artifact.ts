@@ -3,8 +3,8 @@ import type {
   ArtifactSource as ArtifactSourceMsg,
   ArtifactStep as ArtifactStepMsg,
   ArtifactStepSecret,
+  ArtifactSystem,
 } from "./api/artifact/artifact.js";
-import { ArtifactSystem } from "./api/artifact/artifact.js";
 import { Crane } from "./artifact/crane.js";
 import { Rsync } from "./artifact/rsync.js";
 import { shell } from "./artifact/step.js";
@@ -1077,10 +1077,7 @@ echo "Created OCI image \${OCI_IMAGE_NAME}:latest"`;
 
     const step = await shell(context, stepArtifacts, [], stepScript, []);
 
-    const systems = [
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_LINUX,
-    ];
+    const systems = ["aarch64-linux", "x86_64-linux"];
 
     return new Artifact(this._name, [step], systems)
       .withAliases(this._aliases)

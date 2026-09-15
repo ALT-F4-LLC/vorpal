@@ -779,7 +779,7 @@ echo "Created OCI image ${{OCI_IMAGE_NAME}}:latest\""""
 
         step_artifacts = [crane, rsync, self._rootfs, *self._artifacts]
         step = shell(context, step_artifacts, [], step_script, [])
-        systems = [artifact_pb2.AARCH64_LINUX, artifact_pb2.X8664_LINUX]
+        systems = ["aarch64-linux", "x86_64-linux"]
         return (
             Artifact(self._name, [step], systems)
             .with_aliases(self._aliases)

@@ -45,20 +45,13 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     // Define your artifacts here
 
     ctx.Run()
 }
 ```
 
-Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context. Target systems are canonical system strings, available as `config.SYSTEMS` for every supported platform. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -84,14 +77,7 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
-    _, err := language.NewGo("my-app", systems).
+    _, err := language.NewGo("my-app", config.SYSTEMS).
         WithBuildDirectory("cmd/my-app").
         WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
         Build(ctx)
@@ -145,19 +131,12 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     protoc, err := artifact.Protoc(ctx)
     if err != nil {
         log.Fatalf("error building protoc: %v", err)
     }
 
-    _, err = language.NewGo("my-app", systems).
+    _, err = language.NewGo("my-app", config.SYSTEMS).
         WithArtifacts([]*string{protoc}).
         WithBuildDirectory("cmd/my-app").
         WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
@@ -191,19 +170,12 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     protoc, err := artifact.Protoc(ctx)
     if err != nil {
         log.Fatalf("error building protoc: %v", err)
     }
 
-    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
+    language.NewGoDevelopmentEnvironment("my-project-shell", config.SYSTEMS).
         WithArtifacts([]*string{protoc}).
         WithEnvironments([]string{"CGO_ENABLED=0"}).
         Build(ctx)
@@ -256,19 +228,12 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     protoc, err := artifact.Protoc(ctx)
     if err != nil {
         log.Fatalf("error building protoc: %v", err)
     }
 
-    myApp, err := language.NewGo("my-app", systems).
+    myApp, err := language.NewGo("my-app", config.SYSTEMS).
         WithArtifacts([]*string{protoc}).
         WithBuildDirectory("cmd/my-app").
         WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
@@ -281,7 +246,7 @@ func main() {
         %s/bin/my-app --version
     `, artifact.GetEnvKey(*myApp))
 
-    artifact.NewJob("my-job", script, systems).
+    artifact.NewJob("my-job", script, config.SYSTEMS).
         WithArtifacts([]*string{myApp}).
         Build(ctx)
 
@@ -316,19 +281,12 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     protoc, err := artifact.Protoc(ctx)
     if err != nil {
         log.Fatalf("error building protoc: %v", err)
     }
 
-    myApp, err := language.NewGo("my-app", systems).
+    myApp, err := language.NewGo("my-app", config.SYSTEMS).
         WithArtifacts([]*string{protoc}).
         WithBuildDirectory("cmd/my-app").
         WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
@@ -340,7 +298,7 @@ func main() {
     artifact.NewProcess(
         "my-server",
         fmt.Sprintf("%s/bin/my-server", artifact.GetEnvKey(*myApp)),
-        systems,
+        config.SYSTEMS,
     ).
         WithArguments([]string{"--port", "8080"}).
         WithArtifacts([]*string{myApp}).
@@ -378,14 +336,7 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
-    myApp, err := language.NewGo("my-app", systems).
+    myApp, err := language.NewGo("my-app", config.SYSTEMS).
         WithBuildDirectory("cmd/my-app").
         WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
         Build(ctx)
@@ -393,7 +344,7 @@ func main() {
         log.Fatalf("error building: %v", err)
     }
 
-    artifact.NewUserEnvironment("my-home", systems).
+    artifact.NewUserEnvironment("my-home", config.SYSTEMS).
         WithArtifacts([]*string{myApp}).
         WithSymlinks(map[string]string{fmt.Sprintf("%s/bin/my-app", artifact.GetEnvKey(*myApp)): "$HOME/.vorpal/bin/my-app"}).
         Build(ctx)
@@ -430,13 +381,6 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
     step := artifact.NewArtifactStep("docker").
         WithArguments([]string{
             "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
@@ -446,7 +390,7 @@ func main() {
         Build()
 
     artifact.NewArtifact("example-docker",
-        []*api.ArtifactStep{step}, systems).Build(ctx)
+        []*api.ArtifactStep{step}, config.SYSTEMS).Build(ctx)
 
     ctx.Run()
 }

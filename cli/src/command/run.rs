@@ -6,6 +6,7 @@ use crate::command::store::{
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
+use std::fmt::Write as _;
 use std::{
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
@@ -45,7 +46,7 @@ async fn get_alias_from_registry(
     let mut request = Request::new(request);
     let request_auth_header = client_auth_header(registry)
         .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+        .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
     if let Some(header) = request_auth_header {
         request.metadata_mut().insert("authorization", header);
@@ -55,7 +56,7 @@ async fn get_alias_from_registry(
         if status.code() == Code::NotFound {
             anyhow!("alias not found in registry")
         } else {
-            anyhow!("registry error: {:?}", status)
+            anyhow!("registry error: {status:?}")
         }
     })?;
 
@@ -112,7 +113,7 @@ async fn pull_artifact_from_registry(
         let mut request = Request::new(request);
         let request_auth_header = client_auth_header(registry)
             .await
-            .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+            .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
         if let Some(header) = request_auth_header {
             request.metadata_mut().insert("authorization", header);
@@ -126,7 +127,7 @@ async fn pull_artifact_from_registry(
                     bail!("artifact not found in registry");
                 }
 
-                bail!("registry pull error: {:?}", status);
+                bail!("registry pull error: {status:?}");
             }
         };
 
@@ -148,7 +149,7 @@ async fn pull_artifact_from_registry(
                         bail!("artifact not found in registry");
                     }
 
-                    bail!("registry stream error: {:?}", status);
+                    bail!("registry stream error: {status:?}");
                 }
             }
         }
@@ -217,10 +218,7 @@ fn validate_binary_name(binary_name: &str) -> Result<()> {
     }
 
     if binary_name.starts_with('.') {
-        bail!(
-            "invalid binary name '{}': must not start with '.'",
-            binary_name,
-        );
+        bail!("invalid binary name '{binary_name}': must not start with '.'",);
     }
 
     Ok(())
@@ -262,7 +260,7 @@ async fn resolve_binary(output_path: &Path, binary_name: &str) -> Result<PathBuf
             } else {
                 message.push_str("\n\nAvailable binaries:");
                 for name in &available {
-                    message.push_str(&format!("\n\t{name}"));
+                    write!(message, "\n\t{name}")?;
                 }
                 message.push_str("\n\nUse --bin <name> to select a different binary.");
             }
@@ -289,20 +287,15 @@ async fn resolve_binary(output_path: &Path, binary_name: &str) -> Result<PathBuf
     Ok(binary_path)
 }
 
-pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str) -> Result<()> {
-    let alias_parsed = parse_artifact_alias(alias)?;
-    let system = get_system_default()?;
-
-    debug!(
-        "run: name={}, namespace={}, system={}, tag={}",
-        alias_parsed.name,
-        alias_parsed.namespace,
-        system.as_str_name(),
-        alias_parsed.tag,
-    );
-
-    // Step 1: Resolve artifact alias to digest
-
+/// Resolves an artifact alias to its local alias file, checking the registry
+/// and caching the result locally when the alias file does not exist yet.
+/// Returns the resolved digest.
+async fn resolve_alias_digest(
+    alias: &str,
+    alias_parsed: &vorpal_sdk::context::ArtifactAlias,
+    system: ArtifactSystem,
+    registry: &str,
+) -> Result<String> {
     let alias_path = get_artifact_alias_path(
         &alias_parsed.name,
         &alias_parsed.namespace,
@@ -361,7 +354,24 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
         }
     }
 
-    let artifact_digest = read_alias_digest(&alias_path, &alias_parsed.name).await?;
+    read_alias_digest(&alias_path, &alias_parsed.name).await
+}
+
+pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str) -> Result<()> {
+    let alias_parsed = parse_artifact_alias(alias)?;
+    let system = get_system_default()?;
+
+    debug!(
+        "run: name={}, namespace={}, system={}, tag={}",
+        alias_parsed.name,
+        alias_parsed.namespace,
+        system.as_str_name(),
+        alias_parsed.tag,
+    );
+
+    // Step 1: Resolve artifact alias to digest
+
+    let artifact_digest = resolve_alias_digest(alias, &alias_parsed, system, registry).await?;
 
     debug!("run: resolved digest={artifact_digest}");
 

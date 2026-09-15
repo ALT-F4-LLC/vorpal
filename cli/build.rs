@@ -1,3 +1,6 @@
+//! Build script that embeds the git commit hash and build timestamp into the
+//! binary via `VORPAL_GIT_HASH` and `VORPAL_BUILD_TIME`.
+
 use std::process::Command;
 
 fn run_command(program: &str, args: &[&str]) -> String {

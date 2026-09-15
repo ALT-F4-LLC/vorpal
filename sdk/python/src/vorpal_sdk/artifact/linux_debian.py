@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import Artifact, get_env_key
 from vorpal_sdk.step import bash, docker
 
@@ -137,7 +136,7 @@ class LinuxDebian:
     """Builder for the Debian rootfs artifact used to build linux-vorpal."""
 
     def build(self, context: ConfigContext) -> str:
-        systems = [artifact_pb2.AARCH64_LINUX, artifact_pb2.X8664_LINUX]
+        systems = ["aarch64-linux", "x86_64-linux"]
 
         script = (
             "cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"\n"

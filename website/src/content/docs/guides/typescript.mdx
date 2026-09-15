@@ -52,19 +52,12 @@ import { ConfigContext } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
 // Define your artifacts here
 
 await ctx.run();
 ```
 
-Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context. Target systems are canonical system strings, available as `SYSTEMS` for every supported platform. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -79,18 +72,11 @@ Use the `TypeScript` builder to compile a TypeScript project into a cross-platfo
 :::
 
 ```typescript title="vorpal.ts" {1,12-15}
-import { ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+import { ConfigContext, SYSTEMS, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
-await new TypeScript("my-app", systems)
+await new TypeScript("my-app", SYSTEMS)
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
   .build(ctx);
@@ -129,21 +115,15 @@ Build artifacts like `Protoc` and pass them as dependencies to your language art
 import {
   ConfigContext,
   Protoc,
+  SYSTEMS,
   TypeScript,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
 const protoc = await new Protoc().build(ctx);
 
-await new TypeScript("my-app", systems)
+await new TypeScript("my-app", SYSTEMS)
   .withArtifacts([protoc])
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
@@ -164,21 +144,15 @@ Create a portable development shell with pinned tools, environment variables, an
 import {
   ConfigContext,
   Protoc,
+  SYSTEMS,
   TypeScriptDevelopmentEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
 const protoc = await new Protoc().build(ctx);
 
-await new TypeScriptDevelopmentEnvironment("my-project-shell", systems)
+await new TypeScriptDevelopmentEnvironment("my-project-shell", SYSTEMS)
   .withArtifacts([protoc])
   .withEnvironments(["NODE_ENV=development", "LOG_LEVEL=debug"])
   .build(ctx);
@@ -220,22 +194,16 @@ import {
   ConfigContext,
   Job,
   Protoc,
+  SYSTEMS,
   TypeScript,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
 const protoc = await new Protoc().build(ctx);
 
-const myApp = await new TypeScript("my-app", systems)
+const myApp = await new TypeScript("my-app", SYSTEMS)
   .withArtifacts([protoc])
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
@@ -243,7 +211,7 @@ const myApp = await new TypeScript("my-app", systems)
 
 const script = `${getEnvKey(myApp)}/bin/my-app --version`;
 
-await new Job("my-job", script, systems)
+await new Job("my-job", script, SYSTEMS)
   .withArtifacts([myApp])
   .build(ctx);
 
@@ -268,22 +236,16 @@ import {
   ConfigContext,
   Process,
   Protoc,
+  SYSTEMS,
   TypeScript,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
 const protoc = await new Protoc().build(ctx);
 
-const myApp = await new TypeScript("my-app", systems)
+const myApp = await new TypeScript("my-app", SYSTEMS)
   .withArtifacts([protoc])
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
@@ -292,7 +254,7 @@ const myApp = await new TypeScript("my-app", systems)
 await new Process(
   "my-server",
   `${getEnvKey(myApp)}/bin/my-server`,
-  systems,
+  SYSTEMS,
 )
   .withArguments(["--port", "8080"])
   .withArtifacts([myApp])
@@ -318,6 +280,7 @@ Install tools into your user-wide environment with symlinks:
 ```typescript title="vorpal.ts"
 import {
   ConfigContext,
+  SYSTEMS,
   TypeScript,
   UserEnvironment,
   getEnvKey,
@@ -325,19 +288,12 @@ import {
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
-const myApp = await new TypeScript("my-app", systems)
+const myApp = await new TypeScript("my-app", SYSTEMS)
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
   .build(ctx);
 
-await new UserEnvironment("my-home", systems)
+await new UserEnvironment("my-home", SYSTEMS)
   .withArtifacts([myApp])
   .withSymlinks([[`${getEnvKey(myApp)}/bin/my-app`, "$HOME/.vorpal/bin/my-app"]])
   .build(ctx);
@@ -366,16 +322,10 @@ import {
   ConfigContext,
   Artifact,
   ArtifactStep,
+  SYSTEMS,
 } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
-
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
 
 const step = new ArtifactStep("docker")
   .withArguments([
@@ -384,7 +334,7 @@ const step = new ArtifactStep("docker")
   ])
   .build();
 
-await new Artifact("example-docker", [step], systems)
+await new Artifact("example-docker", [step], SYSTEMS)
   .build(ctx);
 
 await ctx.run();

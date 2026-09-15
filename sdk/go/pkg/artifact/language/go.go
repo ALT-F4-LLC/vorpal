@@ -50,13 +50,13 @@ go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildFlags}} 
 
 go clean -modcache`
 
-func GetGOOS(target api.ArtifactSystem) (*string, error) {
+func GetGOOS(target string) (*string, error) {
 	var goos string
 
 	switch target {
-	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_X8664_DARWIN:
+	case "aarch64-darwin", "x86_64-darwin":
 		goos = "darwin"
-	case api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX:
+	case "aarch64-linux", "x86_64-linux":
 		goos = "linux"
 	default:
 		return nil, fmt.Errorf("unsupported target system: %s", target)
@@ -65,13 +65,13 @@ func GetGOOS(target api.ArtifactSystem) (*string, error) {
 	return &goos, nil
 }
 
-func GetGOARCH(target api.ArtifactSystem) (*string, error) {
+func GetGOARCH(target string) (*string, error) {
 	var goarch string
 
 	switch target {
-	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-darwin", "aarch64-linux":
 		goarch = "arm64"
-	case api.ArtifactSystem_X8664_DARWIN, api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-darwin", "x86_64-linux":
 		goarch = "amd64"
 	default:
 		return nil, fmt.Errorf("unsupported target system: %s", target)
@@ -237,7 +237,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 	artifacts = append(artifacts, goBin)
 	artifacts = append(artifacts, builder.artifacts...)
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	goarch, err := GetGOARCH(system)
 	if err != nil {
@@ -394,7 +394,7 @@ func (b *GoDevelopmentEnvironment) Build(context *config.ConfigContext) (*string
 	artifacts = append(artifacts, staticcheck)
 	artifacts = append(artifacts, b.artifacts...)
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	goarch, err := GetGOARCH(system)
 	if err != nil {

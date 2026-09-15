@@ -6,7 +6,7 @@ import (
 )
 
 func Vorpal(context *config.ConfigContext) (*string, error) {
-	return language.NewRust("vorpal", SYSTEMS).
+	return language.NewRust("vorpal", config.SYSTEMS).
 		WithBins([]string{"vorpal"}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).

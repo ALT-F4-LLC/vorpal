@@ -129,7 +129,7 @@ func BuildVorpalRelease(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to execute script template: %w", scriptErr)
 	}
 
-	return artifact.NewJob("vorpal-release", script.String(), SYSTEMS).
+	return artifact.NewJob("vorpal-release", script.String(), config.SYSTEMS).
 		WithArtifacts([]*string{
 			aarch64Darwin,
 			aarch64Linux,

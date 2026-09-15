@@ -27,7 +27,7 @@ pub fn get_lock_path() -> PathBuf {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("vorpal");
-    socket_path.with_file_name(format!("{}.lock", lock_name))
+    socket_path.with_file_name(format!("{lock_name}.lock"))
 }
 
 pub fn get_root_key_dir_path() -> PathBuf {
@@ -94,6 +94,11 @@ pub fn get_artifact_alias_dir_path(namespace: &str, system: ArtifactSystem) -> P
         .join(system.as_str_name())
 }
 
+/// Returns the path for the artifact alias `name`/`tag` under `namespace` and `system`.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the caller in cli/src/command/run.rs propagates the Result with `?`; changing the signature is out of scope for this pass"
+)]
 pub fn get_artifact_alias_path(
     name: &str,
     namespace: &str,
@@ -183,10 +188,9 @@ pub fn get_file_paths(
             let entry = entry.ok()?;
             let path = entry.path();
 
-            if excludes_paths
-                .iter()
-                .any(|i| path.strip_prefix(source_path).unwrap().starts_with(i))
-            {
+            let relative_path = path.strip_prefix(source_path).ok()?;
+
+            if excludes_paths.iter().any(|i| relative_path.starts_with(i)) {
                 return None;
             }
 
@@ -201,9 +205,11 @@ pub fn get_file_paths(
 
     if !includes_paths.is_empty() {
         files.retain(|i| {
-            includes_paths
-                .iter()
-                .any(|j| i.strip_prefix(source_path).unwrap().starts_with(j))
+            let Ok(relative_path) = i.strip_prefix(source_path) else {
+                return false;
+            };
+
+            includes_paths.iter().any(|j| relative_path.starts_with(j))
         });
     }
 
@@ -221,7 +227,10 @@ pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
 
     if path.is_symlink() {
         set_symlink_file_times(path, epoc, epoc).map_err(|e| {
-            anyhow::anyhow!("failed to set symlink file times for {:?}: {}", path, e)
+            anyhow::anyhow!(
+                "failed to set symlink file times for {}: {e}",
+                path.display()
+            )
         })?;
     } else {
         // Ensure the file/directory is writable before modifying timestamps.
@@ -236,14 +245,17 @@ pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
                     let mut perms = meta.permissions();
                     perms.set_mode(mode | 0o200);
                     std::fs::set_permissions(path, perms).map_err(|e| {
-                        anyhow::anyhow!("failed to add write permission for {:?}: {}", path, e)
+                        anyhow::anyhow!(
+                            "failed to add write permission for {}: {e}",
+                            path.display()
+                        )
                     })?;
                 }
             }
         }
 
         set_file_times(path, epoc, epoc)
-            .map_err(|e| anyhow::anyhow!("failed to set file times for {:?}: {}", path, e))?;
+            .map_err(|e| anyhow::anyhow!("failed to set file times for {}: {e}", path.display()))?;
     }
 
     Ok(())
@@ -264,28 +276,52 @@ pub async fn copy_files(
         }
 
         if !src.exists() {
-            bail!("source file not found: {:?}", src);
+            bail!("source file not found: {}", src.display());
         }
 
-        let metadata = metadata(src).await.expect("failed to read metadata");
+        let metadata = metadata(src)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to read metadata for {}: {e}", src.display()))?;
 
-        let dest = target_path.join(src.strip_prefix(source_path).unwrap());
+        let relative_path = src
+            .strip_prefix(source_path)
+            .map_err(|e| anyhow::anyhow!("failed to strip prefix from {}: {e}", src.display()))?;
+        let dest = target_path.join(relative_path);
 
         if metadata.is_dir() {
-            create_dir_all(dest).await.expect("create directory fail");
+            create_dir_all(&dest).await.map_err(|e| {
+                anyhow::anyhow!("failed to create directory {}: {e}", dest.display())
+            })?;
         } else if metadata.is_file() {
-            let parent = dest.parent().expect("failed to get parent directory");
+            let parent = dest.parent().ok_or_else(|| {
+                anyhow::anyhow!("failed to get parent directory of {}", dest.display())
+            })?;
             if !parent.exists() {
-                create_dir_all(parent)
-                    .await
-                    .expect("create parent directory fail");
+                create_dir_all(parent).await.map_err(|e| {
+                    anyhow::anyhow!(
+                        "failed to create parent directory {}: {e}",
+                        parent.display()
+                    )
+                })?;
             }
 
-            copy(src, dest).await.expect("copy file fail");
+            copy(src, &dest).await.map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to copy {} to {}: {e}",
+                    src.display(),
+                    dest.display()
+                )
+            })?;
         } else if metadata.is_symlink() {
-            symlink(src, dest).await.expect("symlink file fail");
+            symlink(src, &dest).await.map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to symlink {} to {}: {e}",
+                    src.display(),
+                    dest.display()
+                )
+            })?;
         } else {
-            bail!("source file is not a file or directory: {:?}", src);
+            bail!("source file is not a file or directory: {}", src.display());
         }
     }
 
@@ -300,67 +336,73 @@ mod tests {
     use std::fs::File;
     use tempfile::TempDir;
 
-    fn file_basenames(root: &Path, paths: &[PathBuf]) -> Vec<String> {
+    fn file_basenames(
+        root: &Path,
+        paths: &[PathBuf],
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         paths
             .iter()
             .filter(|p| p.is_file())
-            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .map(|p| Ok(p.strip_prefix(root)?.to_string_lossy().into_owned()))
             .collect()
     }
 
-    fn make_dir_with_files(names: &[&str]) -> TempDir {
-        let dir = TempDir::new().unwrap();
+    fn make_dir_with_files(names: &[&str]) -> Result<TempDir, Box<dyn std::error::Error>> {
+        let dir = TempDir::new()?;
         for name in names {
-            File::create(dir.path().join(name)).unwrap();
+            File::create(dir.path().join(name))?;
         }
-        dir
+        Ok(dir)
     }
 
     // A case-insensitive or locale-aware sort would order these ["a", "B", "Z"];
     // cross-host digest stability requires the raw byte order 'B'(0x42) < 'Z'(0x5A)
     // < 'a'(0x61), independent of the host's collation.
     #[test]
-    fn get_file_paths_sorts_bytewise_not_case_folded() {
-        let dir = make_dir_with_files(&["a.txt", "B.txt", "Z.txt"]);
+    fn get_file_paths_sorts_bytewise_not_case_folded() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = make_dir_with_files(&["a.txt", "B.txt", "Z.txt"])?;
 
-        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![]).unwrap();
+        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![])?;
 
         assert_eq!(
-            file_basenames(dir.path(), &paths),
+            file_basenames(dir.path(), &paths)?,
             vec!["B.txt", "Z.txt", "a.txt"]
         );
+        Ok(())
     }
 
     // Simulates two host filesystems enumerating the identical file set in different
     // orders (APFS vs ext4 dirent order): the final sort must normalize both to the
     // same sequence, otherwise the combined source digest diverges across producers.
     #[test]
-    fn get_file_paths_order_independent_of_creation_order() {
-        let forward = make_dir_with_files(&["alpha", "bravo", "charlie"]);
-        let reversed = make_dir_with_files(&["charlie", "bravo", "alpha"]);
+    fn get_file_paths_order_independent_of_creation_order() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let forward = make_dir_with_files(&["alpha", "bravo", "charlie"])?;
+        let reversed = make_dir_with_files(&["charlie", "bravo", "alpha"])?;
 
-        let forward_paths = get_file_paths(&forward.path().to_path_buf(), vec![], vec![]).unwrap();
-        let reversed_paths =
-            get_file_paths(&reversed.path().to_path_buf(), vec![], vec![]).unwrap();
+        let forward_paths = get_file_paths(&forward.path().to_path_buf(), vec![], vec![])?;
+        let reversed_paths = get_file_paths(&reversed.path().to_path_buf(), vec![], vec![])?;
 
         assert_eq!(
-            file_basenames(forward.path(), &forward_paths),
-            file_basenames(reversed.path(), &reversed_paths)
+            file_basenames(forward.path(), &forward_paths)?,
+            file_basenames(reversed.path(), &reversed_paths)?
         );
+        Ok(())
     }
 
     // Non-decomposable codepoints (Greek alpha U+03B1, Euro U+20AC) avoid APFS
     // NFC/NFD rewriting; their UTF-8 encodings sort by raw byte value
     // 'z'(0x7A) < α(0xCE..) < €(0xE2..) on any host.
     #[test]
-    fn get_file_paths_orders_unicode_bytewise() {
-        let dir = make_dir_with_files(&["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"]);
+    fn get_file_paths_orders_unicode_bytewise() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = make_dir_with_files(&["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"])?;
 
-        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![]).unwrap();
+        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![])?;
 
         assert_eq!(
-            file_basenames(dir.path(), &paths),
+            file_basenames(dir.path(), &paths)?,
             vec!["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"]
         );
+        Ok(())
     }
 }

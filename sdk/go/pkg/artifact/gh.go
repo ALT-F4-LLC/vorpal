@@ -9,30 +9,30 @@ import (
 
 func Gh(context *config.ConfigContext) (*string, error) {
 	name := "gh"
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	var sourceTarget string
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN:
+	case "aarch64-darwin":
 		sourceTarget = "macOS_arm64"
-	case api.ArtifactSystem_AARCH64_LINUX:
+	case "aarch64-linux":
 		sourceTarget = "linux_arm64"
-	case api.ArtifactSystem_X8664_DARWIN:
+	case "x86_64-darwin":
 		sourceTarget = "macOS_amd64"
-	case api.ArtifactSystem_X8664_LINUX:
+	case "x86_64-linux":
 		sourceTarget = "linux_amd64"
 	default:
-		return nil, fmt.Errorf("unsupported %s system: %s", name, system.String())
+		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
 	var sourceExtension string
 	switch system {
-	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_X8664_DARWIN:
+	case "aarch64-darwin", "x86_64-darwin":
 		sourceExtension = "zip"
-	case api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX:
+	case "aarch64-linux", "x86_64-linux":
 		sourceExtension = "tar.gz"
 	default:
-		return nil, fmt.Errorf("unsupported %s system: %s", name, system.String())
+		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
 	sourceVersion := "2.87.3"
@@ -50,14 +50,7 @@ chmod +x "$VORPAL_OUTPUT/bin/gh"`, name, sourceVersion, sourceTarget)
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:%s", name, sourceVersion)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)

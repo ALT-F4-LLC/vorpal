@@ -1,19 +1,30 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{step, Artifact, ArtifactSource},
+    api::artifact::ArtifactSystem::{
+        Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux,
+    },
+    artifact::{step, system, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+/// Build-target `gh` GitHub CLI, fetched as a prebuilt binary release.
 #[derive(Default)]
 pub struct Gh {}
 
 impl Gh {
+    /// Creates a builder for the `gh` tool.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Builds the `gh` artifact for the context's target system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the target system has no known `gh` release, or if registering the
+    /// source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "gh";
         let system = context.get_system();
@@ -23,13 +34,13 @@ impl Gh {
             Aarch64Linux => "linux_arm64",
             X8664Darwin => "macOS_amd64",
             X8664Linux => "linux_amd64",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_extension = match system {
             Aarch64Darwin | X8664Darwin => "zip",
             Aarch64Linux | X8664Linux => "tar.gz",
-            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+            UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
         let source_version = "2.87.3";
@@ -44,10 +55,9 @@ impl Gh {
             chmod +x \"$VORPAL_OUTPUT/bin/gh\"",
         };
 
-        let step = step::shell(context, vec![], vec![], step_script, vec![]).await?;
-        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let step = step::shell(context, &[], &[], step_script, &[]).await?;
 
-        Artifact::new(name, vec![step], systems)
+        Artifact::new(name, vec![step], system::SYSTEMS)
             .with_aliases(vec![format!("{name}:{source_version}")])
             .with_sources(vec![source])
             .build(context)

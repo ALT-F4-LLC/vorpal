@@ -1,3 +1,6 @@
+//! Build script that compiles the Vorpal protobuf definitions under `api/`
+//! into the `vorpal_sdk::api` modules.
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .message_attribute(

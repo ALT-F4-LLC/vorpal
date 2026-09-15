@@ -53,6 +53,7 @@ from vorpal_sdk.context import (
 )
 from vorpal_sdk.step import bash, bwrap, docker, shell
 from vorpal_sdk.system import (
+    SYSTEMS,
     ArtifactSystemInput,
     get_system,
     get_system_default,
@@ -109,6 +110,7 @@ __all__: list[str] = [
     "RustDevelopmentEnvironment",
     "TypeScriptDevelopmentEnvironment",
     # System utilities
+    "SYSTEMS",
     "ArtifactSystemInput",
     "get_system",
     "get_system_default",

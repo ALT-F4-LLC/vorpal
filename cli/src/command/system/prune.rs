@@ -16,13 +16,18 @@ fn calculate_dir_size(path: PathBuf) -> u64 {
 
     WalkDir::new(path)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
+        .filter(std::fs::Metadata::is_file)
         .map(|m| m.len())
         .sum()
 }
 
+/// Formats a byte count as a human-readable size string (B/KB/MB/GB/TB).
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "byte counts converted to f64 for a human-readable display size; losing bits beyond 2^52 bytes is immaterial here"
+)]
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -38,7 +43,7 @@ fn format_bytes(bytes: u64) -> String {
     } else if bytes >= KB {
         format!("{:.2} KB", bytes as f64 / KB as f64)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 
@@ -56,6 +61,12 @@ async fn calculate_dir_size_async(path: &Path) -> u64 {
         })
 }
 
+/// Removes the selected store directories (or all of them, if `all` is set), recreates
+/// them empty, and logs the space freed per directory and in total.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "mirrors the CLI's independent --all/--aliases/--archives/--configs/--outputs/--sandboxes flags; the caller in command.rs is out of scope for this pass"
+)]
 pub async fn run(
     all: bool,
     artifact_aliases: bool,
@@ -73,11 +84,11 @@ pub async fn run(
 
         remove_dir_all(&artifact_alias_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to remove artifact aliases: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to remove artifact aliases: {e}"))?;
 
         create_dir_all(&artifact_alias_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create artifact aliases directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create artifact aliases directory: {e}"))?;
 
         info!("Pruned artifact aliases: freed {}", format_bytes(size));
     }
@@ -89,11 +100,11 @@ pub async fn run(
 
         remove_dir_all(&artifact_archive_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to remove artifact archives: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to remove artifact archives: {e}"))?;
 
         create_dir_all(&artifact_archive_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create artifact archives directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create artifact archives directory: {e}"))?;
 
         info!("Pruned artifact archives: freed {}", format_bytes(size));
     }
@@ -105,11 +116,11 @@ pub async fn run(
 
         remove_dir_all(&artifact_config_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to remove artifact configs: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to remove artifact configs: {e}"))?;
 
         create_dir_all(&artifact_config_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create artifact configs directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create artifact configs directory: {e}"))?;
 
         info!("Pruned artifact configs: freed {}", format_bytes(size));
     }
@@ -121,11 +132,11 @@ pub async fn run(
 
         remove_dir_all(&artifact_output_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to remove artifact outputs: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to remove artifact outputs: {e}"))?;
 
         create_dir_all(&artifact_output_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create artifact outputs directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create artifact outputs directory: {e}"))?;
 
         info!("Pruned artifact outputs: freed {}", format_bytes(size));
     }
@@ -137,11 +148,11 @@ pub async fn run(
 
         remove_dir_all(&sandbox_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to remove sandboxes: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to remove sandboxes: {e}"))?;
 
         create_dir_all(&sandbox_dir_path)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to create sandboxes directory: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create sandboxes directory: {e}"))?;
 
         info!("Pruned sandboxes: freed {}", format_bytes(size));
     }

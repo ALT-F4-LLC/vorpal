@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact.go import source_tools
+from vorpal_sdk.system import SYSTEMS
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -24,15 +24,9 @@ class Goimports:
 
         name = "goimports"
         build_directory = f"cmd/{name}"
-        systems = [
-            artifact_pb2.AARCH64_DARWIN,
-            artifact_pb2.AARCH64_LINUX,
-            artifact_pb2.X8664_DARWIN,
-            artifact_pb2.X8664_LINUX,
-        ]
 
         return (
-            Go(name, systems)
+            Go(name, SYSTEMS)
             .with_aliases([f"{name}:0.42.0"])
             .with_build_directory(build_directory)
             .with_source(source_tools(name))

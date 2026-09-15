@@ -23,7 +23,7 @@ const defaultUvVersion = "0.10.11"
 func Uv(context *config.ConfigContext) (*string, error) {
 	name := "uv"
 
-	system := context.GetTarget()
+	system := context.GetTargetStr()
 
 	sourceTarget, err := CpythonTarget(system)
 	if err != nil {
@@ -49,14 +49,7 @@ chmod +x "$VORPAL_OUTPUT/bin/uv"
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
 		WithAliases([]string{fmt.Sprintf("%s:%s", name, sourceVersion)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)

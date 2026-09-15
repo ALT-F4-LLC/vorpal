@@ -1,6 +1,17 @@
 use indoc::formatdoc;
 
-#[allow(clippy::too_many_arguments)]
+/// Generates the `linux_vorpal` temporary-tools stage shell script: builds the
+/// full temporary toolset (`m4`, `ncurses`, `bash`, `coreutils`, `diffutils`,
+/// `file`, `findutils`, `gawk`, `grep`, `gzip`, `make`, `patch`, `sed`, `tar`,
+/// `xz`, pass-02 `binutils`, pass-02 `gcc`) into `$VORPAL_OUTPUT`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each parameter is an independent version pin threaded into the generated shell script; bundling them into a struct adds no clarity"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear shell-script assembly for one LFS temporary-tools build stage; splitting the formatdoc! would fragment a single sequential script"
+)]
 pub fn script(
     bash_version: &str,
     binutils_version: &str,

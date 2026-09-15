@@ -6,10 +6,11 @@ use crate::{
     },
     context::ConfigContext,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use indoc::formatdoc;
 use serde::Deserialize;
 use std::fs::read_to_string;
+use std::path::Path;
 use toml::from_str;
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +37,14 @@ struct RustCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
+/// Builds a Rust binary artifact from a `Cargo.toml`/workspace, using a vendored-dependency
+/// step for hermetic, network-free `cargo` invocations.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Rust is a builder; each bool is set independently via a named with_* method, so \
+              no call site risks transposed positional bools; converting to a flags type is a \
+              breaking SDK change out of scope here"
+)]
 pub struct Rust<'a> {
     artifacts: Vec<String>,
     bins: Vec<String>,
@@ -55,13 +64,20 @@ pub struct Rust<'a> {
     system_error: Option<anyhow::Error>,
 }
 
-fn parse_cargo(path: &str) -> Result<RustCargoToml> {
-    let contents = read_to_string(path).expect("Failed to read Cargo.toml");
+/// Reads and parses a `Cargo.toml` manifest.
+///
+/// # Errors
+///
+/// Returns an error if `path` cannot be read or its contents are not valid `Cargo.toml` TOML.
+fn parse_cargo(path: &Path) -> Result<RustCargoToml> {
+    let contents =
+        read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
 
-    Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
+    from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))
 }
 
 impl<'a> Rust<'a> {
+    /// Creates a builder for a Rust binary artifact named `name`, targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -89,51 +105,84 @@ impl<'a> Rust<'a> {
         }
     }
 
+    /// Sets the dependency artifacts made available to the build step.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
         self
     }
 
+    /// Restricts which binary targets are built (default: every bin target in the selected
+    /// packages).
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "public SDK API; changing the signature is a breaking change"
+    )]
+    #[must_use]
     pub fn with_bins(mut self, bins: Vec<&str>) -> Self {
-        self.bins = bins.iter().map(|s| s.to_string()).collect();
+        self.bins = bins.iter().map(std::string::ToString::to_string).collect();
         self
     }
 
+    /// Enables `cargo check --release` for each selected binary.
+    #[must_use]
     pub fn with_check(mut self, check: bool) -> Self {
         self.check = check;
         self
     }
 
+    /// Sets extra environment variables for the build step.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
         self.environments = environments;
         self
     }
 
+    /// Excludes these paths from the registered source, in addition to `target`.
+    #[must_use]
     pub fn with_excludes(mut self, excludes: Vec<&'a str>) -> Self {
         self.excludes = excludes;
         self
     }
 
+    /// Enables `cargo fmt --all --check` before building.
+    #[must_use]
     pub fn with_format(mut self, format: bool) -> Self {
         self.format = format;
         self
     }
 
+    /// Restricts the registered source to these paths, in addition to the always-included
+    /// `Cargo.toml`/`Cargo.lock` manifests (default: the whole source directory).
+    #[must_use]
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
         self
     }
 
+    /// Enables `cargo clippy --deny warnings` for each selected package manifest.
+    #[must_use]
     pub fn with_lint(mut self, lint: bool) -> Self {
         self.lint = lint;
         self
     }
 
+    /// Restricts which workspace packages are built (default: every workspace member).
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "public SDK API; changing the signature is a breaking change"
+    )]
+    #[must_use]
     pub fn with_packages(mut self, packages: Vec<&'a str>) -> Self {
-        self.packages = packages.iter().map(|s| s.to_string()).collect();
+        self.packages = packages
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         self
     }
 
+    /// Adds build-step secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
@@ -147,16 +196,34 @@ impl<'a> Rust<'a> {
         self
     }
 
+    /// Overrides the source directory, relative to the config context (default: `.`).
+    #[must_use]
     pub fn with_source(mut self, source: String) -> Self {
         self.source = Some(source);
         self
     }
 
+    /// Enables `cargo test --release` for each selected binary.
+    #[must_use]
     pub fn with_tests(mut self, tests: bool) -> Self {
         self.tests = tests;
         self
     }
 
+    /// Builds the Rust binary artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if the source directory
+    /// or its `Cargo.toml` is missing or fails to parse, if building the `protoc` or Rust
+    /// toolchain dependency fails, or if registering the vendor source, main source, or
+    /// artifact with the build context fails.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "linear pipeline: parse Cargo.toml, resolve workspace bin targets, vendor \
+                  dependencies, then assemble the build step script; splitting would scatter \
+                  state shared across every stage"
+    )]
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 
@@ -185,10 +252,10 @@ impl<'a> Rust<'a> {
         let source_cargo_path = context_path_source.join("Cargo.toml");
 
         if !source_cargo_path.exists() {
-            bail!("Cargo.toml not found: {:?}", source_cargo_path);
+            bail!("Cargo.toml not found: {}", source_cargo_path.display());
         }
 
-        let source_cargo = parse_cargo(source_cargo_path.to_str().unwrap())?;
+        let source_cargo = parse_cargo(&source_cargo_path)?;
 
         // Get list of bin targets
 
@@ -200,14 +267,14 @@ impl<'a> Rust<'a> {
         if let Some(workspace) = source_cargo.workspace {
             if let Some(members) = workspace.members {
                 for member in members {
-                    let package_path = context_path_source.join(member.clone());
+                    let package_path = context_path_source.join(&member);
                     let package_cargo_path = package_path.join("Cargo.toml");
 
                     if !package_cargo_path.exists() {
-                        bail!("Cargo.toml not found: {:?}", package_cargo_path);
+                        bail!("Cargo.toml not found: {}", package_cargo_path.display());
                     }
 
-                    let package_cargo = parse_cargo(package_cargo_path.to_str().unwrap())?;
+                    let package_cargo = parse_cargo(&package_cargo_path)?;
 
                     if !self.packages.is_empty() {
                         if let Some(ref package) = package_cargo.package {
@@ -239,7 +306,7 @@ impl<'a> Rust<'a> {
                         package_target_paths.push(package_path.join("src/lib.rs"));
                     }
 
-                    for member_target_path in package_target_paths.iter() {
+                    for member_target_path in &package_target_paths {
                         let member_target_path_relative = member_target_path
                             .strip_prefix(&context_path_source)
                             .unwrap_or(member_target_path)
@@ -264,8 +331,6 @@ impl<'a> Rust<'a> {
 
         // Set environment variables
 
-        let mut step_artifacts = vec![rust_toolchain.clone()];
-
         let mut step_environments = vec![
             "HOME=$VORPAL_WORKSPACE/home".to_string(),
             format!(
@@ -280,6 +345,8 @@ impl<'a> Rust<'a> {
             format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
         ];
 
+        let mut step_artifacts = vec![rust_toolchain];
+
         for environment in self.environments {
             step_environments.push(environment.to_string());
         }
@@ -288,18 +355,25 @@ impl<'a> Rust<'a> {
 
         let mut vendor_cargo_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
 
-        for package in packages.iter() {
+        for package in &packages {
             vendor_cargo_paths.push(format!("{package}/Cargo.toml"));
         }
 
-        let mut vendor_step_script = formatdoc! {r#"
+        let mut vendor_step_script = formatdoc! {r"
             mkdir -p $HOME
 
-            pushd ./source/{name}-vendor"#,
+            pushd ./source/{name}-vendor",
             name = self.name,
         };
 
-        if !packages.is_empty() {
+        if packages.is_empty() {
+            vendor_step_script = formatdoc! {r"
+                {vendor_step_script}
+
+                mkdir -p src
+                touch src/main.rs",
+            };
+        } else {
             vendor_step_script = formatdoc! {r#"
                 {vendor_step_script}
 
@@ -307,6 +381,10 @@ impl<'a> Rust<'a> {
                 [workspace]
                 members = [{packages}]
                 resolver = "2"
+
+                [workspace.lints.rust]
+
+                [workspace.lints.clippy]
                 EOF
 
                 target_paths=({target_paths})
@@ -317,13 +395,6 @@ impl<'a> Rust<'a> {
                 done"#,
                 packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
                 target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
-            };
-        } else {
-            vendor_step_script = formatdoc! {r#"
-                {vendor_step_script}
-
-                mkdir -p src
-                touch src/main.rs"#,
             };
         }
 
@@ -340,10 +411,10 @@ impl<'a> Rust<'a> {
         let vendor_steps = vec![
             step::shell(
                 context,
-                step_artifacts.clone(),
-                step_environments.clone(),
+                &step_artifacts,
+                &step_environments,
                 vendor_step_script,
-                self.secrets.clone(),
+                &self.secrets,
             )
             .await?,
         ];
@@ -351,15 +422,17 @@ impl<'a> Rust<'a> {
         let vendor_name = format!("{}-vendor", self.name);
 
         let vendor_source = ArtifactSource::new(vendor_name.as_str(), source_path)
-            .with_includes(vendor_cargo_paths.clone())
+            .with_includes(vendor_cargo_paths)
             .build();
 
-        let vendor = Artifact::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
+        let vendor = Artifact::new(vendor_name.as_str(), vendor_steps, &self.systems)
             .with_sources(vec![vendor_source])
             .build(context)
             .await?;
 
-        step_artifacts.push(vendor.clone());
+        let vendor_env_key = get_env_key(&vendor);
+
+        step_artifacts.push(vendor);
         step_artifacts.push(protoc);
 
         // Create source
@@ -382,7 +455,7 @@ impl<'a> Rust<'a> {
 
         // Create step
 
-        let mut step_script = formatdoc! {r#"
+        let mut step_script = formatdoc! {r"
             mkdir -p $HOME
 
             pushd ./source/{name}
@@ -390,9 +463,9 @@ impl<'a> Rust<'a> {
             mkdir -p .cargo
             mkdir -p $VORPAL_OUTPUT/bin
 
-            ln -s {vendor}/config.toml .cargo/config.toml"#,
+            ln -s {vendor}/config.toml .cargo/config.toml",
             name = self.name,
-            vendor = get_env_key(&vendor),
+            vendor = vendor_env_key,
         };
 
         if !self.packages.is_empty() {
@@ -403,6 +476,10 @@ impl<'a> Rust<'a> {
                 [workspace]
                 members = [{packages}]
                 resolver = "2"
+
+                [workspace.lints.rust]
+
+                [workspace.lints.clippy]
                 EOF"#,
                 packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
             };
@@ -464,10 +541,10 @@ impl<'a> Rust<'a> {
         let steps = vec![
             step::shell(
                 context,
-                [step_artifacts.clone(), self.artifacts.clone()].concat(),
-                step_environments,
+                &[step_artifacts, self.artifacts].concat(),
+                &step_environments,
                 step_script,
-                self.secrets,
+                &self.secrets,
             )
             .await?,
         ];
@@ -485,6 +562,8 @@ impl<'a> Rust<'a> {
 // Rust Development Environment
 // ---------------------------------------------------------------------------
 
+/// Development environment preloaded with the Rust toolchain (rustc, cargo, clippy, rustfmt,
+/// rust-src, rust-analyzer) and, by default, `protoc`.
 pub struct RustDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
     environments: Vec<String>,
@@ -496,6 +575,7 @@ pub struct RustDevelopmentEnvironment<'a> {
 }
 
 impl<'a> RustDevelopmentEnvironment<'a> {
+    /// Creates a builder for a Rust development environment named `name`, targeting `systems`.
     pub fn new<I, S>(name: &'a str, systems: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -514,21 +594,29 @@ impl<'a> RustDevelopmentEnvironment<'a> {
         }
     }
 
+    /// Adds dependency artifacts made available in the environment.
+    #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts.extend(artifacts);
         self
     }
 
+    /// Adds extra environment variables.
+    #[must_use]
     pub fn with_environments(mut self, environments: Vec<String>) -> Self {
         self.environments.extend(environments);
         self
     }
 
+    /// Excludes `protoc` from the environment.
+    #[must_use]
     pub fn without_protoc(mut self) -> Self {
         self.include_protoc = false;
         self
     }
 
+    /// Adds environment secrets, keyed by name, skipping names already present.
+    #[must_use]
     pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
         for secret in secrets {
             if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
@@ -538,6 +626,14 @@ impl<'a> RustDevelopmentEnvironment<'a> {
         self
     }
 
+    /// Builds the Rust development environment artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a requested system string failed to parse, if building the Rust
+    /// toolchain dependency or, unless excluded via [`Self::without_protoc`], the `protoc`
+    /// dependency fails, or if registering the environment artifact with the build context
+    /// fails.
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
         system::check_system_error(&mut self.system_error)?;
 
@@ -549,9 +645,6 @@ impl<'a> RustDevelopmentEnvironment<'a> {
             let protoc = Protoc::new().build(context).await?;
             artifacts.push(protoc);
         }
-
-        artifacts.push(rust_toolchain_digest.clone());
-        artifacts.extend(self.artifacts);
 
         let toolchain_target = rust_toolchain::target(context.get_system())?;
         let toolchain_version = rust_toolchain::version();
@@ -568,6 +661,9 @@ impl<'a> RustDevelopmentEnvironment<'a> {
         ];
 
         environments.extend(self.environments);
+
+        artifacts.push(rust_toolchain_digest);
+        artifacts.extend(self.artifacts);
 
         let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
             .with_artifacts(artifacts)

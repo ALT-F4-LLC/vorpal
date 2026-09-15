@@ -1,10 +1,10 @@
 import type {
   ArtifactSource as ArtifactSourceMsg,
 } from "../api/artifact/artifact.js";
-import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
+import { getSystemStr, SYSTEMS } from "../system.js";
 
 /**
  * Creates a shared ArtifactSource for the Go tools repository.
@@ -31,21 +31,21 @@ export function sourceTools(name: string): ArtifactSourceMsg {
 export class GoBin {
   async build(context: ConfigContext): Promise<string> {
     const name = "go";
-    const system = context.getSystem();
+    const system = getSystemStr(context.getSystem());
 
     let sourceTarget: string;
 
     switch (system) {
-      case ArtifactSystem.AARCH64_DARWIN:
+      case "aarch64-darwin":
         sourceTarget = "darwin-arm64";
         break;
-      case ArtifactSystem.AARCH64_LINUX:
+      case "aarch64-linux":
         sourceTarget = "linux-arm64";
         break;
-      case ArtifactSystem.X8664_DARWIN:
+      case "x86_64-darwin":
         sourceTarget = "darwin-amd64";
         break;
-      case ArtifactSystem.X8664_LINUX:
+      case "x86_64-linux":
         sourceTarget = "linux-amd64";
         break;
       default:
@@ -59,14 +59,8 @@ export class GoBin {
 
     const stepScript = `cp -pr "./source/${name}/go/." "$VORPAL_OUTPUT"`;
     const steps = [await shell(context, [], [], stepScript, [])];
-    const systems = [
-      ArtifactSystem.AARCH64_DARWIN,
-      ArtifactSystem.AARCH64_LINUX,
-      ArtifactSystem.X8664_DARWIN,
-      ArtifactSystem.X8664_LINUX,
-    ];
 
-    return new Artifact(name, steps, systems)
+    return new Artifact(name, steps, SYSTEMS)
       .withAliases([`${name}:${sourceVersion}`])
       .withSources([source])
       .build(context);

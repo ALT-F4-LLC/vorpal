@@ -1,5 +1,5 @@
 use crate::artifact::SYSTEMS;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use indoc::formatdoc;
 use vorpal_sdk::{
     artifact::{get_env_key, gh::Gh, Argument, Job},
@@ -35,10 +35,18 @@ impl VorpalRelease {
 
         // Fetch artifacts
 
-        let aarch64_darwin = context.fetch_artifact(&darwin_aarch64.unwrap()).await?;
-        let aarch64_linux = context.fetch_artifact(&linux_aarch64.unwrap()).await?;
-        let x8664_darwin = context.fetch_artifact(&darwin_x8664.unwrap()).await?;
-        let x8664_linux = context.fetch_artifact(&linux_x8664.unwrap()).await?;
+        let aarch64_darwin = context
+            .fetch_artifact(&darwin_aarch64.context("missing required argument aarch64-darwin")?)
+            .await?;
+        let aarch64_linux = context
+            .fetch_artifact(&linux_aarch64.context("missing required argument aarch64-linux")?)
+            .await?;
+        let x8664_darwin = context
+            .fetch_artifact(&darwin_x8664.context("missing required argument x8664-darwin")?)
+            .await?;
+        let x8664_linux = context
+            .fetch_artifact(&linux_x8664.context("missing required argument x8664-linux")?)
+            .await?;
 
         let script = formatdoc! {r#"
             git clone \
@@ -68,7 +76,7 @@ impl VorpalRelease {
                 {x8664_linux}.tar.zst"#,
             aarch64_darwin = get_env_key(&aarch64_darwin),
             aarch64_linux = get_env_key(&aarch64_linux),
-            branch_name = branch_name.unwrap(),
+            branch_name = branch_name.context("missing required argument branch-name")?,
             x8664_darwin = get_env_key(&x8664_darwin),
             x8664_linux = get_env_key(&x8664_linux),
         };

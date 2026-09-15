@@ -20,7 +20,7 @@ impl VorpalContainerImage {
         let name = "vorpal-container-image";
 
         OciImage::new(name, &linux_vorpal_slim)
-            .with_aliases(vec![&format!("{}:latest", name)])
+            .with_aliases(vec![&format!("{name}:latest")])
             .with_artifacts(vec![&vorpal])
             .build(context)
             .await

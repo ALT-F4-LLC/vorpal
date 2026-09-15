@@ -18,11 +18,11 @@ pub async fn compress_zstd(
 ) -> Result<(), Error> {
     let temp_file = create_sandbox_file(Some("tar.zst"))
         .await
-        .map_err(|e| anyhow!("failed to create temp file: {}", e))?;
+        .map_err(|e| anyhow!("failed to create temp file: {e}"))?;
 
     let file = File::create(&temp_file)
         .await
-        .map_err(|e| anyhow!("failed to create temp file: {}", e))?;
+        .map_err(|e| anyhow!("failed to create temp file: {e}"))?;
 
     let encoder = ZstdEncoder::new(file);
     let mut builder = Builder::new(encoder);
@@ -32,7 +32,7 @@ pub async fn compress_zstd(
     for path in source_files {
         let relative_path = path
             .strip_prefix(source_path)
-            .map_err(|e| anyhow!("failed to strip prefix: {}", e))?;
+            .map_err(|e| anyhow!("failed to strip prefix: {e}"))?;
 
         if relative_path.display().to_string() == "" {
             continue;
@@ -41,29 +41,29 @@ pub async fn compress_zstd(
         builder
             .append_path_with_name(path, relative_path)
             .await
-            .map_err(|e| anyhow!("failed to append path: {}", e))?;
+            .map_err(|e| anyhow!("failed to append path: {e}"))?;
     }
 
     builder
         .finish()
         .await
-        .map_err(|e| anyhow!("failed to finish tar builder: {}", e))?;
+        .map_err(|e| anyhow!("failed to finish tar builder: {e}"))?;
 
     let mut encoder = builder
         .into_inner()
         .await
-        .map_err(|e| anyhow!("failed to get tar inner writer: {}", e))?;
+        .map_err(|e| anyhow!("failed to get tar inner writer: {e}"))?;
     encoder
         .shutdown()
         .await
-        .map_err(|e| anyhow!("failed to shutdown zstd encoder: {}", e))?;
+        .map_err(|e| anyhow!("failed to shutdown zstd encoder: {e}"))?;
 
     copy(&temp_file, output_path)
         .await
-        .map_err(|e| anyhow!("failed to copy archive: {}", e))?;
+        .map_err(|e| anyhow!("failed to copy archive: {e}"))?;
     remove_file(&temp_file)
         .await
-        .map_err(|e| anyhow!("failed to remove temp file: {}", e))?;
+        .map_err(|e| anyhow!("failed to remove temp file: {e}"))?;
 
     Ok(())
 }
@@ -71,7 +71,7 @@ pub async fn compress_zstd(
 pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Error> {
     let file = File::open(source_zstd)
         .await
-        .map_err(|e| anyhow!("failed to open file: {}", e))?;
+        .map_err(|e| anyhow!("failed to open file: {e}"))?;
     let buf_reader = BufReader::new(file);
     let zstd_decoder = ZstdDecoder::new(buf_reader);
     let mut archive = Archive::new(zstd_decoder);
@@ -82,12 +82,12 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
     // remove the destination path before unpacking.
     let mut entries = archive
         .entries()
-        .map_err(|e| anyhow!("failed to read archive entries: {}", e))?;
+        .map_err(|e| anyhow!("failed to read archive entries: {e}"))?;
 
     let target = target_dir.to_path_buf();
 
     while let Some(entry) = entries.next().await {
-        let mut entry = entry.map_err(|e| anyhow!("failed to read archive entry: {}", e))?;
+        let mut entry = entry.map_err(|e| anyhow!("failed to read archive entry: {e}"))?;
         let entry_type = entry.header().entry_type();
 
         if entry_type.is_symlink() || entry_type.is_hard_link() {
@@ -96,7 +96,7 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
                 if dest.symlink_metadata().is_ok() {
                     tokio::fs::remove_file(&dest)
                         .await
-                        .map_err(|e| anyhow!("failed to remove existing symlink: {}", e))?;
+                        .map_err(|e| anyhow!("failed to remove existing symlink: {e}"))?;
                 }
             }
         }
@@ -148,10 +148,12 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
             // Walk the error source chain because TarError::Display
             // only shows the description and drops the underlying IO
             // error (e.g. "Permission denied", "File exists").
-            let mut msg = format!("failed to unpack entry: {}", e);
+            use std::fmt::Write;
+
+            let mut msg = format!("failed to unpack entry: {e}");
             let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
             while let Some(s) = source {
-                msg.push_str(&format!(": {}", s));
+                let _ = write!(msg, ": {s}");
                 source = s.source();
             }
             anyhow!(msg)
@@ -172,48 +174,61 @@ fn sanitize_file_path(path: &str) -> PathBuf {
 }
 
 pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), Error> {
-    let archive_file = File::open(source_path).await.expect("Failed to open file");
+    let archive_file = File::open(source_path)
+        .await
+        .map_err(|e| anyhow!("failed to open file: {e}"))?;
 
     let archive = BufReader::new(archive_file).compat();
 
     let mut reader = ZipFileReader::new(archive)
         .await
-        .expect("Failed to read zip file");
+        .map_err(|e| anyhow!("failed to read zip file: {e}"))?;
 
     for index in 0..reader.file().entries().len() {
-        let entry = reader.file().entries().get(index).unwrap();
+        let entry = reader
+            .file()
+            .entries()
+            .get(index)
+            .ok_or_else(|| anyhow!("zip entry {index} disappeared during iteration"))?;
 
-        let path = target_dir.join(sanitize_file_path(entry.filename().as_str().unwrap()));
+        let entry_filename = entry
+            .filename()
+            .as_str()
+            .map_err(|e| anyhow!("failed to read zip entry filename: {e}"))?;
+
+        let path = target_dir.join(sanitize_file_path(entry_filename));
 
         // If the filename of the entry ends with '/', it is treated as a directory.
         // This is implemented by previous versions of this crate and the Python Standard Library.
         // https://docs.rs/async_zip/0.0.8/src/async_zip/read/mod.rs.html#63-65
         // https://github.com/python/cpython/blob/820ef62833bd2d84a141adedd9a05998595d6b6d/Lib/zipfile.py#L528
-        let entry_is_dir = entry.dir().unwrap();
+        let entry_is_dir = entry
+            .dir()
+            .map_err(|e| anyhow!("failed to determine zip entry type: {e}"))?;
 
         let mut entry_reader = reader
             .reader_without_entry(index)
             .await
-            .expect("Failed to read ZipEntry");
+            .map_err(|e| anyhow!("failed to read ZipEntry: {e}"))?;
 
         if entry_is_dir {
             // The directory may have been created if iteration is out of order.
             if !path.exists() {
                 create_dir_all(&path)
                     .await
-                    .expect("Failed to create extracted directory");
+                    .map_err(|e| anyhow!("failed to create extracted directory: {e}"))?;
             }
         } else {
             // Creates parent directories. They may not exist if iteration is out of order
             // or the archive does not contain directory entries.
             let parent = path
                 .parent()
-                .expect("A file entry should have parent directories");
+                .ok_or_else(|| anyhow!("a file entry should have parent directories"))?;
 
             if !parent.is_dir() {
                 create_dir_all(parent)
                     .await
-                    .expect("Failed to create parent directories");
+                    .map_err(|e| anyhow!("failed to create parent directories: {e}"))?;
             }
 
             let writer = OpenOptions::new()
@@ -221,11 +236,11 @@ pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), 
                 .create_new(true)
                 .open(&path)
                 .await
-                .expect("Failed to create extracted file");
+                .map_err(|e| anyhow!("failed to create extracted file: {e}"))?;
 
             futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write())
                 .await
-                .expect("Failed to copy to extracted file");
+                .map_err(|e| anyhow!("failed to copy to extracted file: {e}"))?;
         }
     }
 

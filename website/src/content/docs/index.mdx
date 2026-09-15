@@ -72,14 +72,7 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []string{
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    }
-
-    language.NewGo("my-app", systems).
+    language.NewGo("my-app", config.SYSTEMS).
         WithBuildDirectory("cmd/app").
         WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
         Build(ctx)
@@ -101,19 +94,12 @@ func main() {
 </Card>
 
 ```python title="vorpal.py"
-from vorpal_sdk import ConfigContext, Python
+from vorpal_sdk import SYSTEMS, ConfigContext, Python
 
 ctx = ConfigContext.create()
 
-systems = [
-    "aarch64-darwin",
-    "aarch64-linux",
-    "x86_64-darwin",
-    "x86_64-linux",
-]
-
 (
-    Python("my-app", systems)
+    Python("my-app", SYSTEMS)
     .with_entrypoint("src/main.py")
     .with_includes(["pyproject.toml", "uv.lock", "src"])
     .build(ctx)
@@ -136,25 +122,18 @@ ctx.run()
 
 ```rust title="vorpal.rs"
 use vorpal_sdk::{
-    artifact::language::rust::Rust,
+    artifact::{language::rust::Rust, system},
     context::get_context,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = &mut get_context().await?;
+    let mut ctx = get_context().await?;
 
-    let systems = [
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-darwin",
-        "x86_64-linux",
-    ];
-
-    Rust::new("my-app", systems)
+    Rust::new("my-app", system::SYSTEMS)
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx)
+        .build(&mut ctx)
         .await?;
 
     ctx.run().await
@@ -174,18 +153,11 @@ async fn main() -> anyhow::Result<()> {
 </Card>
 
 ```typescript title="vorpal.ts"
-import { ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+import { ConfigContext, SYSTEMS, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
-const systems = [
-  "aarch64-darwin",
-  "aarch64-linux",
-  "x86_64-darwin",
-  "x86_64-linux",
-];
-
-await new TypeScript("my-app", systems)
+await new TypeScript("my-app", SYSTEMS)
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
   .build(ctx);

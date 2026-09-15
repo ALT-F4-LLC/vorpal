@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
     collections::{BTreeMap, HashMap},
+    net::{Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -32,6 +33,8 @@ use tonic::{
 };
 use tracing::info;
 
+/// Artifacts and lookup caches accumulated while a config runs, shared
+/// between [`ConfigContext`] and the [`ConfigServer`] it starts.
 #[derive(Clone)]
 pub struct ConfigContextStore {
     artifact: HashMap<String, Artifact>,
@@ -39,6 +42,8 @@ pub struct ConfigContextStore {
     variable: HashMap<String, String>,
 }
 
+/// Handle a Vorpal config binary uses to define and resolve artifacts for a
+/// single build.
 #[derive(Clone)]
 pub struct ConfigContext {
     artifact: String,
@@ -53,26 +58,43 @@ pub struct ConfigContext {
     store: ConfigContextStore,
 }
 
+/// gRPC [`ContextService`] implementation that serves a config's resolved
+/// artifact store back to the `vorpal` CLI.
 #[derive(Clone)]
 pub struct ConfigServer {
+    /// Artifact store served to callers over the `ContextService` API.
     pub store: ConfigContextStore,
 }
 
+/// Access and refresh token material for one issuer, as stored in the
+/// on-disk credentials file.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VorpalCredentialsContent {
+    /// Current access token used to authenticate registry requests.
     pub access_token: String,
+    /// Audience parameter required by some `IdPs` (for example Auth0) when
+    /// refreshing the access token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<String>,
+    /// `OAuth2` client ID the token was issued to.
     pub client_id: String,
+    /// Lifetime of the access token, in seconds, from `issued_at`.
     pub expires_in: u64,
+    /// Unix timestamp (seconds) at which the access token was issued.
     pub issued_at: u64,
+    /// Refresh token used to obtain a new access token once it expires.
     pub refresh_token: String,
+    /// `OAuth2` scopes granted to the access token.
     pub scopes: Vec<String>,
 }
 
+/// On-disk contents of the Vorpal credentials file: per-issuer token
+/// material plus the issuer each registry authenticates against.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VorpalCredentials {
+    /// Token material for each known issuer, keyed by issuer URL.
     pub issuer: BTreeMap<String, VorpalCredentialsContent>,
+    /// Issuer URL used by each registry, keyed by registry address.
     pub registry: BTreeMap<String, String>,
 }
 
@@ -89,8 +111,13 @@ pub const DEFAULT_TAG: &str = "latest";
 /// - tag defaults to [`DEFAULT_TAG`] when omitted
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArtifactAlias {
+    /// Artifact name component of the alias.
     pub name: String,
+    /// Namespace component of the alias, defaulted to [`DEFAULT_NAMESPACE`]
+    /// when the alias omits it.
     pub namespace: String,
+    /// Tag component of the alias, defaulted to [`DEFAULT_TAG`] when the
+    /// alias omits it.
     pub tag: String,
 }
 
@@ -114,6 +141,13 @@ fn is_valid_component(s: &str) -> bool {
 /// characters, hyphens, dots, underscores, and plus signs.
 ///
 /// This mirrors the Go implementation in `sdk/go/pkg/config/context.go`.
+///
+/// # Errors
+///
+/// Returns an error if `alias` is empty, longer than 255 characters, has an
+/// empty tag or namespace segment, has more than one `/` separator, has no
+/// name, or has a name, namespace, or tag containing characters outside the
+/// allowed set.
 pub fn parse_artifact_alias(alias: &str) -> Result<ArtifactAlias> {
     if alias.is_empty() {
         bail!("alias cannot be empty");
@@ -178,6 +212,8 @@ pub fn parse_artifact_alias(alias: &str) -> Result<ArtifactAlias> {
 }
 
 impl ConfigServer {
+    /// Creates a server that serves the given artifact store.
+    #[must_use]
     pub fn new(store: ConfigContextStore) -> Self {
         Self { store }
     }
@@ -195,13 +231,13 @@ impl ContextService for ConfigServer {
             return Err(tonic::Status::invalid_argument("'digest' is required"));
         }
 
-        let artifact = self.store.artifact.get(request.digest.as_str());
+        let artifact = self
+            .store
+            .artifact
+            .get(request.digest.as_str())
+            .ok_or_else(|| tonic::Status::not_found("artifact not found"))?;
 
-        if artifact.is_none() {
-            return Err(tonic::Status::not_found("artifact not found"));
-        }
-
-        Ok(Response::new(artifact.unwrap().clone()))
+        Ok(Response::new(artifact.clone()))
     }
 
     async fn get_artifacts(
@@ -217,6 +253,13 @@ impl ContextService for ConfigServer {
     }
 }
 
+/// Parses CLI arguments and connects to the agent and registry services to
+/// build a [`ConfigContext`] for the current run.
+///
+/// # Errors
+///
+/// Returns an error if connecting to the agent or registry service fails, or
+/// if `artifact_system` does not name a supported system.
 pub async fn get_context() -> Result<ConfigContext> {
     let args = Cli::parse();
 
@@ -255,7 +298,21 @@ pub async fn get_context() -> Result<ConfigContext> {
 }
 
 impl ConfigContext {
-    #[allow(clippy::too_many_arguments)]
+    /// Builds a context from the resolved `start` subcommand flags and
+    /// connected service clients.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `artifact_system` does not name a supported
+    /// system.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "constructor takes the ten flags of the `start` subcommand one-to-one"
+    )]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "public SDK API; changing the signature is a breaking change"
+    )]
     pub fn new(
         artifact: String,
         artifact_context: PathBuf,
@@ -294,7 +351,19 @@ impl ConfigContext {
         })
     }
 
-    pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
+    /// Sends `artifact` to the agent service to be prepared (locked and
+    /// hashed), caching the result so identical artifacts are only prepared
+    /// once. Returns the digest of the prepared artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `artifact` has an empty name, no steps, no
+    /// systems, or a target system not listed in its systems; if the
+    /// artifact cannot be serialized; if the agent request fails to
+    /// authenticate or the agent service returns an error other than "not
+    /// found"; or if the agent service does not return a prepared artifact
+    /// and its digest.
+    pub async fn add_artifact(&mut self, artifact: Artifact) -> Result<String> {
         if artifact.name.is_empty() {
             bail!("name cannot be empty");
         }
@@ -323,9 +392,9 @@ impl ConfigContext {
 
         // Send raw sources to agent - agent will handle all lockfile operations
         let artifact_json =
-            serde_json::to_vec(&artifact).expect("failed to serialize artifact to JSON");
+            serde_json::to_vec(&artifact).context("failed to serialize artifact to JSON")?;
 
-        let input_digest = digest(artifact_json.clone());
+        let input_digest = digest(artifact_json);
 
         if self.store.artifact.contains_key(&input_digest) {
             return Ok(input_digest);
@@ -339,8 +408,12 @@ impl ConfigContext {
 
         // TODO: make this run in parallel
 
+        // The request owns the artifact once sent; only the name is kept for
+        // progress output.
+        let artifact_name = artifact.name.clone();
+
         let request = PrepareArtifactRequest {
-            artifact: Some(artifact.clone()),
+            artifact: Some(artifact),
             artifact_context: self.artifact_context.display().to_string(),
             artifact_namespace: self.artifact_namespace.clone(),
             artifact_unlock: self.artifact_unlock,
@@ -358,7 +431,7 @@ impl ConfigContext {
             .client_agent
             .prepare_artifact(request)
             .await
-            .expect("failed to prepare artifact");
+            .context("failed to prepare artifact")?;
 
         let mut response = response.into_inner();
         let mut response_artifact = None;
@@ -369,9 +442,9 @@ impl ConfigContext {
                 Ok(Some(message)) => {
                     if let Some(artifact_output) = message.artifact_output {
                         if self.port == 0 {
-                            info!("{} |> {}", artifact.name, artifact_output);
+                            info!("{artifact_name} |> {artifact_output}");
                         } else {
-                            println!("{} |> {}", artifact.name, artifact_output);
+                            emit(format!("{artifact_name} |> {artifact_output}"));
                         }
                     }
 
@@ -389,39 +462,54 @@ impl ConfigContext {
             }
         }
 
-        if response_artifact.is_none() {
+        let Some(artifact) = response_artifact else {
             bail!("artifact not returned from agent service");
-        }
+        };
 
-        if response_artifact_digest.is_none() {
+        let Some(artifact_digest) = response_artifact_digest else {
             bail!("artifact digest not returned from agent service");
-        }
-
-        let artifact = response_artifact.unwrap();
-        let artifact_digest = response_artifact_digest.unwrap();
-
-        self.store
-            .artifact
-            .insert(artifact_digest.clone(), artifact.clone());
+        };
 
         self.store
             .artifact_input_cache
             .insert(input_digest, artifact_digest.clone());
 
+        self.store
+            .artifact
+            .insert(artifact_digest.clone(), artifact);
+
         Ok(artifact_digest)
     }
 
+    /// Fetches an artifact and its transitive dependencies from the registry
+    /// into the local store, in the context's own namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the registry request fails to authenticate, the
+    /// artifact is not found in the registry, or the registry returns an
+    /// error other than "not found".
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
-        self.fetch_artifact_in_namespace(digest, &self.artifact_namespace.clone())
-            .await
+        Self::fetch_artifact_in_namespace(
+            &mut self.store,
+            &mut self.client_artifact,
+            &self.registry,
+            digest,
+            &self.artifact_namespace,
+        )
+        .await
     }
 
+    /// Takes the store and client as separate borrows so callers can pass a
+    /// namespace borrowed from another field of `self` while recursing.
     async fn fetch_artifact_in_namespace(
-        &mut self,
+        store: &mut ConfigContextStore,
+        client_artifact: &mut ArtifactServiceClient<Channel>,
+        registry: &str,
         digest: &str,
         namespace: &str,
     ) -> Result<String> {
-        if self.store.artifact.contains_key(digest) {
+        if store.artifact.contains_key(digest) {
             return Ok(digest.to_string());
         }
 
@@ -432,40 +520,59 @@ impl ConfigContext {
             namespace: namespace.to_string(),
         };
 
-        let mut request = Request::new(request.clone());
-        let request_auth = client_auth_header(&self.registry).await?;
+        let mut request = Request::new(request);
+        let request_auth = client_auth_header(registry).await?;
 
         if let Some(header) = request_auth {
             request.metadata_mut().insert("authorization", header);
         }
 
-        match self.client_artifact.get_artifact(request).await {
+        match client_artifact.get_artifact(request).await {
             Err(status) => {
                 if status.code() != NotFound {
-                    bail!("artifact service error: {:?}", status);
+                    bail!("artifact service error: {status:?}");
                 }
 
-                bail!("artifact not found: {}", digest);
+                bail!("artifact not found: {digest}");
             }
 
             Ok(response) => {
                 let artifact = response.into_inner();
 
-                self.store
-                    .artifact
-                    .insert(digest.to_string(), artifact.clone());
-
-                for step in artifact.steps.iter() {
-                    for dep in step.artifacts.iter() {
-                        Box::pin(self.fetch_artifact_in_namespace(dep, namespace)).await?;
+                // Dependencies are fetched before the artifact is stored so the
+                // artifact can be moved into the store afterwards. Digests are
+                // content-addressed, so the dependency graph cannot cycle back
+                // to `digest` and the store's final contents are unchanged.
+                for step in &artifact.steps {
+                    for dep in &step.artifacts {
+                        Box::pin(Self::fetch_artifact_in_namespace(
+                            store,
+                            client_artifact,
+                            registry,
+                            dep,
+                            namespace,
+                        ))
+                        .await?;
                     }
                 }
+
+                store.artifact.insert(digest.to_string(), artifact);
 
                 Ok(digest.to_string())
             }
         }
     }
 
+    /// Resolves an artifact alias (`[<namespace>/]<name>[:<tag>]`) to a
+    /// digest via the registry, then fetches that artifact and its
+    /// transitive dependencies into the local store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `alias` fails to parse, the registry request
+    /// fails to authenticate, the alias is not found in the registry, the
+    /// registry returns an empty digest or another error, or fetching the
+    /// resolved artifact fails.
     pub async fn fetch_artifact_alias(&mut self, alias: &str) -> Result<String> {
         let alias_parsed = parse_artifact_alias(alias)?;
 
@@ -489,84 +596,128 @@ impl ConfigContext {
             .await
             .map_err(|status| {
                 if status.code() == NotFound {
-                    anyhow!("alias not found in registry: {}", alias)
+                    anyhow!("alias not found in registry: {alias}")
                 } else {
-                    anyhow!("registry error: {:?}", status)
+                    anyhow!("registry error: {status:?}")
                 }
             })?;
 
         let digest = response.into_inner().digest;
 
         if digest.is_empty() {
-            bail!("registry returned empty digest for alias: {}", alias);
+            bail!("registry returned empty digest for alias: {alias}");
         }
 
         if self.store.artifact.contains_key(&digest) {
             return Ok(digest);
         }
 
-        self.fetch_artifact_in_namespace(&digest, &alias_parsed.namespace)
-            .await?;
+        Self::fetch_artifact_in_namespace(
+            &mut self.store,
+            &mut self.client_artifact,
+            &self.registry,
+            &digest,
+            &alias_parsed.namespace,
+        )
+        .await?;
 
         Ok(digest)
     }
 
-    pub fn get_artifact_store(&self) -> HashMap<String, Artifact> {
-        self.store.artifact.clone()
+    /// Returns all artifacts resolved into the local store so far.
+    pub fn get_artifact_store(&self) -> &HashMap<String, Artifact> {
+        &self.store.artifact
     }
 
+    /// Returns the artifact resolved into the local store under `digest`, if
+    /// any.
     pub fn get_artifact(&self, digest: &str) -> Option<Artifact> {
         self.store.artifact.get(digest).cloned()
     }
 
+    /// Returns the path to the artifact's source context directory.
     pub fn get_artifact_context_path(&self) -> &PathBuf {
         &self.artifact_context
     }
 
+    /// Returns the name of the artifact this context is building.
     pub fn get_artifact_name(&self) -> &str {
         self.artifact.as_str()
     }
 
+    /// Returns the namespace the artifact belongs to.
     pub fn get_artifact_namespace(&self) -> &str {
         self.artifact_namespace.as_str()
     }
 
+    /// Returns the target system this context is building for.
     pub fn get_system(&self) -> ArtifactSystem {
         self.artifact_system
     }
 
+    /// Returns the value of the `key=value` build variable named `name`, if
+    /// it was set on the command line.
     pub fn get_variable(&self, name: &str) -> Option<String> {
         self.store.variable.get(name).cloned()
     }
 
-    pub async fn run(&self) -> Result<()> {
-        let service = ContextServiceServer::new(ConfigServer::new(self.store.clone()));
+    /// Runs the `ContextService` gRPC server, serving this context's
+    /// resolved artifact store to the `vorpal` CLI until the server exits.
+    /// Consumes the context: the store moves into the server.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server fails to serve on the configured port.
+    pub async fn run(self) -> Result<()> {
+        let service = ContextServiceServer::new(ConfigServer::new(self.store));
 
         let service_addr_str = format!("[::]:{}", self.port);
-        let service_addr = service_addr_str.parse().expect("failed to parse address");
+        let service_addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, self.port));
 
-        println!("context service: {service_addr_str}");
+        emit(format!("context service: {service_addr_str}"));
 
         Server::builder()
             .add_service(service)
             .serve(service_addr)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to serve: {}", e))
+            .map_err(|e| anyhow::anyhow!("failed to serve: {e}"))
     }
 }
 
+/// Writes a line to standard output.
+///
+/// The SDK's single sanctioned terminal output path: config binaries report
+/// build progress on stdout, distinct from the `tracing` output used when the
+/// binary runs as a service.
+#[expect(
+    clippy::print_stdout,
+    reason = "the SDK's single sanctioned terminal output path; config binaries report progress on stdout"
+)]
+fn emit(line: impl std::fmt::Display) {
+    println!("{line}");
+}
+
+/// Returns the root directory Vorpal stores its runtime state under.
+#[must_use]
 pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
 }
 
+/// Returns the directory Vorpal stores key material under.
+#[must_use]
 pub fn get_root_key_dir_path() -> PathBuf {
     get_root_dir_path().join("key")
 }
 
+/// Returns the path to the CA certificate used to verify TLS connections to
+/// Vorpal services.
+#[must_use]
 pub fn get_key_ca_path() -> PathBuf {
     get_root_key_dir_path().join("ca").with_extension("pem")
 }
 
+/// Returns the path to the on-disk [`VorpalCredentials`] file.
+#[must_use]
 pub fn get_key_credentials_path() -> PathBuf {
     get_root_key_dir_path()
         .join("credentials")
@@ -593,10 +744,18 @@ async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
     Ok(Some(client_tls_config))
 }
 
+/// Connects to a Vorpal service at `uri`, which may be an `http://`,
+/// `https://`, or `unix://` address.
+///
+/// # Errors
+///
+/// Returns an error if `uri` does not start with `http://`, `https://`, or
+/// `unix://`; if `uri` fails to parse; if the TLS configuration for an
+/// `https://` address cannot be built; or if connecting to the service fails.
 pub async fn build_channel(uri: &str) -> Result<Channel> {
     // Handle Unix domain socket connections
-    if uri.starts_with("unix://") {
-        let socket_path = uri.strip_prefix("unix://").unwrap().to_string();
+    if let Some(socket_path) = uri.strip_prefix("unix://") {
+        let socket_path = socket_path.to_string();
 
         // Dummy URI required by tonic's channel builder; ignored when using a custom connector.
         // Uses connect_with_connector_lazy so the channel is created immediately and the
@@ -617,12 +776,12 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
     }
 
     if !uri.starts_with("http://") && !uri.starts_with("https://") {
-        bail!("URI must start with http://, https://, or unix://: {}", uri);
+        bail!("URI must start with http://, https://, or unix://: {uri}");
     }
 
     let parsed_uri = uri
         .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow!("invalid URI: {}", e))?;
+        .map_err(|e: InvalidUri| anyhow!("invalid URI: {e}"))?;
 
     let tls_config = get_client_tls_config(uri).await?;
 
@@ -635,13 +794,13 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
     endpoint
         .connect()
         .await
-        .with_context(|| format!("failed to connect to {}", uri))
+        .with_context(|| format!("failed to connect to {uri}"))
 }
 
 /// Refreshes an expired access token using the refresh token.
 ///
 /// Returns `(access_token, expires_in, issued_at, rotated_refresh_token)`.
-/// `rotated_refresh_token` is `Some(new)` when the IdP rotated the refresh
+/// `rotated_refresh_token` is `Some(new)` when the `IdP` rotated the refresh
 /// token (Zitadel default), `None` when it did not (caller should keep the
 /// existing refresh token).
 async fn refresh_access_token(
@@ -651,7 +810,7 @@ async fn refresh_access_token(
     refresh_token: &str,
 ) -> Result<(String, u64, u64, Option<String>)> {
     // Discover token endpoint
-    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
     let doc: serde_json::Value = reqwest::get(&discovery_url).await?.json().await?;
 
     let token_endpoint = doc
@@ -676,14 +835,10 @@ async fn refresh_access_token(
 
     let token_result = request.request_async(&http_client).await?;
 
-    let new_access_token = token_result.access_token().secret().to_string();
-    let new_expires_in = token_result
-        .expires_in()
-        .map(|d| d.as_secs())
-        .unwrap_or(3600);
-    let new_refresh_token = normalize_rotated_refresh_token(
-        token_result.refresh_token().map(|t| t.secret().to_string()),
-    );
+    let new_access_token = token_result.access_token().secret().clone();
+    let new_expires_in = token_result.expires_in().map_or(3600, |d| d.as_secs());
+    let new_refresh_token =
+        normalize_rotated_refresh_token(token_result.refresh_token().map(|t| t.secret().clone()));
 
     let issued_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -699,7 +854,7 @@ async fn refresh_access_token(
 
 /// Normalizes the `refresh_token` field from an OIDC token-refresh response.
 ///
-/// Some IdPs send `"refresh_token": ""` in the response body, which the
+/// Some `IdPs` send `"refresh_token": ""` in the response body, which the
 /// `oauth2` crate may surface as `Some(RefreshToken(""))`. Treat that as
 /// "not rotated" so callers do not overwrite the stored refresh token with
 /// an empty string. Mirrors the Go and TypeScript SDK behavior.
@@ -745,6 +900,19 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Builds the `authorization: Bearer <token>` gRPC metadata header for
+/// `registry`, refreshing the stored access token first if it is within five
+/// minutes of expiry. Returns `None` when no credentials file exists or the
+/// registry has no stored issuer, in which case the request proceeds
+/// unauthenticated.
+///
+/// # Errors
+///
+/// Returns an error if the credentials file cannot be read or parsed; if the
+/// registry's issuer has no stored credentials; if the access token is
+/// expired and no refresh token is available; if the token refresh request
+/// fails; if the refreshed credentials cannot be saved; or if the resulting
+/// header value fails to parse.
 pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
     let credentials_path = get_key_credentials_path();
 
@@ -755,9 +923,10 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     let credentials_data = read(&credentials_path).await?;
     let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
 
-    let registry_issuer = match credentials.registry.get(registry) {
-        Some(issuer) => issuer.clone(),
-        None => return Ok(None),
+    // Borrowed from `credentials.registry`; the refresh below only mutates
+    // `credentials.issuer`, so the borrow stays valid across it.
+    let Some(registry_issuer) = credentials.registry.get(registry) else {
+        return Ok(None);
     };
 
     // Check if token needs refresh
@@ -765,54 +934,37 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
 
-    let needs_refresh = {
-        let issuer_creds = credentials
-            .issuer
-            .get(&registry_issuer)
-            .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
+    let issuer_creds = credentials
+        .issuer
+        .get(registry_issuer)
+        .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
-        let token_age = now - issuer_creds.issued_at;
-        let expires_in = issuer_creds.expires_in;
+    let token_age = now - issuer_creds.issued_at;
 
-        // Refresh if token has less than 5 minutes left
-        token_age + 300 >= expires_in
-    };
+    // Refresh if token has less than 5 minutes left
+    let needs_refresh = token_age + 300 >= issuer_creds.expires_in;
 
     if needs_refresh {
-        // Clone values needed for refresh
-        let (audience, client_id, refresh_token) = {
-            let issuer_creds = credentials
-                .issuer
-                .get(&registry_issuer)
-                .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
-            (
-                issuer_creds.audience.clone(),
-                issuer_creds.client_id.clone(),
-                issuer_creds.refresh_token.clone(),
-            )
-        };
-
         // Skip refresh if no refresh token available (user must re-login)
-        if refresh_token.is_empty() {
+        if issuer_creds.refresh_token.is_empty() {
             return Err(anyhow!(
-                "Access token expired and no refresh token available. Please run: vorpal login --issuer {}",
-                registry_issuer
+                "Access token expired and no refresh token available. Please run: vorpal login --issuer {registry_issuer}"
             ));
         }
 
         let (new_token, new_expires, new_issued_at, rotated_refresh) = refresh_access_token(
-            audience.as_deref(),
-            &client_id,
-            &registry_issuer,
-            &refresh_token,
+            issuer_creds.audience.as_deref(),
+            &issuer_creds.client_id,
+            registry_issuer,
+            &issuer_creds.refresh_token,
         )
         .await?;
 
         // Now update the credentials
         let issuer_creds = credentials
             .issuer
-            .get_mut(&registry_issuer)
-            .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
+            .get_mut(registry_issuer)
+            .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
         apply_token_refresh(
             issuer_creds,
@@ -828,16 +980,15 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     }
 
     // Get the access token
-    let access_token = credentials
+    let access_token = &credentials
         .issuer
-        .get(&registry_issuer)
-        .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?
-        .access_token
-        .clone();
+        .get(registry_issuer)
+        .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?
+        .access_token;
 
-    let header = format!("Bearer {}", access_token)
+    let header = format!("Bearer {access_token}")
         .parse()
-        .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+        .map_err(|e| anyhow!("failed to parse Bearer token: {e}"))?;
 
     Ok(Some(header))
 }
@@ -923,18 +1074,17 @@ mod tests {
     }
 
     #[test]
-    fn write_credentials_secure_creates_file_with_mode_0o600() {
+    fn write_credentials_secure_creates_file_with_mode_0o600() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = std::env::temp_dir().join(format!(
             "vorpal-creds-mode-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)?
                 .as_nanos()
         ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
+        std::fs::create_dir_all(&dir)?;
         let path = dir.join("credentials.json");
         // Sanity: the path must not pre-exist — we are testing file birth, not
         // an inherited mode from a pre-created 0o600 file.
@@ -942,16 +1092,10 @@ mod tests {
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
-            .build()
-            .expect("build runtime");
-        runtime
-            .block_on(write_credentials_secure(&path, b"{\"hello\":\"world\"}"))
-            .expect("write credentials");
+            .build()?;
+        runtime.block_on(write_credentials_secure(&path, b"{\"hello\":\"world\"}"))?;
 
-        let mode = std::fs::metadata(&path)
-            .expect("stat credentials")
-            .permissions()
-            .mode();
+        let mode = std::fs::metadata(&path)?.permissions().mode();
         assert_eq!(
             mode & 0o777,
             0o600,
@@ -961,10 +1105,12 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
+
+        Ok(())
     }
 
     #[test]
-    fn apply_token_refresh_persists_through_serde_roundtrip() {
+    fn apply_token_refresh_persists_through_serde_roundtrip() -> Result<()> {
         let mut creds = sample_creds();
 
         apply_token_refresh(
@@ -975,8 +1121,8 @@ mod tests {
             Some("rotated-refresh".to_string()),
         );
 
-        let json = serde_json::to_string(&creds).expect("serialize");
-        let parsed: VorpalCredentialsContent = serde_json::from_str(&json).expect("deserialize");
+        let json = serde_json::to_string(&creds)?;
+        let parsed: VorpalCredentialsContent = serde_json::from_str(&json)?;
 
         assert_eq!(parsed.access_token, "new-access");
         assert_eq!(parsed.refresh_token, "rotated-refresh");
@@ -985,5 +1131,7 @@ mod tests {
         assert_eq!(parsed.audience.as_deref(), Some("aud-1"));
         assert_eq!(parsed.client_id, "client-1");
         assert_eq!(parsed.scopes, vec!["openid", "offline_access"]);
+
+        Ok(())
     }
 }

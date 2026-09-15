@@ -4,6 +4,16 @@ import { arch, platform } from "node:os";
 export type ArtifactSystemInput = string | ArtifactSystem;
 
 /**
+ * Canonical list of all systems Vorpal supports.
+ */
+export const SYSTEMS: string[] = [
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
+];
+
+/**
  * Returns the default system string for the current platform.
  * Format: "{arch}-{os}" (e.g., "aarch64-darwin", "x86_64-linux")
  */
@@ -117,9 +127,16 @@ export function tryNormalizeSystems(
 }
 
 /**
- * Converts an ArtifactSystem enum value to a system string.
+ * Converts a system string or ArtifactSystem enum value to its canonical
+ * system string. Accepts both forms so callers holding either an authored
+ * string or a normalized enum value (e.g. from `ConfigContext.getSystem()`)
+ * can use it directly.
  */
-export function getSystemStr(system: ArtifactSystem): string {
+export function getSystemStr(system: ArtifactSystemInput): string {
+  if (typeof system === "string") {
+    return system;
+  }
+
   switch (system) {
     case ArtifactSystem.AARCH64_DARWIN:
       return "aarch64-darwin";
