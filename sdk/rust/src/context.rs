@@ -812,13 +812,13 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
         .with_context(|| format!("failed to connect to {uri}"))
 }
 
-/// Bounds a single refresh exchange so a hung IdP stalls only that exchange
+/// Bounds a single refresh exchange so a hung `IdP` stalls only that exchange
 /// rather than every caller queued behind [`CREDENTIALS_REFRESH`].
 const REFRESH_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A completed refresh exchange: `(access_token, expires_in, issued_at,
 /// rotated_refresh_token)`. `rotated_refresh_token` is `Some(new)` when the
-/// IdP rotated the refresh token (Zitadel default), `None` when it did not
+/// `IdP` rotated the refresh token (Zitadel default), `None` when it did not
 /// (caller keeps the existing refresh token).
 type RefreshedToken = (String, u64, u64, Option<String>);
 
@@ -826,7 +826,7 @@ type RefreshedToken = (String, u64, u64, Option<String>);
 /// had already left this process.
 ///
 /// The distinction is what makes the failure safe to act on. A token that
-/// reached the IdP may have been consumed and rotated even when the outcome
+/// reached the `IdP` may have been consumed and rotated even when the outcome
 /// never came back, so it must never be sent a second time. A token that
 /// never left is untouched: the fault was local (bad URL, unreachable
 /// discovery endpoint, malformed document), and retrying it once that clears
@@ -836,7 +836,7 @@ enum RefreshFailure {
     /// The exchange was abandoned before the token was put on the wire.
     NotSent(anyhow::Error),
 
-    /// The token-endpoint request was issued. The IdP may have consumed the
+    /// The token-endpoint request was issued. The `IdP` may have consumed the
     /// token whatever came back — including nothing at all.
     Sent(anyhow::Error),
 }
@@ -853,7 +853,7 @@ impl From<RefreshFailure> for anyhow::Error {
 /// destination a refresh token must not be sent to.
 ///
 /// Plaintext HTTP is refused except on loopback, where there is no network to
-/// eavesdrop and local IdP fixtures live. The origin it returns is what pins
+/// eavesdrop and local `IdP` fixtures live. The origin it returns is what pins
 /// the token endpoint — named by a remote discovery document — to the issuer
 /// the user actually logged in to.
 ///
@@ -863,12 +863,18 @@ impl From<RefreshFailure> for anyhow::Error {
 /// a second implementation of this rule on the login side is exactly how the
 /// two paths could disagree (see the trim mismatch this function does not
 /// itself fix, guarded instead at each caller's normalization point).
+///
+/// # Errors
+///
+/// Returns an error if `raw` does not parse as a URL; if it has no host; if
+/// its scheme is not `https` (and not `http` on a loopback host); or if it
+/// has neither an explicit port nor one implied by its scheme.
 pub fn credential_egress_origin(raw: &str) -> Result<String> {
-    let url = reqwest::Url::parse(raw).with_context(|| format!("invalid OIDC URL: {}", raw))?;
+    let url = reqwest::Url::parse(raw).with_context(|| format!("invalid OIDC URL: {raw}"))?;
 
     let host = url
         .host_str()
-        .ok_or_else(|| anyhow!("OIDC URL has no host: {}", raw))?;
+        .ok_or_else(|| anyhow!("OIDC URL has no host: {raw}"))?;
 
     let is_loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
 
@@ -876,15 +882,13 @@ pub fn credential_egress_origin(raw: &str) -> Result<String> {
         "https" => {}
         "http" if is_loopback => {}
         scheme => bail!(
-            "refusing to send a refresh token over {} to {}: the OIDC issuer must be https",
-            scheme,
-            host
+            "refusing to send a refresh token over {scheme} to {host}: the OIDC issuer must be https"
         ),
     }
 
     let port = url
         .port_or_known_default()
-        .ok_or_else(|| anyhow!("OIDC URL has no port: {}", raw))?;
+        .ok_or_else(|| anyhow!("OIDC URL has no port: {raw}"))?;
 
     Ok(format!("{}://{}:{}", url.scheme(), host, port))
 }
@@ -900,7 +904,7 @@ pub fn credential_egress_origin(raw: &str) -> Result<String> {
 /// [`RefreshFailure::Sent`] at the point it arises: everything up to and
 /// including the discovery round trip happens before the token is on the
 /// wire, and everything from the token-endpoint request onward happens after
-/// the IdP could have consumed it.
+/// the `IdP` could have consumed it.
 async fn refresh_access_token(
     audience: Option<&str>,
     client_id: &str,
@@ -969,17 +973,15 @@ async fn refresh_access_token(
     // origin) rather than this check being relaxed or bypassed.
     if token_endpoint_origin != issuer_origin {
         return Err(RefreshFailure::NotSent(anyhow!(
-            "OIDC token_endpoint origin {} does not match issuer origin {}",
-            token_endpoint_origin,
-            issuer_origin
+            "OIDC token_endpoint origin {token_endpoint_origin} does not match issuer origin {issuer_origin}"
         )));
     }
 
     // Create OAuth2 client
     let auth_uri = AuthUrl::new(issuer.to_string())
-        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid issuer URL: {}", e)))?;
+        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid issuer URL: {e}")))?;
     let token_uri = TokenUrl::new(token_endpoint.to_string())
-        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid token_endpoint URL: {}", e)))?;
+        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid token_endpoint URL: {e}")))?;
 
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
         .set_auth_uri(auth_uri)
@@ -999,7 +1001,7 @@ async fn refresh_access_token(
     let token_result = request
         .request_async(&http_client)
         .await
-        .map_err(|e| RefreshFailure::Sent(anyhow!("OAuth refresh-token exchange failed: {}", e)))?;
+        .map_err(|e| RefreshFailure::Sent(anyhow!("OAuth refresh-token exchange failed: {e}")))?;
 
     let new_access_token = token_result.access_token().secret().clone();
     let new_expires_in = token_result.expires_in().map_or(3600, |d| d.as_secs());
@@ -1256,7 +1258,7 @@ async fn write_credentials_secure_with_names(
 
         match opened {
             Ok(opened) => break opened,
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(err) => return Err(err.into()),
         }
     };
@@ -1324,14 +1326,14 @@ impl TokenRefresher for LiveTokenRefresher {
 /// the digest is recorded in the same synchronous stretch as the
 /// `is_spent` check that guards it, before the only `.await` that could be
 /// lost to a dropped future or a cancelled task. From that point no
-/// reachable exit — a local failure, an IdP failure, a commit failure, or
+/// reachable exit — a local failure, an `IdP` failure, a commit failure, or
 /// the caller simply dropping the future while it is suspended inside the
 /// exchange — can leave the digest unrecorded. Disarmed again only when the
 /// digest turns out not to have been needed: the exchange never reached the
-/// IdP (`RefreshFailure::NotSent`), or it did and the value that ended up
+/// `IdP` (`RefreshFailure::NotSent`), or it did and the value that ended up
 /// stored is the same value that was armed. That second case is a digest
 /// comparison, not a presence check on the response's rotated-token field:
-/// an IdP that did not rotate the value and one that rotated it to an
+/// an `IdP` that did not rotate the value and one that rotated it to an
 /// identical (echoed) value both leave the stored token equal to the one
 /// that was armed, and both must disarm — a presence check would wrongly
 /// treat the echo as a real rotation and leave the digest spent forever
@@ -1341,7 +1343,7 @@ impl TokenRefresher for LiveTokenRefresher {
 /// both leave `credentials.json` byte-identical. Re-reading that file cannot
 /// tell either apart from a token that has simply never been tried, so every
 /// waiter re-decides "needs refresh" and replays the same one-time token
-/// against the IdP (VPL-183 AB-1). Serializing the callers spaces that replay
+/// against the `IdP` (VPL-183 AB-1). Serializing the callers spaces that replay
 /// out in time; only remembering the exchange's outcome prevents it.
 ///
 /// Being spent is terminal for that token *value*, not a backoff: a
@@ -1386,7 +1388,7 @@ impl RefreshState {
     }
 
     /// Disarms `digest`: undoes a prior `arm` once it turns out the memo
-    /// never needed to hold it (the exchange never reached the IdP, or the
+    /// never needed to hold it (the exchange never reached the `IdP`, or the
     /// value that ended up stored is the one that was armed).
     fn disarm(&mut self, digest: &str) {
         self.spent.remove(digest);
@@ -1523,9 +1525,8 @@ async fn acquire_credentials_lock(path: &Path) -> Result<CredentialsFileLock> {
         // Blocks the calling OS thread (this is `spawn_blocking`, never a
         // tokio worker) until the exclusive lock is held; released by the
         // kernel when `file` closes.
-        file.lock().with_context(|| {
-            format!("failed to lock credentials file: {}", lock_path.display())
-        })?;
+        file.lock()
+            .with_context(|| format!("failed to lock credentials file: {}", lock_path.display()))?;
 
         Ok(CredentialsFileLock { _file: file })
     })
@@ -1533,7 +1534,7 @@ async fn acquire_credentials_lock(path: &Path) -> Result<CredentialsFileLock> {
 }
 
 /// Applies a completed exchange to `path`'s on-disk credentials and commits
-/// the result. Returns `Err` without committing anything when the IdP's
+/// the result. Returns `Err` without committing anything when the `IdP`'s
 /// response is unusable.
 ///
 /// The cross-process [`CredentialsFileLock`] spans the whole critical
@@ -1562,9 +1563,7 @@ async fn commit_refreshed_credentials(
     // AB-8). Refuse the record and make the user re-login instead.
     if expires_in == 0 {
         bail!(
-            "OAuth refresh for issuer {} returned a token with a zero lifetime. Please run: vorpal login --issuer {}",
-            issuer,
-            issuer
+            "OAuth refresh for issuer {issuer} returned a token with a zero lifetime. Please run: vorpal login --issuer {issuer}"
         );
     }
 
@@ -1575,7 +1574,7 @@ async fn commit_refreshed_credentials(
     let issuer_creds = credentials
         .issuer
         .get_mut(issuer)
-        .ok_or_else(|| anyhow!("no credentials for issuer: {}", issuer))?;
+        .ok_or_else(|| anyhow!("no credentials for issuer: {issuer}"))?;
 
     apply_token_refresh(
         issuer_creds,
@@ -1620,6 +1619,14 @@ pub struct LoginRecord {
 /// [`acquire_credentials_lock`] stay private on purpose: exporting both would
 /// let a caller take the atomic write without the lock, and nothing in the
 /// type system would say they belong together (VPL-188 C-2).
+///
+/// # Errors
+///
+/// Returns an error if `record.content` has a zero token lifetime or an empty
+/// refresh token (VPL-188 AB-7); if the cross-process credentials file lock
+/// cannot be acquired; if the existing `credentials.json` cannot be read or
+/// parsed; if the merged document cannot be serialized; or if the atomic
+/// write to `credentials.json` fails.
 pub async fn commit_login_credentials(record: LoginRecord) -> Result<()> {
     commit_login_credentials_at(&get_key_credentials_path(), record).await
 }
@@ -1659,16 +1666,13 @@ async fn commit_login_credentials_at(path: &Path, record: LoginRecord) -> Result
     // (VPL-188 AB-7).
     if content.expires_in == 0 {
         bail!(
-            "OAuth login for issuer {} returned a token with a zero lifetime. Please run: vorpal login --issuer {}",
-            issuer,
-            issuer
+            "OAuth login for issuer {issuer} returned a token with a zero lifetime. Please run: vorpal login --issuer {issuer}"
         );
     }
 
     if content.refresh_token.is_empty() {
         bail!(
-            "OAuth login for issuer {} returned no refresh token; vorpal cannot maintain the grant without one. Request the offline_access scope from the issuer.",
-            issuer
+            "OAuth login for issuer {issuer} returned no refresh token; vorpal cannot maintain the grant without one. Request the offline_access scope from the issuer."
         );
     }
 
@@ -1760,10 +1764,7 @@ async fn read_credentials_document(path: &Path) -> Result<VorpalCredentials> {
 /// everywhere a user reads it. The chain is still attached for `{:#}` and
 /// `Debug` renderings.
 fn spent_grant_error(issuer: &str, summary: &str, cause: anyhow::Error) -> anyhow::Error {
-    let message = format!(
-        "{} ({:#}). Please run: vorpal login --issuer {}",
-        summary, cause, issuer
-    );
+    let message = format!("{summary} ({cause:#}). Please run: vorpal login --issuer {issuer}");
 
     cause.context(message)
 }
@@ -1792,6 +1793,13 @@ fn spent_grant_error(issuer: &str, summary: &str, cause: anyhow::Error) -> anyho
 /// future again and costs one surplus exchange. It is bounded to one, because
 /// that waiter's own commit re-mints `issued_at` from the clock it just read
 /// (VPL-283 SEC-283-2, accepted residual risk).
+#[expect(
+    clippy::similar_names,
+    reason = "`refresher` (the injected TokenRefresher) and `refreshed` (the outcome \
+              tuple, deliberately named rather than positional per the comment at its \
+              declaration) name different things at different scopes; renaming either \
+              would trade a real distinction for a cosmetic one"
+)]
 async fn client_auth_header_at(
     credentials_path: &Path,
     registry: &str,
@@ -1845,8 +1853,7 @@ async fn client_auth_header_at(
             // known: the exchange was already attempted and its outcome is
             // not confirmed safe to retry.
             return Err(anyhow!(
-                "OAuth refresh-token exchange for the stored token was already attempted and its outcome could not be confirmed as safe to retry. Please run: vorpal login --issuer {}",
-                registry_issuer
+                "OAuth refresh-token exchange for the stored token was already attempted and its outcome could not be confirmed as safe to retry. Please run: vorpal login --issuer {registry_issuer}"
             ));
         }
 
@@ -1889,8 +1896,7 @@ async fn client_auth_header_at(
                 return Err(spent_grant_error(
                     &registry_issuer,
                     &format!(
-                        "The OAuth refresh-token exchange for issuer {} failed after the token had been sent, so the stored refresh token is no longer usable",
-                        registry_issuer
+                        "The OAuth refresh-token exchange for issuer {registry_issuer} failed after the token had been sent, so the stored refresh token is no longer usable"
                     ),
                     err,
                 ));
@@ -1966,8 +1972,7 @@ async fn client_auth_header_at(
             return Err(spent_grant_error(
                 &registry_issuer,
                 &format!(
-                    "Refreshed credentials for issuer {} could not be saved, so the stored refresh token is no longer usable",
-                    registry_issuer
+                    "Refreshed credentials for issuer {registry_issuer} could not be saved, so the stored refresh token is no longer usable"
                 ),
                 err,
             ));
@@ -1981,9 +1986,9 @@ async fn client_auth_header_at(
             state.disarm(&refresh_token_digest);
         }
 
-        let header = format!("Bearer {}", refreshed_access_token)
+        let header = format!("Bearer {refreshed_access_token}")
             .parse()
-            .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+            .map_err(|e| anyhow!("failed to parse Bearer token: {e}"))?;
 
         return Ok(Some(header));
     }
@@ -2034,7 +2039,7 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     client_auth_header_live(&get_key_credentials_path(), registry).await
 }
 
-/// The production wiring of [`client_auth_header`] — the real IdP exchange
+/// The production wiring of [`client_auth_header`] — the real `IdP` exchange
 /// and the real clock — with only the credentials path left as a parameter,
 /// so a test can drive that wiring instead of trusting it by inspection.
 ///
@@ -2050,6 +2055,12 @@ async fn client_auth_header_live(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -2177,7 +2188,11 @@ mod tests {
                 .expect("read scratch dir")
                 .map(|entry| entry.expect("dir entry").file_name())
                 .map(|name| name.to_string_lossy().into_owned())
-                .filter(|name| name.ends_with(".tmp"))
+                .filter(|name| {
+                    std::path::Path::new(name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+                })
                 .collect()
         }
     }
@@ -2192,7 +2207,7 @@ mod tests {
     type Exchange = std::result::Result<RefreshedToken, RefreshFailure>;
 
     /// Counts exchanges and answers each with a scripted outcome, so a test
-    /// can pin how many times the real entry point reached the IdP.
+    /// can pin how many times the real entry point reached the `IdP`.
     struct ScriptedRefresher {
         calls: AtomicU32,
         respond: Box<dyn Fn(u32) -> Exchange + Send + Sync>,
@@ -2714,7 +2729,7 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(2));
 
         let login_path = scratch.path.clone();
-        let login_barrier = barrier.clone();
+        let login_barrier = std::sync::Arc::clone(&barrier);
         let login_token = login_refresh.clone();
         let login_handle = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -2729,7 +2744,7 @@ mod tests {
         });
 
         let refresh_path = scratch.path.clone();
-        let refresh_barrier = barrier.clone();
+        let refresh_barrier = std::sync::Arc::clone(&barrier);
         let refresh_issuer_thread = refresh_issuer.clone();
         let refresh_handle = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -2915,7 +2930,7 @@ mod tests {
 
         for _ in 0..8 {
             let path = scratch.path.clone();
-            let refresher = refresher.clone();
+            let refresher = std::sync::Arc::clone(&refresher);
 
             tasks.spawn(async move {
                 client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
@@ -2976,7 +2991,7 @@ mod tests {
 
         for _ in 0..8 {
             let path = scratch.path.clone();
-            let refresher = refresher.clone();
+            let refresher = std::sync::Arc::clone(&refresher);
 
             tasks.spawn(async move {
                 client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
@@ -3003,14 +3018,12 @@ mod tests {
 
                 assert!(
                     rendered.contains("Permission denied"),
-                    "the local cause must survive into the message a caller prints, got: {}",
-                    rendered
+                    "the local cause must survive into the message a caller prints, got: {rendered}"
                 );
                 assert!(
                     rendered.contains("no longer usable")
                         && rendered.contains("vorpal login --issuer"),
-                    "a spent grant must name the remedy, got: {}",
-                    rendered
+                    "a spent grant must name the remedy, got: {rendered}"
                 );
             }
 
@@ -3116,7 +3129,7 @@ mod tests {
 
         tokio::select! {
             result = client_auth_header_at(&scratch.path, "registry-1", &hanging, &clock) => {
-                panic!("the exchange never resolves; got {:?}", result);
+                panic!("the exchange never resolves; got {result:?}");
             }
             () = hanging.entered.notified() => {
                 // The exchange has been entered — state.spent is already
@@ -3190,8 +3203,7 @@ mod tests {
 
         assert!(
             refused.to_string().contains("already attempted"),
-            "got: {}",
-            refused
+            "got: {refused}"
         );
         assert_eq!(
             retry.calls(),
@@ -3432,7 +3444,7 @@ mod tests {
                 "rotated-access".to_string(),
                 0,
                 now,
-                Some(format!("{}-{}", rotated, call)),
+                Some(format!("{rotated}-{call}")),
             ))
         });
 
@@ -3472,8 +3484,7 @@ mod tests {
         for expires_in in [1, 2, 60, 299, 300, 301, 600, 3600] {
             assert!(
                 !needs_refresh(now, expires_in, now),
-                "a token issued now with expires_in {} must not be due for refresh",
-                expires_in
+                "a token issued now with expires_in {expires_in} must not be due for refresh"
             );
         }
     }
@@ -3492,14 +3503,11 @@ mod tests {
         ] {
             assert!(
                 !needs_refresh(now - (due_at - 1), expires_in, now),
-                "expires_in {} must not be due one second early",
-                expires_in
+                "expires_in {expires_in} must not be due one second early"
             );
             assert!(
                 needs_refresh(now - due_at, expires_in, now),
-                "expires_in {} must be due at age {}",
-                expires_in,
-                due_at
+                "expires_in {expires_in} must be due at age {due_at}"
             );
         }
     }
@@ -3579,7 +3587,7 @@ mod tests {
 
         for _ in 0..8 {
             let path = scratch.path.clone();
-            let refresher = refresher.clone();
+            let refresher = std::sync::Arc::clone(&refresher);
 
             tasks.spawn(async move {
                 client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
@@ -3605,8 +3613,7 @@ mod tests {
                 assert!(
                     rendered.contains("no longer usable")
                         && rendered.contains("vorpal login --issuer"),
-                    "a spent grant must name the remedy, got: {}",
-                    rendered
+                    "a spent grant must name the remedy, got: {rendered}"
                 );
             }
 
@@ -3656,7 +3663,7 @@ mod tests {
 
         for _ in 0..8 {
             let path = scratch.path.clone();
-            let refresher = refresher.clone();
+            let refresher = std::sync::Arc::clone(&refresher);
 
             tasks.spawn(async move {
                 client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
@@ -3719,7 +3726,7 @@ mod tests {
         );
 
         let sim_clock = Arc::new(AtomicU64::new(before_lock));
-        let refresher_clock = sim_clock.clone();
+        let refresher_clock = std::sync::Arc::clone(&sim_clock);
 
         let refresher = Arc::new(ScriptedRefresher::new(move |_| {
             // Every exchange mints its issued_at from a clock reading one
@@ -3741,8 +3748,8 @@ mod tests {
 
         for _ in 0..8 {
             let path = scratch.path.clone();
-            let refresher = refresher.clone();
-            let clock = sim_clock.clone();
+            let refresher = std::sync::Arc::clone(&refresher);
+            let clock = std::sync::Arc::clone(&sim_clock);
 
             tasks.spawn(async move {
                 client_auth_header_at(&path, "registry-1", refresher.as_ref(), &move || {
@@ -3842,7 +3849,7 @@ mod tests {
         let writer_path = path.clone();
         let writer_content_a = content_a.clone();
         let writer_content_b = content_b.clone();
-        let writer_done = done.clone();
+        let writer_done = std::sync::Arc::clone(&done);
         let writer = tokio::spawn(async move {
             for i in 0..ITERATIONS {
                 let bytes = if i % 2 == 0 {
@@ -3858,7 +3865,7 @@ mod tests {
         });
 
         let reader_path = path.clone();
-        let reader_done = done.clone();
+        let reader_done = std::sync::Arc::clone(&done);
         let reader = tokio::task::spawn_blocking(move || {
             let mut reads = 0usize;
             let mut torn = 0usize;
@@ -3897,6 +3904,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::similar_names,
+        reason = "the _a/_b suffix pairing across issuer/path/barrier/handle names is the \
+                  point: it makes the test's symmetric two-thread structure legible"
+    )]
     fn commit_refreshed_credentials_survives_two_concurrent_refreshes_for_different_issuers() {
         // AC2 / C-281-12(b): genuinely independent writers, not two tasks
         // sharing one process's CREDENTIALS_REFRESH. `commit_refreshed_credentials`
@@ -3947,7 +3959,7 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(2));
 
         let path_a = scratch.path.clone();
-        let barrier_a = barrier.clone();
+        let barrier_a = std::sync::Arc::clone(&barrier);
         let issuer_a_thread = issuer_a.clone();
         let handle_a = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -3968,7 +3980,7 @@ mod tests {
         });
 
         let path_b = scratch.path.clone();
-        let barrier_b = barrier.clone();
+        let barrier_b = std::sync::Arc::clone(&barrier);
         let issuer_b_thread = issuer_b.clone();
         let handle_b = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -4017,6 +4029,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::similar_names,
+        reason = "the _a/_b suffix pairing across issuer/path/barrier/handle names is the \
+                  point: it makes the test's symmetric two-thread structure legible"
+    )]
     fn naive_read_modify_write_without_the_lock_loses_a_concurrent_issuers_update() {
         // C-281-12's mandatory negative control: this reproduces AB-281-1 in
         // the exact shape VPL-281 describes — read the whole file, mutate
@@ -4070,7 +4087,7 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(2));
 
         let path_a = scratch.path.clone();
-        let barrier_a = barrier.clone();
+        let barrier_a = std::sync::Arc::clone(&barrier);
         let issuer_a_thread = issuer_a.clone();
         let handle_a = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -4086,7 +4103,7 @@ mod tests {
         });
 
         let path_b = scratch.path.clone();
-        let barrier_b = barrier.clone();
+        let barrier_b = std::sync::Arc::clone(&barrier);
         let issuer_b_thread = issuer_b.clone();
         let handle_b = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -4111,13 +4128,11 @@ mod tests {
         let a_survived = final_credentials
             .issuer
             .get(&issuer_a)
-            .map(|c| c.access_token == "a-new-access")
-            .unwrap_or(false);
+            .is_some_and(|c| c.access_token == "a-new-access");
         let b_survived = final_credentials
             .issuer
             .get(&issuer_b)
-            .map(|c| c.access_token == "b-new-access")
-            .unwrap_or(false);
+            .is_some_and(|c| c.access_token == "b-new-access");
 
         assert!(
             !(a_survived && b_survived),
@@ -4158,8 +4173,7 @@ mod tests {
         let (elapsed, _lock_b) = handle_b.join().expect("thread b panicked");
         assert!(
             elapsed >= std::time::Duration::from_millis(150),
-            "second acquirer got the lock after {:?}, so it did not wait for the first to release",
-            elapsed
+            "second acquirer got the lock after {elapsed:?}, so it did not wait for the first to release"
         );
     }
 
@@ -4232,7 +4246,7 @@ mod tests {
         // token bytes (VPL-183 C5).
         let scratch = ScratchCredentials::new("commit-failure");
         let token = scratch.token("live-refresh-token");
-        let bytes = format!("{{\"refresh_token\":\"{}\"}}", token);
+        let bytes = format!("{{\"refresh_token\":\"{token}\"}}");
 
         // Make `rename` fail after the temp file has been written: a
         // non-empty directory cannot be replaced by a file.
@@ -4305,8 +4319,7 @@ mod tests {
 
         assert!(
             leftovers.is_empty(),
-            "cancelled writes leaked temp files: {:?}",
-            leftovers
+            "cancelled writes leaked temp files: {leftovers:?}"
         );
     }
 
@@ -4400,8 +4413,7 @@ mod tests {
         // this test's name promises.
         assert!(
             error.contains("every one of 2 candidate temp-file names"),
-            "the error must report every candidate as tried, got: {}",
-            error
+            "the error must report every candidate as tried, got: {error}"
         );
 
         assert!(
@@ -4427,13 +4439,11 @@ mod tests {
 
         assert!(
             !error.contains("already taken"),
-            "no name was drawn, so nothing was taken, got: {}",
-            error
+            "no name was drawn, so nothing was taken, got: {error}"
         );
         assert!(
             error.contains("no candidate temp-file name was offered"),
-            "the error must say no name was offered, got: {}",
-            error
+            "the error must say no name was offered, got: {error}"
         );
     }
 
@@ -4502,25 +4512,24 @@ mod tests {
         assert_eq!(
             distinct.len(),
             names.len(),
-            "every candidate name must be distinct, got {:?}",
-            names
+            "every candidate name must be distinct, got {names:?}"
         );
 
         for name in &names {
             assert!(
                 name.starts_with(&format!("credentials.json.{}.", std::process::id())),
-                "a candidate name must stay a bare temp name beside the credentials file, got {}",
-                name
+                "a candidate name must stay a bare temp name beside the credentials file, got {name}"
             );
             assert!(
-                name.ends_with(".tmp"),
-                "unexpected candidate name: {}",
-                name
+                std::path::Path::new(name)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp")),
+                "unexpected candidate name: {name}"
             );
         }
     }
 
-    /// A minimal HTTP/1.1 stand-in for an IdP: it answers each request with
+    /// A minimal HTTP/1.1 stand-in for an `IdP`: it answers each request with
     /// whatever `respond` returns for that request's path, or holds the
     /// connection open forever when that is `None`. Only a true external
     /// boundary is faked here — the code under test is the real exchange.
@@ -4539,7 +4548,7 @@ mod tests {
             let addr = listener.local_addr().expect("fixture address");
             let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
             let respond = Arc::new(respond);
-            let accepted = paths.clone();
+            let accepted = std::sync::Arc::clone(&paths);
 
             tokio::spawn(async move {
                 loop {
@@ -4547,8 +4556,8 @@ mod tests {
                         return;
                     };
 
-                    let respond = respond.clone();
-                    let accepted = accepted.clone();
+                    let respond = std::sync::Arc::clone(&respond);
+                    let accepted = std::sync::Arc::clone(&accepted);
 
                     tokio::spawn(async move {
                         use tokio::io::AsyncReadExt;
@@ -4781,8 +4790,7 @@ mod tests {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "client_auth_header_live did not return within this test's own {:?} watchdog: LiveTokenRefresher's REFRESH_HTTP_TIMEOUT appears to be unwired",
-                watchdog
+                "client_auth_header_live did not return within this test's own {watchdog:?} watchdog: LiveTokenRefresher's REFRESH_HTTP_TIMEOUT appears to be unwired"
             )
         });
 
@@ -4792,9 +4800,7 @@ mod tests {
 
         assert!(
             elapsed >= REFRESH_HTTP_TIMEOUT,
-            "LiveTokenRefresher must honor the full {:?} REFRESH_HTTP_TIMEOUT, returned after only {:?}",
-            REFRESH_HTTP_TIMEOUT,
-            elapsed
+            "LiveTokenRefresher must honor the full {REFRESH_HTTP_TIMEOUT:?} REFRESH_HTTP_TIMEOUT, returned after only {elapsed:?}"
         );
 
         assert_eq!(
@@ -4863,17 +4869,13 @@ mod tests {
             .expect("the client timeout must surface as a reqwest::Error");
         assert!(
             reqwest_error.is_timeout(),
-            "unexpected error: {}",
-            reqwest_error
+            "unexpected error: {reqwest_error}"
         );
 
         let allowance = NEVER_ANSWER_TIMEOUT * NEVER_ANSWER_ELAPSED_ALLOWANCE;
         assert!(
             elapsed <= allowance,
-            "the discovery leg must be bounded by the configured {:?}, took {:?} which exceeds the {:?} allowance",
-            NEVER_ANSWER_TIMEOUT,
-            elapsed,
-            allowance
+            "the discovery leg must be bounded by the configured {NEVER_ANSWER_TIMEOUT:?}, took {elapsed:?} which exceeds the {allowance:?} allowance"
         );
 
         assert_eq!(
@@ -4897,11 +4899,7 @@ mod tests {
 
         let error = anyhow::Error::from(failure).to_string();
 
-        assert!(
-            error.contains("must be https"),
-            "unexpected error: {}",
-            error
-        );
+        assert!(error.contains("must be https"), "unexpected error: {error}");
     }
 
     #[tokio::test]
@@ -5005,10 +5003,7 @@ mod tests {
         let allowance = NEVER_ANSWER_TIMEOUT * NEVER_ANSWER_ELAPSED_ALLOWANCE;
         assert!(
             elapsed <= allowance,
-            "the token POST must be bounded by the configured {:?}, took {:?} which exceeds the {:?} allowance",
-            NEVER_ANSWER_TIMEOUT,
-            elapsed,
-            allowance
+            "the token POST must be bounded by the configured {NEVER_ANSWER_TIMEOUT:?}, took {elapsed:?} which exceeds the {allowance:?} allowance"
         );
 
         assert!(
@@ -5068,8 +5063,7 @@ mod tests {
             }
 
             Some(format!(
-                "HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:{}/token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                elsewhere_port
+                "HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:{elsewhere_port}/token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
             ))
         })
         .await;

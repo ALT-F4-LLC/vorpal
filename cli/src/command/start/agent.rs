@@ -433,7 +433,7 @@ where
 
         pushed?;
 
-        bail!("failed to remove source archive: {:?}", e);
+        bail!("failed to remove source archive: {e:?}");
     }
 
     pushed?;
@@ -636,13 +636,18 @@ struct SourceCacheKey {
     platform: String,
 }
 
+/// Key for `SourceCacheState::by_url`: `(namespace, source_url, excludes,
+/// includes, platform)`, for HTTP sources, which are keyed on the fetch URL
+/// rather than the full `SourceCacheKey` fields `by_key` uses.
+type SourceUrlCacheKey = (String, String, Vec<String>, Vec<String>, String);
+
 /// Combined cache of source digests resolved during this session.
 #[derive(Debug, Default)]
 struct SourceCacheState {
     /// Key: namespace + all source fields (except digest) + platform -> computed source digest
     by_key: HashMap<SourceCacheKey, String>,
     /// Key: (namespace, `source_url`, excludes, includes, platform) -> computed source digest (HTTP sources only)
-    by_url: HashMap<(String, String, Vec<String>, Vec<String>, String), String>,
+    by_url: HashMap<SourceUrlCacheKey, String>,
 }
 
 type SourceCache = Arc<Mutex<SourceCacheState>>;
@@ -1170,6 +1175,10 @@ impl AgentService for AgentServer {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test assertions read as intent, not defensive code: an expect failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -1305,8 +1314,8 @@ mod tests {
         let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
         let builder = RecordingSourceBuilder::new();
 
-        prepare_http_source("x", source_cache.clone(), &builder).await;
-        prepare_http_source("y", source_cache.clone(), &builder).await;
+        prepare_http_source("x", std::sync::Arc::clone(&source_cache), &builder).await;
+        prepare_http_source("y", std::sync::Arc::clone(&source_cache), &builder).await;
 
         assert_eq!(
             builder.namespaces().await,
@@ -1323,8 +1332,8 @@ mod tests {
         let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
         let builder = RecordingSourceBuilder::new();
 
-        prepare_http_source("x", source_cache.clone(), &builder).await;
-        prepare_http_source("x", source_cache.clone(), &builder).await;
+        prepare_http_source("x", std::sync::Arc::clone(&source_cache), &builder).await;
+        prepare_http_source("x", std::sync::Arc::clone(&source_cache), &builder).await;
 
         assert_eq!(
             builder.namespaces().await,

@@ -239,7 +239,7 @@ impl ArchiveService for ArchiveServer {
         // Safe only because `digest` and `namespace` are each a single path
         // component with no separator: an unvalidated pair could collide
         // ("a"/"b/c" vs "a/b"/"c") and answer for the wrong namespace.
-        let cache_key = format!("{}/{}", namespace, digest);
+        let cache_key = format!("{namespace}/{digest}");
         info!("registry |> archive check: cache_key={}", cache_key);
 
         // Try cache first
@@ -657,6 +657,11 @@ pub async fn backend_artifact(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -666,7 +671,6 @@ mod tests {
 
     /// Recorded (digest, namespace, `collected_data`) for one push call.
     type PushCall = (String, String, Vec<u8>);
-
 
     /// Mock backend that tracks call counts, received data, and returns configurable results.
     struct MockBackend {
@@ -871,8 +875,12 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same digest in different namespaces
-        server.check(make_check_request("ns1", DIGEST_GENERIC)).await?;
-        server.check(make_check_request("ns2", DIGEST_GENERIC)).await?;
+        server
+            .check(make_check_request("ns1", DIGEST_GENERIC))
+            .await?;
+        server
+            .check(make_check_request("ns2", DIGEST_GENERIC))
+            .await?;
 
         // Then: backend should be called twice (different cache keys)
         assert_eq!(backend.call_count(), 2);
@@ -911,9 +919,15 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 0);
 
         // When: we check the same archive multiple times
-        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
-        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
-        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
+        server
+            .check(make_check_request("ns", DIGEST_GENERIC))
+            .await?;
+        server
+            .check(make_check_request("ns", DIGEST_GENERIC))
+            .await?;
+        server
+            .check(make_check_request("ns", DIGEST_GENERIC))
+            .await?;
 
         // Then: backend should be called every time (no caching)
         assert_eq!(backend.call_count(), 3);
@@ -940,13 +954,17 @@ mod tests {
             ArchiveServer::with_check_cache_ttl(backend.box_clone(), Duration::from_millis(50));
 
         // When: we check, wait for TTL to expire, then check again
-        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
+        server
+            .check(make_check_request("ns", DIGEST_GENERIC))
+            .await?;
         assert_eq!(backend.call_count(), 1);
 
         // Wait for cache to expire.
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
+        server
+            .check(make_check_request("ns", DIGEST_GENERIC))
+            .await?;
 
         // Then: backend should be called twice (second call after expiration)
         assert_eq!(backend.call_count(), 2);
@@ -1104,37 +1122,37 @@ mod tests {
     // -----------------------------------------------------------------------
 
     struct MockArtifactBackend {
-        get_artifact_calls: Arc<AtomicUsize>,
-        get_artifact_alias_calls: Arc<AtomicUsize>,
-        store_artifact_calls: Arc<AtomicUsize>,
+        get_artifact: Arc<AtomicUsize>,
+        get_artifact_alias: Arc<AtomicUsize>,
+        store_artifact: Arc<AtomicUsize>,
     }
 
     impl MockArtifactBackend {
         fn new() -> Self {
             Self {
-                get_artifact_calls: Arc::new(AtomicUsize::new(0)),
-                get_artifact_alias_calls: Arc::new(AtomicUsize::new(0)),
-                store_artifact_calls: Arc::new(AtomicUsize::new(0)),
+                get_artifact: Arc::new(AtomicUsize::new(0)),
+                get_artifact_alias: Arc::new(AtomicUsize::new(0)),
+                store_artifact: Arc::new(AtomicUsize::new(0)),
             }
         }
 
         fn get_artifact_call_count(&self) -> usize {
-            self.get_artifact_calls.load(Ordering::SeqCst)
+            self.get_artifact.load(Ordering::SeqCst)
         }
 
         fn alias_call_count(&self) -> usize {
-            self.get_artifact_alias_calls.load(Ordering::SeqCst)
+            self.get_artifact_alias.load(Ordering::SeqCst)
         }
 
         fn store_call_count(&self) -> usize {
-            self.store_artifact_calls.load(Ordering::SeqCst)
+            self.store_artifact.load(Ordering::SeqCst)
         }
     }
 
     #[tonic::async_trait]
     impl ArtifactBackend for MockArtifactBackend {
         async fn get_artifact(&self, _digest: &str, _namespace: &str) -> Result<Artifact, Status> {
-            self.get_artifact_calls.fetch_add(1, Ordering::SeqCst);
+            self.get_artifact.fetch_add(1, Ordering::SeqCst);
             Ok(Artifact::default())
         }
 
@@ -1145,7 +1163,7 @@ mod tests {
             _system: ArtifactSystem,
             _version: &str,
         ) -> Result<String, Status> {
-            self.get_artifact_alias_calls.fetch_add(1, Ordering::SeqCst);
+            self.get_artifact_alias.fetch_add(1, Ordering::SeqCst);
             Ok(DIGEST_GENERIC.to_string())
         }
 
@@ -1155,15 +1173,15 @@ mod tests {
             _artifact_aliases: Vec<String>,
             _artifact_namespace: String,
         ) -> Result<String, Status> {
-            self.store_artifact_calls.fetch_add(1, Ordering::SeqCst);
+            self.store_artifact.fetch_add(1, Ordering::SeqCst);
             Ok(DIGEST_GENERIC.to_string())
         }
 
         fn box_clone(&self) -> Box<dyn ArtifactBackend> {
             Box::new(MockArtifactBackend {
-                get_artifact_calls: Arc::clone(&self.get_artifact_calls),
-                get_artifact_alias_calls: Arc::clone(&self.get_artifact_alias_calls),
-                store_artifact_calls: Arc::clone(&self.store_artifact_calls),
+                get_artifact: Arc::clone(&self.get_artifact),
+                get_artifact_alias: Arc::clone(&self.get_artifact_alias),
+                store_artifact: Arc::clone(&self.store_artifact),
             })
         }
     }
@@ -1720,6 +1738,12 @@ mod tests {
 
     /// Encode one protobuf message as a single gRPC length-prefixed frame
     /// (uncompressed): `[0u8][len: u32 BE][message bytes]`.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test fixture payloads are small literals defined in this file; \
+                  a real truncation here would mean the fixture itself is malformed, \
+                  not a runtime condition to handle"
+    )]
     fn grpc_frame(msg: &ArchivePushRequest) -> bytes::Bytes {
         let mut payload = Vec::new();
         prost::Message::encode(msg, &mut payload).expect("encoding a well-formed message");
@@ -1736,7 +1760,7 @@ mod tests {
     /// of chunks, each becoming one gRPC message on the wire — the same
     /// shape a real client's `ArchivePushRequest` stream produces.
     fn make_unauthenticated_push_request(
-        chunks: Vec<ArchivePushRequest>,
+        chunks: &[ArchivePushRequest],
     ) -> Request<Streaming<ArchivePushRequest>> {
         let body = FixedFramesBody {
             frames: chunks.iter().map(grpc_frame).collect(),
@@ -1756,7 +1780,7 @@ mod tests {
     /// chunk rather than by the RPC's own fields, so the grant is derived
     /// from that chunk.
     fn make_push_streaming_request(
-        chunks: Vec<ArchivePushRequest>,
+        chunks: &[ArchivePushRequest],
     ) -> Request<Streaming<ArchivePushRequest>> {
         let namespace = chunks
             .first()
@@ -1774,7 +1798,7 @@ mod tests {
 
         // When: the first chunk carries a traversing digest, over a real
         // `Streaming<ArchivePushRequest>` built from wire-framed bytes
-        let request = make_push_streaming_request(vec![ArchivePushRequest {
+        let request = make_push_streaming_request(&[ArchivePushRequest {
             data: b"hello".to_vec(),
             digest: "../../../../../etc/cron.d/pwn".to_string(),
             namespace: "library".to_string(),
@@ -1798,7 +1822,7 @@ mod tests {
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
-        let request = make_push_streaming_request(vec![ArchivePushRequest {
+        let request = make_push_streaming_request(&[ArchivePushRequest {
             data: b"hello".to_vec(),
             digest: DIGEST_GENERIC.to_string(),
             namespace: "a/b".to_string(),
@@ -1817,7 +1841,7 @@ mod tests {
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
-        let request = make_push_streaming_request(vec![ArchivePushRequest {
+        let request = make_push_streaming_request(&[ArchivePushRequest {
             data: b"hello world".to_vec(),
             digest: DIGEST_GENERIC.to_string(),
             namespace: "library".to_string(),
@@ -1851,7 +1875,7 @@ mod tests {
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
-        let request = make_push_streaming_request(vec![
+        let request = make_push_streaming_request(&[
             ArchivePushRequest {
                 data: b"chunk-one-".to_vec(),
                 digest: DIGEST_GENERIC.to_string(),
@@ -1888,7 +1912,7 @@ mod tests {
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
-        let mut request = make_push_streaming_request(vec![ArchivePushRequest {
+        let mut request = make_push_streaming_request(&[ArchivePushRequest {
             data: b"hello".to_vec(),
             digest: DIGEST_GENERIC.to_string(),
             namespace: "library".to_string(),
@@ -2157,7 +2181,7 @@ mod tests {
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
-        let request = make_unauthenticated_push_request(vec![ArchivePushRequest {
+        let request = make_unauthenticated_push_request(&[ArchivePushRequest {
             data: b"payload".to_vec(),
             digest: DIGEST_GENERIC.to_string(),
             namespace: "library".to_string(),

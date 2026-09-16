@@ -51,8 +51,7 @@ use vorpal_sdk::{
         },
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
-            ArtifactSource, ArtifactStep, ArtifactStepSecret, ArtifactSystem,
-            StoreArtifactRequest,
+            ArtifactSource, ArtifactStep, ArtifactStepSecret, ArtifactSystem, StoreArtifactRequest,
         },
         worker::{
             worker_service_server::WorkerService, BuildArtifactRequest, BuildArtifactResponse,
@@ -345,7 +344,7 @@ async fn unpack_source_workspace(
             get_file_paths(&source_workspace_path.to_path_buf(), vec![], vec![])
                 .map_err(|err| Status::internal(format!("failed to get source files: {err}")))?;
 
-        for path in source_workspace_files.iter() {
+        for path in &source_workspace_files {
             set_timestamps(path).await.map_err(|err| {
                 Status::internal(format!("failed to sanitize output files: {err:?}"))
             })?;
@@ -821,7 +820,7 @@ async fn find_embedded_reference(
     let needle = needle.as_bytes();
     let overlap = needle.len() - 1;
 
-    for path in staged_files.iter() {
+    for path in staged_files {
         let metadata = symlink_metadata(path)
             .await
             .map_err(|err| Status::internal(format!("failed to stat output file: {err}")))?;
@@ -1206,7 +1205,7 @@ async fn run_step(
     // violation: refuse it here instead of indexing past the end of a split.
     // The offending value is not echoed — secrets are carried in this same
     // list, and the client already knows what it sent.
-    for env in environments_sorted.iter() {
+    for env in &environments_sorted {
         let Some((key, value)) = env.split_once('=') else {
             return Err(Status::invalid_argument(
                 "step environment entry is not 'KEY=VALUE'",
@@ -1647,14 +1646,14 @@ async fn validate_and_lock_artifact(
         return Err(Status::invalid_argument("artifact 'steps' are missing"));
     }
 
-    for step in artifact.steps.iter() {
-        for step_artifact in step.artifacts.iter() {
+    for step in &artifact.steps {
+        for step_artifact in &step.artifacts {
             parse_artifact_digest(step_artifact, "artifact step")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
         }
     }
 
-    for artifact_source in artifact.sources.iter() {
+    for artifact_source in &artifact.sources {
         if let Some(source_digest) = artifact_source.digest.as_ref() {
             parse_artifact_digest(source_digest, "artifact source")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
@@ -1707,7 +1706,7 @@ async fn validate_and_lock_artifact(
 
     let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest, artifact_namespace);
 
-    if let Err(status) = acquire_output_lock(&artifact_output_lock, &artifact_json).await {
+    if let Err(status) = acquire_output_lock(&artifact_output_lock, artifact_json).await {
         error!(
             "worker |> could not take the lock for {}: {}",
             artifact_digest,
@@ -1755,6 +1754,20 @@ async fn obtain_build_credentials(
     (archive_auth_header, artifact_auth_header)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "drives one artifact through step execution, local staging, and registry \
+              publish as a single fail-safe sequence (stage before push, push only what \
+              was really staged); splitting the stages into helpers would separate code \
+              that has to run in this exact order and share this exact cleanup path"
+)]
+#[expect(
+    clippy::similar_names,
+    reason = "`published` (the staging outcome) and `publisher` (the RemoteRegistry \
+              value) are different types filling different roles 100+ lines apart; \
+              renaming either for lexical distance would lose the name that documents \
+              its role"
+)]
 async fn build_artifact(
     issuer: Option<&str>,
     issuer_audience: Option<&str>,
@@ -1875,14 +1888,14 @@ async fn build_artifact(
 
         // Pull sources
 
-        for artifact_source in artifact.sources.iter() {
+        for artifact_source in &artifact.sources {
             pull_source(
                 archive_auth_header.clone(),
                 artifact_namespace.clone(),
                 artifact_source,
                 &artifact_source_dir_path,
                 registry.clone(),
-                &tx,
+                tx,
             )
             .await?;
 
@@ -1897,19 +1910,19 @@ async fn build_artifact(
         // Pull dependency artifacts
 
         let mut dependency_digests = HashSet::new();
-        for step in artifact.steps.iter() {
-            for dep_digest in step.artifacts.iter() {
+        for step in &artifact.steps {
+            for dep_digest in &step.artifacts {
                 dependency_digests.insert(dep_digest.clone());
             }
         }
 
-        for dep_digest in dependency_digests.iter() {
+        for dep_digest in &dependency_digests {
             pull_artifact(
                 archive_auth_header.as_ref(),
                 artifact_namespace,
                 dep_digest,
                 &registry,
-                &tx,
+                tx,
             )
             .await?;
 
@@ -1937,7 +1950,7 @@ async fn build_artifact(
         let store_namespace = artifact_namespace.clone();
 
         let published = stage_then_publish(&artifact_output_path, move |artifact_staging_path| async move {
-            for step in artifact_steps.iter() {
+            for step in artifact_steps {
                 run_step(
                     artifact_digest,
                     artifact_namespace,
@@ -2001,7 +2014,7 @@ async fn build_artifact(
             // Before the publish rather than after it: these are the bytes the
             // rename installs as the store entry, and the archive pushed for this
             // digest is packed from that entry afterwards.
-            for entry in staged.iter() {
+            for entry in &staged {
                 set_timestamps(&entry.path().to_path_buf())
                     .await
                     .map_err(|err| {
@@ -2128,21 +2141,19 @@ impl WorkerService for WorkerServer {
         // TDD §4.5 + AC §1.3 #5: every authenticated call records the
         // principal classification (Human with `sub`, TrustedService with
         // `azp`) and the namespace it touched.
-        match request.extensions().get::<auth::PrincipalKind>() {
-            Some(auth::PrincipalKind::TrustedService { azp }) => {
-                info!(
-                    "worker |> build_artifact by service={} in namespace {}",
-                    azp, req_inner.artifact_namespace
-                );
-            }
-            _ => {
-                let user =
-                    auth::get_user_context(&request).unwrap_or_else(|| "<unknown>".to_string());
-                info!(
-                    "worker |> build_artifact by user={} in namespace {}",
-                    user, req_inner.artifact_namespace
-                );
-            }
+        if let Some(auth::PrincipalKind::TrustedService { azp }) =
+            request.extensions().get::<auth::PrincipalKind>()
+        {
+            info!(
+                "worker |> build_artifact by service={} in namespace {}",
+                azp, req_inner.artifact_namespace
+            );
+        } else {
+            let user = auth::get_user_context(&request).unwrap_or_else(|| "<unknown>".to_string());
+            info!(
+                "worker |> build_artifact by user={} in namespace {}",
+                user, req_inner.artifact_namespace
+            );
         }
 
         let (tx, rx) = mpsc::channel(100);
@@ -2177,6 +2188,12 @@ impl WorkerService for WorkerServer {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use filetime::{set_file_mtime, FileTime};
@@ -2347,6 +2364,12 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "every call site pushes this alongside `Err(...)` and bare `Ok(None)` into \
+                  one `Vec<Result<Option<ArchivePullResponse>, Status>>` literal, so the \
+                  element type must stay `Result`-wrapped for them to unify"
+    )]
     fn chunk(data: &[u8]) -> Result<Option<ArchivePullResponse>, Status> {
         Ok(Some(ArchivePullResponse {
             data: data.to_vec(),
@@ -2961,8 +2984,10 @@ mod tests {
             environments
                 .iter()
                 .find_map(|e| e.strip_prefix(&format!("{key}=")))
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("{key} missing from {environments:?}"))
+                .map_or_else(
+                    || panic!("{key} missing from {environments:?}"),
+                    str::to_string,
+                )
         };
 
         assert_eq!(value_of("VORPAL_OUTPUT"), "/store/output/default/.tmp-uuid");

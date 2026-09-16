@@ -1965,9 +1965,10 @@ fn generate_ts_scripts_module(script_files: &[(&str, &str)]) -> String {
 
     for (func_name, _) in script_files {
         let ts_name = to_ts_camel(func_name);
-        out.push_str(&format!(
-            "export {{ {ts_name} }} from \"./script_{func_name}.js\";\n"
-        ));
+        let _ = writeln!(
+            out,
+            "export {{ {ts_name} }} from \"./script_{func_name}.js\";"
+        );
     }
 
     out
@@ -2114,7 +2115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &ts_scripts,
         check_mode,
         &mut mismatches,
-    );
+    )?;
 
     let py_scripts = generate_py_scripts_module(&script_files);
     write_or_check(

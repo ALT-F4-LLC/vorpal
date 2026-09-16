@@ -233,8 +233,7 @@ pub fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
     if digest.len() != ARTIFACT_DIGEST_LENGTH || !is_lowercase_hex {
         bail!(
             "invalid artifact digest from {source}: expected {ARTIFACT_DIGEST_LENGTH} lowercase \
-             hex characters, got {:?}",
-            digest,
+             hex characters, got {digest:?}",
         );
     }
 
@@ -266,11 +265,9 @@ pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
         || value.starts_with(STAGING_PREFIX)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, at most \
+            "invalid artifact {field} {value:?}: must be non-empty, at most \
              {ARTIFACT_ALIAS_NAME_LENGTH} characters, contain no path separator or NUL byte, not \
-             be '.' or '..', and not start with the reserved staging prefix {:?}",
-            value,
-            STAGING_PREFIX,
+             be '.' or '..', and not start with the reserved staging prefix {STAGING_PREFIX:?}",
         );
     }
 
@@ -304,10 +301,9 @@ pub fn parse_alias_name(name: &str, field: &str) -> Result<String> {
         || !name.chars().all(is_allowed_char)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, at most {ARTIFACT_ALIAS_NAME_LENGTH} \
+            "invalid artifact {field} {name:?}: must be non-empty, at most {ARTIFACT_ALIAS_NAME_LENGTH} \
              characters, contain only alphanumeric characters, '_', '-', and '.', and not start \
              or end with '.' or '-'",
-            name,
         );
     }
 
@@ -675,6 +671,10 @@ pub async fn copy_files(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::{collections::BTreeSet, fs::File, os::unix::fs::MetadataExt};
@@ -1290,6 +1290,10 @@ mod tests {
 /// that sets the variable, or that asserts on a value derived from
 /// `get_root_dir_path`, must take the same lock.
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
 mod root_path_override_tests {
     use super::*;
     use tempfile::TempDir;
@@ -1309,7 +1313,7 @@ mod root_path_override_tests {
         fn new() -> Self {
             let guard = ROOT_PATH_ENV_LOCK
                 .lock()
-                .unwrap_or_else(|err| err.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             let previous = std::env::var("VORPAL_ROOT_PATH").ok();
             let dir = TempDir::new().unwrap();
@@ -1348,7 +1352,7 @@ mod root_path_override_tests {
         fn new(value: &str) -> Self {
             let guard = ROOT_PATH_ENV_LOCK
                 .lock()
-                .unwrap_or_else(|err| err.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             let previous = std::env::var("VORPAL_ROOT_PATH").ok();
 
@@ -1417,7 +1421,7 @@ mod root_path_override_tests {
     fn an_unset_override_keeps_the_default_root() {
         let _guard = ROOT_PATH_ENV_LOCK
             .lock()
-            .unwrap_or_else(|err| err.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let previous = std::env::var("VORPAL_ROOT_PATH").ok();
 
@@ -1425,9 +1429,8 @@ mod root_path_override_tests {
 
         let observed = get_root_dir_path();
 
-        match previous {
-            Some(value) => std::env::set_var("VORPAL_ROOT_PATH", value),
-            None => {}
+        if let Some(value) = previous {
+            std::env::set_var("VORPAL_ROOT_PATH", value);
         }
 
         assert_eq!(observed, Path::new("/var/lib/vorpal"));

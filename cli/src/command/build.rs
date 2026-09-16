@@ -69,8 +69,7 @@ fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
     if digest.len() != ARTIFACT_DIGEST_LENGTH || !is_lowercase_hex {
         bail!(
             "invalid artifact digest from {source}: expected {ARTIFACT_DIGEST_LENGTH} lowercase \
-             hex characters, got {:?}",
-            digest,
+             hex characters, got {digest:?}",
         );
     }
 
@@ -100,10 +99,8 @@ fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
         || value.starts_with(&staging_prefix)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, contain no path separator, \
-             not be '.' or '..', and not start with the reserved staging prefix {:?}",
-            value,
-            staging_prefix,
+            "invalid artifact {field} {value:?}: must be non-empty, contain no path separator, \
+             not be '.' or '..', and not start with the reserved staging prefix {staging_prefix:?}",
         );
     }
 
@@ -120,6 +117,12 @@ const STAGING_SCAN_CHUNK_SIZE: usize = 8192;
 /// with, read back out of that function rather than written out here, so
 /// renaming the prefix there cannot leave this file compiling and matching
 /// nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "staging_path_for always names its result after a real Path::new(\"/entry\") \
+              input, so file_name() returning None here would mean staging_path_for itself \
+              is broken, not a runtime condition this function should propagate"
+)]
 fn staging_path_prefix() -> String {
     let sample = staging_path_for(Path::new("/entry"));
 
@@ -182,7 +185,7 @@ async fn find_staging_path_reference(staged_files: &[PathBuf]) -> Result<Option<
     let window_size = needle.len() + STAGING_UUID_LENGTH;
     let overlap = window_size - 1;
 
-    for path in staged_files.iter() {
+    for path in staged_files {
         let metadata = symlink_metadata(path)
             .await
             .map_err(|err| anyhow!("failed to stat staged file {}: {err}", path.display()))?;
@@ -392,25 +395,24 @@ impl StagedArchive {
             return Ok(());
         }
 
-        let file = match self.file.as_mut() {
-            Some(file) => file,
-            None => {
-                let archive_parent = self
-                    .archive_path
-                    .parent()
-                    .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+        let file = if let Some(file) = self.file.as_mut() {
+            file
+        } else {
+            let archive_parent = self
+                .archive_path
+                .parent()
+                .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
 
-                create_dir_all(archive_parent).await?;
+            create_dir_all(archive_parent).await?;
 
-                let file = File::create(&self.staging_path).await.map_err(|err| {
-                    anyhow!(
-                        "failed to write archive {}: {err}",
-                        self.archive_path.display()
-                    )
-                })?;
+            let file = File::create(&self.staging_path).await.map_err(|err| {
+                anyhow!(
+                    "failed to write archive {}: {err}",
+                    self.archive_path.display()
+                )
+            })?;
 
-                self.file.insert(file)
-            }
+            self.file.insert(file)
         };
 
         file.write_all(data).await.map_err(|err| {
@@ -527,7 +529,7 @@ async fn publish_archive_stream(
                     );
                 }
 
-                bail!("{error_context}: {:?}", status);
+                bail!("{error_context}: {status:?}");
             }
         }
     }
@@ -542,7 +544,7 @@ async fn publish_archive_stream(
 /// caller's context-specific message for that case.
 async fn pull_archive(
     client_archive: &mut ArchiveServiceClient<Channel>,
-    archive_path: &PathBuf,
+    archive_path: &Path,
     artifact_digest: &str,
     artifact_namespace: &str,
     registry: &str,
@@ -656,7 +658,7 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
             );
         }
 
-        for path in staged_files.iter() {
+        for path in &staged_files {
             set_timestamps(path).await?;
         }
 
@@ -777,7 +779,7 @@ async fn registry_has_archive(
     let mut request = Request::new(request);
     let request_auth_header = client_auth_header(registry)
         .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+        .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
     if let Some(header) = request_auth_header {
         request.metadata_mut().insert("authorization", header);
@@ -790,7 +792,7 @@ async fn registry_has_archive(
             if status.code() == Code::NotFound {
                 Ok(false)
             } else {
-                bail!("registry check error: {:?}", status);
+                bail!("registry check error: {status:?}");
             }
         }
     }
@@ -844,7 +846,7 @@ async fn build_at_paths(
 
         pull_archive(
             client_archive,
-            &archive_path.to_path_buf(),
+            archive_path,
             artifact_digest,
             artifact_namespace,
             registry,
@@ -926,7 +928,7 @@ async fn build_at_paths(
     if !artifact_path.exists() {
         pull_archive(
             client_archive,
-            &archive_path.to_path_buf(),
+            archive_path,
             artifact_digest,
             artifact_namespace,
             registry,
@@ -940,13 +942,8 @@ async fn build_at_paths(
         )
         .await?;
 
-        unpack_archive_if_present(
-            &artifact.name,
-            artifact_digest,
-            artifact_path,
-            archive_path,
-        )
-        .await?;
+        unpack_archive_if_present(&artifact.name, artifact_digest, artifact_path, archive_path)
+            .await?;
     }
 
     Ok(())
@@ -1001,6 +998,20 @@ const STUCK_DIGESTS_LISTED: usize = 8;
 /// queue, `indegree`, and `dependents` are all keyed on it, never on a tuple
 /// carrying aliases or a parent, so a digest shared by two parents in a
 /// diamond graph is still only ever spawned once.
+#[expect(
+    clippy::expect_used,
+    reason = "every expect in this loop is over a map this function has just built from \
+              inputs it has already checked (see the doc comment above): a fired one \
+              means the scheduler's own bookkeeping is broken, not a runtime condition \
+              to propagate as an error"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the ready/indegree/dependents bookkeeping this function's doc comment \
+              describes as a single checked-inputs invariant lives in one frame on \
+              purpose: splitting it into helpers would spread that invariant across \
+              call boundaries and make it unauditable in one place"
+)]
 async fn run_scheduler<F, Fut>(
     build_store: &HashMap<String, Artifact>,
     order: Vec<String>,
@@ -1021,10 +1032,10 @@ where
     }
 
     for artifact in build_store.values() {
-        for step in artifact.steps.iter() {
-            for hash in step.artifacts.iter() {
+        for step in &artifact.steps {
+            for hash in &step.artifacts {
                 if !build_store.contains_key(hash) {
-                    bail!("artifact 'build' not found: {}", hash);
+                    bail!("artifact 'build' not found: {hash}");
                 }
             }
         }
@@ -1052,15 +1063,15 @@ where
     // tasks — the one thing C-3 forbids.
     for digest in build_store.keys() {
         if !position.contains_key(digest.as_str()) {
-            bail!("artifact 'build' missing from dispatch order: {}", digest);
+            bail!("artifact 'build' missing from dispatch order: {digest}");
         }
     }
 
     for (digest, artifact) in build_store {
         let mut seen: HashSet<&str> = HashSet::new();
 
-        for step in artifact.steps.iter() {
-            for dep in step.artifacts.iter() {
+        for step in &artifact.steps {
+            for dep in &step.artifacts {
                 if seen.insert(dep.as_str()) {
                     *indegree
                         .get_mut(digest)
@@ -1178,7 +1189,7 @@ where
         let mut stuck: Vec<&str> = build_store
             .keys()
             .filter(|digest| !completed.contains(digest.as_str()))
-            .map(|digest| digest.as_str())
+            .map(std::string::String::as_str)
             .collect();
 
         stuck.sort_unstable();
@@ -1214,6 +1225,12 @@ where
     reason = "driver function threading namespace/selection/store/clients/jobs/registry through \
               the scheduler; grouping would only relocate the count, not reduce it"
 )]
+#[expect(
+    clippy::expect_used,
+    reason = "dispatch only ever runs over digests drawn from artifact_order, which \
+              get_order derives from build_store's own keys, so a miss here means the \
+              order and the store have diverged, not a runtime condition to propagate"
+)]
 async fn build_artifacts(
     artifact_namespace: &str,
     artifact_selected: Option<&Artifact>,
@@ -1238,7 +1255,7 @@ async fn build_artifacts(
 
         if let Some(selected) = artifact_selected {
             if selected.name == artifact.name {
-                artifact_aliases = artifact_selected_aliases.clone();
+                artifact_aliases.clone_from(&artifact_selected_aliases);
             }
         }
 
@@ -1783,7 +1800,7 @@ pub async fn run(
         .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact.name))?;
 
     let selected_artifact_digest =
-        parse_artifact_digest(&selected_artifact_digest, "selected artifact")?;
+        parse_artifact_digest(selected_artifact_digest, "selected artifact")?;
 
     if artifact.rebuild {
         remove_outputs_for_rebuild(
@@ -1868,6 +1885,12 @@ pub async fn run(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
@@ -2109,6 +2132,12 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "every call site pushes this alongside a bare `Ok(None)` into one \
+                  `Vec<Result<Option<ArchivePullResponse>, Status>>` literal, so the \
+                  element type must stay `Result`-wrapped for them to unify"
+    )]
     fn chunk(data: &[u8]) -> Result<Option<ArchivePullResponse>, Status> {
         Ok(Some(ArchivePullResponse {
             data: data.to_vec(),
@@ -2881,7 +2910,7 @@ mod tests {
     fn artifact_depending_on(deps: &[&str]) -> Artifact {
         Artifact {
             steps: vec![ArtifactStep {
-                artifacts: deps.iter().map(|d| d.to_string()).collect(),
+                artifacts: deps.iter().map(std::string::ToString::to_string).collect(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -2903,10 +2932,10 @@ mod tests {
         let started: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
 
         let dispatch = {
-            let started = started.clone();
+            let started = std::sync::Arc::clone(&started);
 
             move |digest: String| {
-                let started = started.clone();
+                let started = std::sync::Arc::clone(&started);
 
                 async move {
                     started.lock().await.push(digest);
@@ -2942,12 +2971,12 @@ mod tests {
         let peak = Arc::new(AtomicUsize::new(0));
 
         let dispatch = {
-            let in_flight = in_flight.clone();
-            let peak = peak.clone();
+            let in_flight = std::sync::Arc::clone(&in_flight);
+            let peak = std::sync::Arc::clone(&peak);
 
             move |_digest: String| {
-                let in_flight = in_flight.clone();
-                let peak = peak.clone();
+                let in_flight = std::sync::Arc::clone(&in_flight);
+                let peak = std::sync::Arc::clone(&peak);
 
                 async move {
                     let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -2986,17 +3015,17 @@ mod tests {
             build_store.insert(name.to_string(), artifact_depending_on(&[]));
         }
 
-        let order: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        let order: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         let in_flight = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
 
         let dispatch = {
-            let in_flight = in_flight.clone();
-            let peak = peak.clone();
+            let in_flight = std::sync::Arc::clone(&in_flight);
+            let peak = std::sync::Arc::clone(&peak);
 
             move |_digest: String| {
-                let in_flight = in_flight.clone();
-                let peak = peak.clone();
+                let in_flight = std::sync::Arc::clone(&in_flight);
+                let peak = std::sync::Arc::clone(&peak);
 
                 async move {
                     let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -3059,10 +3088,10 @@ mod tests {
 
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3096,10 +3125,10 @@ mod tests {
 
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3133,10 +3162,10 @@ mod tests {
 
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3246,12 +3275,12 @@ mod tests {
         let slow_completed = Arc::new(AtomicUsize::new(0));
 
         let dispatch = {
-            let dispatched = dispatched.clone();
-            let slow_completed = slow_completed.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
+            let slow_completed = std::sync::Arc::clone(&slow_completed);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
-                let slow_completed = slow_completed.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
+                let slow_completed = std::sync::Arc::clone(&slow_completed);
 
                 async move {
                     dispatched.lock().await.push(digest.clone());
@@ -3304,15 +3333,13 @@ mod tests {
         let slow_completed = Arc::new(AtomicUsize::new(0));
 
         let dispatch = {
-            let slow_completed = slow_completed.clone();
+            let slow_completed = std::sync::Arc::clone(&slow_completed);
 
             move |digest: String| {
-                let slow_completed = slow_completed.clone();
+                let slow_completed = std::sync::Arc::clone(&slow_completed);
 
                 async move {
-                    if digest == "boom" {
-                        panic!("boom task panicked on purpose");
-                    }
+                    assert!(digest != "boom", "boom task panicked on purpose");
 
                     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
@@ -3360,10 +3387,10 @@ mod tests {
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
 
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3416,10 +3443,10 @@ mod tests {
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
 
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3469,10 +3496,10 @@ mod tests {
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
 
         let dispatch = {
-            let dispatched = dispatched.clone();
+            let dispatched = std::sync::Arc::clone(&dispatched);
 
             move |digest: String| {
-                let dispatched = dispatched.clone();
+                let dispatched = std::sync::Arc::clone(&dispatched);
 
                 async move {
                     dispatched.lock().await.push(digest);
@@ -3569,7 +3596,7 @@ mod tests {
 
         let archive = ArchiveServiceStubServer::new(StubRegistry { has_archive });
         let worker = WorkerServiceStubServer::new(StubWorker {
-            dispatched: dispatched.clone(),
+            dispatched: std::sync::Arc::clone(&dispatched),
         });
 
         tokio::spawn(async move {

@@ -191,7 +191,7 @@ pub enum CommandSystemServices {
         health_check_port: u16,
 
         /// OIDC issuer URL for `--services worker`/`registry` authentication.
-        /// Settable via VORPAL_ISSUER so a default install
+        /// Settable via `VORPAL_ISSUER` so a default install
         /// (`script/install.sh`) can supply it without a flag. Validated at
         /// parse time by `parse_issuer` so a value on either channel that is
         /// empty or not a well-formed issuer never reaches
@@ -210,7 +210,7 @@ pub enum CommandSystemServices {
         #[arg(long)]
         issuer_client_id: Option<String>,
 
-        /// Settable via VORPAL_ISSUER_CLIENT_SECRET so an installed unit can
+        /// Settable via `VORPAL_ISSUER_CLIENT_SECRET` so an installed unit can
         /// read the secret from a mode-600 environment file instead of
         /// carrying it in argv, where any local user could read it from
         /// `ps`/`/proc/<pid>/cmdline`. It is the channel `script/install.sh` writes. `hide_env_values` keeps
@@ -836,6 +836,11 @@ struct Cli {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod unlock_parse_tests {
     use super::*;
 
@@ -1109,7 +1114,7 @@ fn clamp_jobs(requested: usize) -> usize {
 }
 
 /// Bounds every HTTP request `Command::Login` makes so a hung or malicious
-/// IdP stalls the command rather than hanging until the user interrupts it
+/// `IdP` stalls the command rather than hanging until the user interrupts it
 /// (VPL-280 AB-7). Same value as the SDK refresh path's
 /// `REFRESH_HTTP_TIMEOUT`.
 const LOGIN_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1156,7 +1161,7 @@ const DEFAULT_DEV_ISSUER: &str = "http://localhost:8080/realms/vorpal";
 /// that comparison is only sound when *both* sides are canonical. Expressed
 /// as `&str` the precondition can only be stated in a comment and remembered
 /// by each caller; expressed as a type it travels with the value, and the
-/// one-sided canonicalization that produced a live mismatch (an IdP naming
+/// one-sided canonicalization that produced a live mismatch (an `IdP` naming
 /// an explicit default port, or a mixed-case host) is no longer expressible.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NormalizedIssuer(String);
@@ -1175,7 +1180,7 @@ impl NormalizedIssuer {
     /// the binary's two issuer-accepting paths do not carry two
     /// implementations of one rule. Normalizing is observable on the login
     /// path, where the result is the credentials-file key and the string
-    /// compared against the discovery document: an IdP states its `iss` in
+    /// compared against the discovery document: an `IdP` states its `iss` in
     /// canonical form, so normalizing the operator's text toward it makes
     /// the comparison agree more often, not less.
     fn parse(candidate: &str) -> std::result::Result<Self, String> {
@@ -1355,13 +1360,13 @@ fn value_source_label(source: Option<ValueSource>) -> &'static str {
 /// supplied value, so `VORPAL_ISSUER_CLIENT_SECRET=` — the shape an
 /// `EnvironmentFile` written for an install that has no secret yet produces —
 /// would otherwise reach `exchange_client_credentials` as `Some("")` and be
-/// POSTed to the IdP, whose refusal arrives as an opaque 401 rather than as
+/// `POSTed` to the `IdP`, whose refusal arrives as an opaque 401 rather than as
 /// the configuration error it is.
 ///
 /// The value is returned byte-for-byte, deliberately: a client secret is
 /// opaque IdP-generated text that the operator cannot edit, so trimming it
 /// would silently alter a credential whose surrounding whitespace, however
-/// unlikely, is the IdP's to define and not ours.
+/// unlikely, is the `IdP`'s to define and not ours.
 fn parse_client_secret(raw: &str) -> std::result::Result<String, String> {
     if raw.trim().is_empty() {
         return Err(
@@ -1392,7 +1397,7 @@ fn normalize_and_validate_login_issuer(issuer: &str) -> Result<NormalizedIssuer>
 ///
 /// - the document's own `issuer` claim must equal `issuer` exactly (after
 ///   trailing-slash normalization) — the origin pin below is blind to path,
-///   so on a multi-tenant IdP that shares one origin across realms it alone
+///   so on a multi-tenant `IdP` that shares one origin across realms it alone
 ///   would let a co-tenant substitute its own endpoints (VPL-280 AB-4); a
 ///   missing `issuer` field fails closed rather than skipping the check
 /// - `device_authorization_endpoint` must share the issuer's
@@ -1428,11 +1433,7 @@ fn login_discovery_targets(
     })?;
 
     if normalized_doc_issuer != *issuer {
-        bail!(
-            "OIDC discovery issuer {} does not match requested issuer {}",
-            doc_issuer,
-            issuer
-        );
+        bail!("OIDC discovery issuer {doc_issuer} does not match requested issuer {issuer}");
     }
 
     let device_endpoint = doc
@@ -1442,9 +1443,7 @@ fn login_discovery_targets(
 
     if credential_egress_origin(device_endpoint)? != issuer_origin {
         bail!(
-            "OIDC device_authorization_endpoint {} does not match issuer origin {}",
-            device_endpoint,
-            issuer_origin
+            "OIDC device_authorization_endpoint {device_endpoint} does not match issuer origin {issuer_origin}"
         );
     }
 
@@ -1454,11 +1453,7 @@ fn login_discovery_targets(
         .ok_or_else(|| anyhow!("missing token_endpoint"))?;
 
     if credential_egress_origin(token_endpoint)? != issuer_origin {
-        bail!(
-            "OIDC token_endpoint {} does not match issuer origin {}",
-            token_endpoint,
-            issuer_origin
-        );
+        bail!("OIDC token_endpoint {token_endpoint} does not match issuer origin {issuer_origin}");
     }
 
     Ok((device_endpoint.to_string(), token_endpoint.to_string()))
@@ -1479,7 +1474,7 @@ struct LoginVerificationPrompt {
 ///
 /// `login_discovery_targets` pins where the CLI *sends* the device-code
 /// request; nothing pinned what came back. The response names the URL the
-/// user opens and authenticates at, so an off-origin value there is IdP
+/// user opens and authenticates at, so an off-origin value there is `IdP`
 /// credential phishing even though vorpal's own tokens stay safe. The
 /// guarantee is narrow on purpose: it protects a user whose issuer is honest
 /// but whose device-endpoint response path is not. An issuer that is itself
@@ -1505,10 +1500,7 @@ fn login_verification_prompt(
 
         if origin != issuer_origin {
             bail!(
-                "device-authorization {} origin {} does not match issuer origin {}",
-                field,
-                origin,
-                issuer_origin
+                "device-authorization {field} origin {origin} does not match issuer origin {issuer_origin}"
             );
         }
 
@@ -1539,7 +1531,7 @@ async fn fetch_login_discovery_endpoints(
     client: &reqwest::Client,
     issuer: &NormalizedIssuer,
 ) -> Result<(String, String)> {
-    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
 
     let doc: serde_json::Value = client
         .get(&discovery_url)
@@ -1775,7 +1767,8 @@ async fn run_login(
     // One hardened client for every request this flow makes (AC3), built by
     // the same function the tests exercise (`login_http_client`) so a
     // mutant that weakens it fails there too.
-    let http_client = login_http_client(LOGIN_HTTP_TIMEOUT).context("failed to build HTTP client")?;
+    let http_client =
+        login_http_client(LOGIN_HTTP_TIMEOUT).context("failed to build HTTP client")?;
 
     let (device_endpoint, token_endpoint) =
         fetch_login_discovery_endpoints(&http_client, &normalized_issuer).await?;
@@ -2208,6 +2201,12 @@ pub async fn run() -> Result<()> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod login_egress_tests {
     use super::*;
 
@@ -2232,7 +2231,7 @@ mod login_egress_tests {
     fn issuer_env_guard() -> std::sync::MutexGuard<'static, ()> {
         ISSUER_ENV_LOCK
             .lock()
-            .unwrap_or_else(|err| err.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     // --- parse_issuer ----------------------------------------
@@ -3171,12 +3170,11 @@ mod login_egress_tests {
 
         let parsed = accepted.expect("an https VORPAL_ISSUER must parse");
 
-        let issuer = match parsed.command {
-            Command::System(CommandSystem::Services(CommandSystemServices::Start {
-                issuer,
-                ..
-            })) => issuer,
-            _ => panic!("expected `system services start`"),
+        let Command::System(CommandSystem::Services(CommandSystemServices::Start {
+            issuer, ..
+        })) = parsed.command
+        else {
+            panic!("expected `system services start`")
         };
 
         assert_eq!(
@@ -3221,15 +3219,13 @@ mod login_egress_tests {
         ]);
         std::env::remove_var("VORPAL_ISSUER");
 
-        let issuer = match parsed
+        let Command::System(CommandSystem::Services(CommandSystemServices::Start {
+            issuer, ..
+        })) = parsed
             .expect("both a valid flag and a valid env value must still parse")
             .command
-        {
-            Command::System(CommandSystem::Services(CommandSystemServices::Start {
-                issuer,
-                ..
-            })) => issuer,
-            _ => panic!("expected `system services start`"),
+        else {
+            panic!("expected `system services start`")
         };
 
         assert_eq!(
@@ -3245,11 +3241,11 @@ mod login_egress_tests {
     /// clap where each value came from — the same question `run` asks before
     /// logging the trust anchor and warning about an argv-borne secret.
     fn services_start_matches(args: &[&str]) -> ArgMatches {
-        let mut argv = vec!["vorpal", "system", "services", "start"];
-        argv.extend_from_slice(args);
+        let mut full_argv = vec!["vorpal", "system", "services", "start"];
+        full_argv.extend_from_slice(args);
 
         Cli::command()
-            .try_get_matches_from(argv)
+            .try_get_matches_from(full_argv)
             .expect("these arguments must parse")
     }
 
@@ -3343,8 +3339,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("must be https"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3465,8 +3460,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("token_endpoint"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3485,8 +3479,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("device_authorization_endpoint"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3504,8 +3497,7 @@ mod login_egress_tests {
             error
                 .to_string()
                 .contains("does not match requested issuer"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3562,8 +3554,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("missing issuer"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3649,8 +3640,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("verification_uri"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3670,8 +3660,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("verification_uri_complete"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3688,8 +3677,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("verification_uri_complete"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3703,8 +3691,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("must be https"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
     }
 
@@ -3743,13 +3730,11 @@ mod login_egress_tests {
 
         assert!(
             !rendered.contains('\u{1b}'),
-            "the refusal rendered an escape byte: {:?}",
-            rendered
+            "the refusal rendered an escape byte: {rendered:?}"
         );
         assert!(
             rendered.contains("https://attacker.example.com"),
-            "the refusal must still name the offending origin: {}",
-            rendered
+            "the refusal must still name the offending origin: {rendered}"
         );
     }
 
@@ -3776,7 +3761,7 @@ mod login_egress_tests {
             let addr = listener.local_addr().expect("fixture address");
             let paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let respond = std::sync::Arc::new(respond);
-            let accepted = paths.clone();
+            let accepted = std::sync::Arc::clone(&paths);
 
             tokio::spawn(async move {
                 loop {
@@ -3784,8 +3769,8 @@ mod login_egress_tests {
                         return;
                     };
 
-                    let respond = respond.clone();
-                    let accepted = accepted.clone();
+                    let respond = std::sync::Arc::clone(&respond);
+                    let accepted = std::sync::Arc::clone(&accepted);
 
                     tokio::spawn(async move {
                         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -3887,8 +3872,7 @@ mod login_egress_tests {
 
         assert!(
             error.to_string().contains("token_endpoint"),
-            "unexpected error: {}",
-            error
+            "unexpected error: {error}"
         );
         assert_eq!(
             idp.requested_paths(),
@@ -3909,8 +3893,7 @@ mod login_egress_tests {
         let idp = IdpServer::start(move |path, _| {
             if path == "/.well-known/openid-configuration" {
                 return Some(format!(
-                    "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{}/.well-known/openid-configuration\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                    elsewhere_port
+                    "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{elsewhere_port}/.well-known/openid-configuration\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
                 ));
             }
             Some(http_json_status("404 Not Found", "{}"))
@@ -3957,8 +3940,7 @@ mod login_egress_tests {
 
         assert!(
             reqwest_error.is_timeout(),
-            "unexpected error: {}",
-            reqwest_error
+            "unexpected error: {reqwest_error}"
         );
         assert_eq!(
             idp.requested_paths(),

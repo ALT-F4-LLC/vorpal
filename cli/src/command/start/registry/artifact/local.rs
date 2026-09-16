@@ -63,8 +63,7 @@ async fn publish_alias(
             }
 
             Err(Status::already_exists(format!(
-                "alias '{}' already exists",
-                alias
+                "alias '{alias}' already exists"
             )))
         }
         Err(err) => Err(Status::internal(format!("failed to publish alias: {err}"))),
@@ -226,6 +225,10 @@ impl ArtifactBackend for LocalBackend {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
@@ -251,13 +254,13 @@ mod tests {
         let root = TempDir::new().unwrap();
         let alias_path = root.path().join("latest");
 
-        let mut publishes = Vec::new();
+        let mut publish_tasks = Vec::new();
 
         for source in ["first-artifact", "second-artifact"] {
             let path = alias_path.clone();
             let artifact_digest = digest(source);
 
-            publishes.push(tokio::spawn(async move {
+            publish_tasks.push(tokio::spawn(async move {
                 publish_alias(&path, "rust:latest", &artifact_digest)
                     .await
                     .map(|()| artifact_digest)
@@ -267,7 +270,7 @@ mod tests {
         let mut published = Vec::new();
         let mut refused = Vec::new();
 
-        for publish in publishes {
+        for publish in publish_tasks {
             match publish.await.unwrap() {
                 Ok(artifact_digest) => published.push(artifact_digest),
                 Err(status) => refused.push(status),

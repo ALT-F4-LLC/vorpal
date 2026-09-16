@@ -222,15 +222,13 @@ impl ArtifactBackend for S3Backend {
                     }
 
                     return Err(Status::already_exists(format!(
-                        "alias '{}' already exists",
-                        alias
+                        "alias '{alias}' already exists"
                     )));
                 }
                 Err(err) => {
-                    let is_not_found = err
-                        .as_service_error()
-                        .map(|service_err| service_err.is_not_found())
-                        .unwrap_or(false);
+                    let is_not_found = err.as_service_error().is_some_and(
+                        aws_sdk_s3::operation::head_object::HeadObjectError::is_not_found,
+                    );
 
                     if !is_not_found {
                         return Err(Status::internal(format!(

@@ -133,6 +133,10 @@ impl ArchiveBackend for LocalBackend {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
@@ -172,7 +176,7 @@ mod tests {
 
         let observed_dir = namespace_dir.clone();
         let observed_mid_stream = std::sync::Arc::new(std::sync::Mutex::new(BTreeSet::new()));
-        let observer = observed_mid_stream.clone();
+        let observer = std::sync::Arc::clone(&observed_mid_stream);
 
         let mut stream = Box::pin(
             tokio_stream::iter(vec![Ok(bytes::Bytes::from_static(b"first-half"))]).chain(
@@ -197,7 +201,9 @@ mod tests {
             1,
             "the push must have opened a temp file before the stream failed"
         );
-        assert!(mid_stream.iter().next().unwrap().ends_with(".tmp"));
+        assert!(std::path::Path::new(mid_stream.iter().next().unwrap())
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp")));
 
         assert_eq!(
             dir_entry_names(&namespace_dir),

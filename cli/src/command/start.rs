@@ -94,8 +94,12 @@ fn resolve_workspace_root(configured: Option<PathBuf>) -> Result<PathBuf> {
         })?,
     };
 
-    root.canonicalize()
-        .map_err(|e| anyhow!("workspace root {:?} could not be resolved: {e}", root))
+    root.canonicalize().map_err(|e| {
+        anyhow!(
+            "workspace root {} could not be resolved: {e}",
+            root.display()
+        )
+    })
 }
 
 /// `ResolvedRegistry` and `resolve_registry` live in their own submodule,
@@ -207,6 +211,10 @@ mod resolved_registry {
     // here now, and a pure-function seam should carry its own tests rather
     // than leaving them behind in the module that merely calls it.
     #[cfg(test)]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+    )]
     mod tests {
         use super::*;
 
@@ -425,7 +433,7 @@ fn default_registry_allowed(
 /// agent is a confused deputy for arbitrary file read and namespace forgery.
 /// Refusing here is what leaves only two states — authenticated, or refused
 /// to start — with no third in which the agent registers bare.
-fn anonymous_start_refused(services: &StartupServices, issuer: Option<&str>) -> bool {
+fn anonymous_start_refused(services: StartupServices, issuer: Option<&str>) -> bool {
     (services.has_worker || services.has_registry || services.has_agent) && issuer.is_none()
 }
 
@@ -476,7 +484,7 @@ fn resolve_required_issuer(
     services: StartupServices,
     issuer: Option<String>,
 ) -> Result<Option<String>> {
-    if anonymous_start_refused(&services, issuer.as_deref()) {
+    if anonymous_start_refused(services, issuer.as_deref()) {
         bail!(
             "agent, worker and archive/artifact services require --issuer for authentication; \
              refusing to start unauthenticated — an anonymous peer could otherwise run \
@@ -655,7 +663,7 @@ use service_registrar::EXEMPT_SERVICES;
 /// Taking `StartupServices` rather than `RunArgs` keeps this free of the
 /// network I/O `OidcValidator::new` performs, so the enumeration test can
 /// cover every service subset without an issuer to reach.
-fn planned_registrations(services: &StartupServices) -> Vec<(&'static str, Disposition)> {
+fn planned_registrations(services: StartupServices) -> Vec<(&'static str, Disposition)> {
     use tonic::server::NamedService;
 
     let mut planned = vec![(
@@ -849,13 +857,13 @@ where
 /// Adds the worker service to `registrar` when `args.services` requests it,
 /// wrapped in the shared `interceptor` (VPL-713/C3-f: one interceptor per
 /// `run`, not one per service block).
-async fn add_worker_service<I>(
-    mut registrar: ServiceRegistrar,
+fn add_worker_service<I>(
+    registrar: ServiceRegistrar,
     args: &RunArgs,
     issuer: &str,
     interceptor: I,
     registry_allowed: Vec<String>,
-) -> Result<ServiceRegistrar>
+) -> ServiceRegistrar
 where
     I: tonic::service::Interceptor + Clone + Send + Sync + 'static,
 {
@@ -868,9 +876,7 @@ where
         registry_allowed,
     );
 
-    registrar = registrar.intercepted(WorkerServiceServer::new(worker_server), interceptor);
-
-    Ok(registrar)
+    registrar.intercepted(WorkerServiceServer::new(worker_server), interceptor)
 }
 
 /// If `socket_path` exists, checks whether it is still backed by a live
@@ -1100,6 +1106,15 @@ async fn serve_with_shutdown(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the single top-level driver for every service registration \
+              (add_registry_services/add_worker_service/prepare_health_check) threaded \
+              through one ServiceRegistrar and one interceptor: splitting service \
+              wiring across helper functions here would relocate the invariant that \
+              every service is registered through the shared interceptor, not enforce \
+              it more clearly"
+)]
 pub async fn run(args: RunArgs) -> Result<()> {
     log_trusted_service_clients(&args.issuer_service_client_ids);
 
@@ -1298,8 +1313,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 &issuer,
                 validator_intercepter.clone(),
                 registry_allowed.clone(),
-            )
-            .await?;
+            );
 
             info!("worker |> service: {}", transport_label);
         }
@@ -1312,7 +1326,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // (or removed from `run` and left in it) refuses to start rather than
     // shipping a mechanism whose own green test describes a router that no
     // longer exists.
-    let planned = planned_registrations(&startup_services);
+    let planned = planned_registrations(startup_services);
 
     if registrar.ledger() != planned.as_slice() {
         bail!(
@@ -1412,18 +1426,18 @@ mod anonymous_start_refused_tests {
     // about credential absence, not reach.
     #[test]
     fn anonymous_start_refused_for_worker_with_no_issuer() {
-        assert!(anonymous_start_refused(&services(true, false, false), None));
+        assert!(anonymous_start_refused(services(true, false, false), None));
     }
 
     #[test]
     fn anonymous_start_refused_for_registry_with_no_issuer() {
-        assert!(anonymous_start_refused(&services(false, true, false), None));
+        assert!(anonymous_start_refused(services(false, true, false), None));
     }
 
     #[test]
     fn anonymous_start_not_refused_when_an_issuer_is_configured() {
         assert!(!anonymous_start_refused(
-            &services(true, true, true),
+            services(true, true, true),
             Some("https://issuer.example.com")
         ));
     }
@@ -1435,7 +1449,7 @@ mod anonymous_start_refused_tests {
     // refusal.
     #[test]
     fn anonymous_start_refused_for_agent_with_no_issuer() {
-        assert!(anonymous_start_refused(&services(false, false, true), None));
+        assert!(anonymous_start_refused(services(false, false, true), None));
     }
 
     // A process running none of the three has no surface for this predicate
@@ -1443,7 +1457,7 @@ mod anonymous_start_refused_tests {
     #[test]
     fn anonymous_start_not_refused_for_a_process_running_none_of_them() {
         assert!(!anonymous_start_refused(
-            &services(false, false, false),
+            services(false, false, false),
             None
         ));
     }
@@ -1457,6 +1471,10 @@ mod anonymous_start_refused_tests {
 // with that block removed). Driving `run` itself, rather than the predicate
 // alone, closes that gap.
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
 mod run_startup_refusal_tests {
     use super::*;
 
@@ -1511,6 +1529,11 @@ mod run_startup_refusal_tests {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod registry_scheme_tests {
     use super::*;
 
@@ -1712,6 +1735,10 @@ mod default_registry_allowed_tests {
 // `ServiceRegistrar` actually recorded, so these assertions are about the
 // real router rather than a parallel description of one.
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test assertions read as intent, not defensive code: an expect failure is the test failing, which is the point"
+)]
 mod registration_enumeration_tests {
     use super::*;
 
@@ -1735,7 +1762,7 @@ mod registration_enumeration_tests {
             for has_registry in [false, true] {
                 for has_agent in [false, true] {
                     let planned =
-                        planned_registrations(&services(has_worker, has_registry, has_agent));
+                        planned_registrations(services(has_worker, has_registry, has_agent));
 
                     assert!(
                         registrations_are_intercepted_or_exempt(&planned),
@@ -1753,7 +1780,7 @@ mod registration_enumeration_tests {
     // catches a registration silently swapped for a different service.
     #[test]
     fn a_full_service_set_registers_four_intercepted_services_and_the_exempt_health_service() {
-        let planned = planned_registrations(&services(true, true, true));
+        let planned = planned_registrations(services(true, true, true));
 
         assert_eq!(
             planned,
@@ -1771,7 +1798,7 @@ mod registration_enumeration_tests {
     // still the only thing it serves unwrapped.
     #[test]
     fn a_process_with_no_configured_services_registers_only_the_exempt_health_service() {
-        let planned = planned_registrations(&services(false, false, false));
+        let planned = planned_registrations(services(false, false, false));
 
         assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
         assert!(registrations_are_intercepted_or_exempt(&planned));
@@ -1879,7 +1906,7 @@ mod registration_enumeration_tests {
             tls: false,
         };
 
-        let planned = planned_registrations(&StartupServices::from_run_args(&args));
+        let planned = planned_registrations(StartupServices::from_run_args(&args));
 
         assert_eq!(
             names(&planned),
@@ -1917,7 +1944,7 @@ mod registration_enumeration_tests {
             tls: false,
         };
 
-        let planned = planned_registrations(&StartupServices::from_run_args(&args));
+        let planned = planned_registrations(StartupServices::from_run_args(&args));
 
         assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
     }

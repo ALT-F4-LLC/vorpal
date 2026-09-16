@@ -103,7 +103,7 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
 
         let raw_path = entry
             .path()
-            .map_err(|e| anyhow!("failed to read archive entry path: {}", e))?
+            .map_err(|e| anyhow!("failed to read archive entry path: {e}"))?
             .into_owned();
 
         // Reject any entry whose path would escape the target directory
@@ -126,8 +126,8 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
                 continue;
             }
             return Err(anyhow!(
-                "archive entry path resolves to the target root, rejecting: {:?}",
-                raw_path
+                "archive entry path resolves to the target root, rejecting: {}",
+                raw_path.display()
             ));
         }
 
@@ -147,7 +147,7 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
         {
             tokio::fs::remove_file(&dest)
                 .await
-                .map_err(|e| anyhow!("failed to remove existing symlink: {}", e))?;
+                .map_err(|e| anyhow!("failed to remove existing symlink: {e}"))?;
         }
 
         // Ensure all existing ancestor directories are writable.
@@ -212,8 +212,8 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
 
         if !unpacked {
             return Err(anyhow!(
-                "archive entry escaped target directory: {:?}",
-                raw_path
+                "archive entry escaped target directory: {}",
+                raw_path.display()
             ));
         }
     }
@@ -240,9 +240,9 @@ async fn resolve_inside_target(target: &Path, relative: &Path) -> Result<PathBuf
         if let Ok(meta) = tokio::fs::symlink_metadata(&current).await {
             if meta.file_type().is_symlink() {
                 return Err(anyhow!(
-                    "archive entry path traverses through a symlink at {:?}: {:?}",
-                    current,
-                    relative
+                    "archive entry path traverses through a symlink at {}: {}",
+                    current.display(),
+                    relative.display()
                 ));
             }
         }
@@ -272,8 +272,8 @@ async fn resolve_inside_target(target: &Path, relative: &Path) -> Result<PathBuf
 fn sanitize_entry_path(path: &Path) -> Result<PathBuf, Error> {
     if path.is_absolute() {
         return Err(anyhow!(
-            "archive entry path is absolute, rejecting: {:?}",
-            path
+            "archive entry path is absolute, rejecting: {}",
+            path.display()
         ));
     }
 
@@ -285,8 +285,8 @@ fn sanitize_entry_path(path: &Path) -> Result<PathBuf, Error> {
             Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
             Component::ParentDir => {
                 return Err(anyhow!(
-                    "archive entry path traverses outside target: {:?}",
-                    path
+                    "archive entry path traverses outside target: {}",
+                    path.display()
                 ));
             }
         }
@@ -380,6 +380,11 @@ pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), 
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::unpack_zstd;
     use async_compression::tokio::write::ZstdEncoder;
@@ -768,13 +773,14 @@ mod tests {
 
         #[cfg(unix)]
         {
+            use std::os::unix::fs::PermissionsExt;
+
             let link_target = fs::read_link(&existing_link).await.unwrap();
             assert_eq!(link_target, std::path::PathBuf::from("new-target"));
 
             let child_contents = fs::read(readonly_dir.join("child")).await.unwrap();
             assert_eq!(child_contents, b"hi");
 
-            use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(&readonly_dir)
                 .await
                 .unwrap()

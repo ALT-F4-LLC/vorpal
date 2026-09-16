@@ -28,7 +28,7 @@ const OIDC_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// The interceptor reaches that refresh before any authentication decision, so
 /// without a floor an unauthenticated peer aims one outbound request at the
-/// operator's IdP per token by varying `kid`. The bound is a minimum interval
+/// operator's `IdP` per token by varying `kid`. The bound is a minimum interval
 /// rather than a per-`kid` negative cache so a genuine rolling-key rotation is
 /// still picked up: it is delayed by at most one interval and never blocked.
 /// Five seconds collapses a sustained flood by orders of magnitude while
@@ -222,7 +222,7 @@ pub struct OidcValidator {
     client: reqwest::Client,
     /// Instant of the last *attempted* cache-miss refresh, `None` until the
     /// first one. Attempted rather than successful: keying on success would
-    /// hand the unbounded rate back whenever the IdP is failing, which is
+    /// hand the unbounded rate back whenever the `IdP` is failing, which is
     /// exactly when the extra load is least affordable.
     ///
     /// A `Mutex` rather than an `RwLock` because the test-and-claim and the
@@ -247,7 +247,7 @@ impl OidcValidator {
         let client = login_http_client(OIDC_HTTP_TIMEOUT)?;
 
         // 1) Discover the realm (/.well-known/openid-configuration)
-        let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+        let discovery_url = format!("{issuer}/.well-known/openid-configuration");
         let disc: OidcDiscovery =
             reject_redirect(client.get(&discovery_url).send().await?, &discovery_url)?
                 .error_for_status()?
@@ -349,7 +349,7 @@ impl OidcValidator {
     /// A suppressed refresh is not an error: the caller falls through to the
     /// same `KeyNotFound` it would have returned had the fetch happened and
     /// still not produced the `kid`. Only a refresh that ran and failed is
-    /// reported, which keeps a broken IdP diagnosable.
+    /// reported, which keeps a broken `IdP` diagnosable.
     async fn refresh_jwks_if_interval_elapsed(&self) -> Result<(), AuthError> {
         let mut last_attempt = self.last_refresh_attempt.lock().await;
 
@@ -564,7 +564,7 @@ pub async fn exchange_client_credentials(
     let issuer_origin = credential_egress_origin(issuer.as_str())?;
     let client = login_http_client(OIDC_HTTP_TIMEOUT)?;
 
-    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
 
     let discovery_response = reject_redirect(
         client
@@ -729,6 +729,11 @@ pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
 
@@ -1071,7 +1076,7 @@ mod tests {
     // requests" and "the fixture never worked" are the same observation
     // otherwise.
 
-    /// A minimal HTTP/1.1 stand-in for an IdP, answering each request with
+    /// A minimal HTTP/1.1 stand-in for an `IdP`, answering each request with
     /// whatever `respond` returns for that request's path and recording the
     /// paths it served.
     struct IdpServer {
@@ -1089,7 +1094,7 @@ mod tests {
             let addr = listener.local_addr().expect("fixture address");
             let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
             let respond = Arc::new(respond);
-            let accepted = paths.clone();
+            let accepted = std::sync::Arc::clone(&paths);
 
             tokio::spawn(async move {
                 loop {
@@ -1097,8 +1102,8 @@ mod tests {
                         return;
                     };
 
-                    let respond = respond.clone();
-                    let accepted = accepted.clone();
+                    let respond = std::sync::Arc::clone(&respond);
+                    let accepted = std::sync::Arc::clone(&accepted);
 
                     tokio::spawn(async move {
                         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1143,15 +1148,13 @@ mod tests {
 
     fn http_redirect(status: &str, location: &str) -> String {
         format!(
-            "HTTP/1.1 {}\r\nlocation: {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-            status, location
+            "HTTP/1.1 {status}\r\nlocation: {location}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
         )
     }
 
     fn discovery_document(issuer: &str, jwks_uri: &str) -> String {
         http_json(&format!(
-            "{{\"issuer\":\"{}\",\"jwks_uri\":\"{}\",\"token_endpoint\":\"{}/token\"}}",
-            issuer, jwks_uri, issuer
+            "{{\"issuer\":\"{issuer}\",\"jwks_uri\":\"{jwks_uri}\",\"token_endpoint\":\"{issuer}/token\"}}"
         ))
     }
 
@@ -1166,7 +1169,7 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
             }
@@ -1195,7 +1198,7 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
             }
@@ -1206,7 +1209,7 @@ mod tests {
         let idp = IdpServer::start(move |_, _| {
             http_redirect(
                 "302 Found",
-                &format!("{}/.well-known/openid-configuration", target),
+                &format!("{target}/.well-known/openid-configuration"),
             )
         })
         .await;
@@ -1284,7 +1287,7 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(
                     "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
@@ -1313,8 +1316,7 @@ mod tests {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
             http_json(&format!(
-                "{{\"issuer\":\"{}\",\"jwks_uri\":\"{}/jwks\",\"token_endpoint\":\"{}\"}}",
-                issuer, issuer, attacker_token_endpoint
+                "{{\"issuer\":\"{issuer}\",\"jwks_uri\":\"{issuer}/jwks\",\"token_endpoint\":\"{attacker_token_endpoint}\"}}"
             ))
         })
         .await;
@@ -1345,9 +1347,8 @@ mod tests {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
             http_json(&format!(
-                "{{\"issuer\":\"{}/realms/other\",\"jwks_uri\":\"{}/jwks\",\
-                 \"token_endpoint\":\"{}/realms/other/token\"}}",
-                origin, origin, origin
+                "{{\"issuer\":\"{origin}/realms/other\",\"jwks_uri\":\"{origin}/jwks\",\
+                 \"token_endpoint\":\"{origin}/realms/other/token\"}}"
             ))
         })
         .await;
@@ -1376,7 +1377,7 @@ mod tests {
         let idp = IdpServer::start(|_, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            http_json(&format!("{{\"token_endpoint\":\"{}/token\"}}", origin))
+            http_json(&format!("{{\"token_endpoint\":\"{origin}/token\"}}"))
         })
         .await;
 
@@ -1407,9 +1408,8 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => http_json(&format!(
-                    "{{\"issuer\":\"{}/\",\"jwks_uri\":\"{}/jwks\",\
-                     \"token_endpoint\":\"{}/token\"}}",
-                    origin, origin, origin
+                    "{{\"issuer\":\"{origin}/\",\"jwks_uri\":\"{origin}/jwks\",\
+                     \"token_endpoint\":\"{origin}/token\"}}"
                 )),
                 _ => http_json(
                     "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
@@ -1440,7 +1440,7 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_redirect("307 Temporary Redirect", &target),
             }
@@ -1534,7 +1534,7 @@ mod tests {
         assert_eq!(response_excerpt(body), body);
     }
 
-    /// Build a validator against a loopback IdP serving an empty JWKS: enough
+    /// Build a validator against a loopback `IdP` serving an empty JWKS: enough
     /// for the interceptor to be constructed, and enough that any presented
     /// token fails verification rather than being accepted.
     async fn interceptor_over_empty_jwks_idp(
@@ -1544,7 +1544,7 @@ mod tests {
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
             }
@@ -1568,8 +1568,7 @@ mod tests {
         let interceptor = interceptor_over_empty_jwks_idp().await;
 
         let status = interceptor(Request::new(()))
-            .err()
-            .expect("a request with no authorization metadata must be refused");
+            .expect_err("a request with no authorization metadata must be refused");
 
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
         assert_eq!(status.message(), "missing authorization");
@@ -1589,9 +1588,8 @@ mod tests {
             "Bearer not-a-real-token".parse().expect("header value"),
         );
 
-        let status = interceptor(request)
-            .err()
-            .expect("a token that does not verify must be refused");
+        let status =
+            interceptor(request).expect_err("a token that does not verify must be refused");
 
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
         assert!(
@@ -1632,18 +1630,18 @@ mod tests {
         )
     }
 
-    /// An IdP whose `/jwks` body is swappable, so a key rotation can be staged
+    /// An `IdP` whose `/jwks` body is swappable, so a key rotation can be staged
     /// mid-test, and whose served paths are counted by `IdpServer`.
     async fn rotatable_idp(initial_jwks: String) -> (IdpServer, Arc<std::sync::Mutex<String>>) {
         let served = Arc::new(std::sync::Mutex::new(initial_jwks));
-        let jwks = served.clone();
+        let jwks = std::sync::Arc::clone(&served);
 
         let idp = IdpServer::start(move |path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
             match path {
                 "/.well-known/openid-configuration" => {
-                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(&jwks.lock().unwrap().clone()),
             }
@@ -1678,8 +1676,7 @@ mod tests {
             let error = validator
                 .validate(&unsigned_token_with_kid(&format!("unknown-{attempt}")))
                 .await
-                .err()
-                .expect("an unknown kid must never validate");
+                .expect_err("an unknown kid must never validate");
 
             assert!(
                 matches!(error, AuthError::KeyNotFound),
@@ -1713,8 +1710,7 @@ mod tests {
         let error = validator
             .validate(&unsigned_token_with_kid("cached"))
             .await
-            .err()
-            .expect("a garbage signature must not validate");
+            .expect_err("a garbage signature must not validate");
 
         assert!(
             matches!(error, AuthError::Jwt(_)),
@@ -1751,8 +1747,7 @@ mod tests {
         let during_interval = validator
             .validate(&unsigned_token_with_kid("after-rotation"))
             .await
-            .err()
-            .expect("the rotated key is not cached yet");
+            .expect_err("the rotated key is not cached yet");
 
         assert!(
             matches!(during_interval, AuthError::KeyNotFound),
@@ -1770,8 +1765,7 @@ mod tests {
         let after_interval = validator
             .validate(&unsigned_token_with_kid("after-rotation"))
             .await
-            .err()
-            .expect("a garbage signature must not validate");
+            .expect_err("a garbage signature must not validate");
 
         assert!(
             matches!(after_interval, AuthError::Jwt(_)),
@@ -1805,14 +1799,13 @@ mod tests {
         let mut misses = tokio::task::JoinSet::new();
 
         for attempt in 0..8 {
-            let validator = validator.clone();
+            let validator = std::sync::Arc::clone(&validator);
 
             misses.spawn(async move {
                 validator
                     .validate(&unsigned_token_with_kid(&format!("concurrent-{attempt}")))
                     .await
-                    .err()
-                    .expect("an unknown kid must never validate");
+                    .expect_err("an unknown kid must never validate");
             });
         }
 

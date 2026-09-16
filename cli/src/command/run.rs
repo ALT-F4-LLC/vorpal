@@ -52,8 +52,7 @@ fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
     if digest.len() != ARTIFACT_DIGEST_LENGTH || !is_lowercase_hex {
         bail!(
             "invalid artifact digest from {source}: expected {ARTIFACT_DIGEST_LENGTH} lowercase \
-             hex characters, got {:?}",
-            digest,
+             hex characters, got {digest:?}",
         );
     }
 
@@ -214,10 +213,8 @@ fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
         || value.starts_with(&staging_prefix)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, contain no path separator, \
-             not be '.' or '..', and not start with the reserved staging prefix {:?}",
-            value,
-            staging_prefix,
+            "invalid artifact {field} {value:?}: must be non-empty, contain no path separator, \
+             not be '.' or '..', and not start with the reserved staging prefix {staging_prefix:?}",
         );
     }
 
@@ -234,6 +231,12 @@ const STAGING_SCAN_CHUNK_SIZE: usize = 8192;
 /// with, read back out of that function rather than written out here, so
 /// renaming the prefix there cannot leave this file compiling and matching
 /// nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "staging_path_for always names its result after a real Path::new(\"/entry\") \
+              input, so file_name() returning None here would mean staging_path_for itself \
+              is broken, not a runtime condition this function should propagate"
+)]
 fn staging_path_prefix() -> String {
     let sample = staging_path_for(Path::new("/entry"));
 
@@ -296,7 +299,7 @@ async fn find_staging_path_reference(staged_files: &[PathBuf]) -> Result<Option<
     let window_size = needle.len() + STAGING_UUID_LENGTH;
     let overlap = window_size - 1;
 
-    for path in staged_files.iter() {
+    for path in staged_files {
         let metadata = symlink_metadata(path)
             .await
             .map_err(|err| anyhow!("failed to stat staged file {}: {err}", path.display()))?;
@@ -483,7 +486,7 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
             );
         }
 
-        for path in staged_files.iter() {
+        for path in &staged_files {
             set_timestamps(path).await?;
         }
 
@@ -715,10 +718,10 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
     let alias_path =
         get_artifact_alias_path(&artifact_name, &artifact_namespace, system, &artifact_tag)?;
 
-    let artifact_digest = match read_cached_alias_digest(&alias_path, &artifact_name).await? {
-        Some(digest) => digest,
-
-        None => {
+    let artifact_digest =
+        if let Some(digest) = read_cached_alias_digest(&alias_path, &artifact_name).await? {
+            digest
+        } else {
             info!("alias not found locally, checking registry: {registry}");
 
             match get_alias_from_registry(
@@ -741,24 +744,23 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
 
                     bail!(
                         "artifact alias not found: {}\n\
-                         \n\
-                         The alias file does not exist at: {}\n\
-                         \n\
-                         The alias could not be resolved from the registry:\n\
-                         \n\
-                         \t{err}\n\
-                         \n\
-                         Have you built this artifact? Try:\n\
-                         \n\
-                         \tvorpal build {}",
+                     \n\
+                     The alias file does not exist at: {}\n\
+                     \n\
+                     The alias could not be resolved from the registry:\n\
+                     \n\
+                     \t{err}\n\
+                     \n\
+                     Have you built this artifact? Try:\n\
+                     \n\
+                     \tvorpal build {}",
                         alias,
                         alias_path.display(),
                         artifact_name,
                     );
                 }
             }
-        }
-    };
+        };
 
     debug!("run: resolved digest={artifact_digest}");
 
@@ -816,6 +818,11 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
