@@ -2291,8 +2291,7 @@ mod idp_fixture {
 #[expect(
     clippy::expect_used,
     clippy::panic,
-    clippy::unwrap_used,
-    reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
+    reason = "test assertions read as intent, not defensive code: an expect/panic failure is the test failing, which is the point"
 )]
 mod login_egress_tests {
     use super::*;
