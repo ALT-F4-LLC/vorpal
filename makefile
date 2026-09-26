@@ -283,6 +283,30 @@ ac-commands:
 doc-record:
 	@"$$HOME/.docket/bin/doc-record"
 
+# qa-test — security-change's project-supplied QA gate on implement and fix.
+# It runs the same suite as the `tests` gate, by the operator's 2026-09-23
+# decision, so a security change is held to the full test bar before review.
+qa-test: test
+
+# doc-validate — every code workflow's implement and fix gate. A changed doc
+# must carry this repo's header shape; script/qa/doc-validate.sh names it.
+doc-validate:
+	bash script/qa/doc-validate.sh
+
+# diff-scope-<track> — the light tracks (docs-only, trivial-change,
+# small-change) bind on a label alone, so these gates refuse a change whose
+# footprint outgrew the label; script/qa/diff-scope.sh states each rule.
+diff-scope-docs:
+	bash script/qa/diff-scope.sh docs-only
+
+diff-scope-trivial:
+	bash script/qa/diff-scope.sh trivial
+
+diff-scope-small:
+	bash script/qa/diff-scope.sh small
+
+.PHONY: qa-test doc-validate diff-scope-docs diff-scope-trivial diff-scope-small
+
 sdet-abuse:
 	$(STUB)
 
