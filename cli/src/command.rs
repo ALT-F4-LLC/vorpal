@@ -2793,9 +2793,9 @@ mod login_egress_tests {
         // The launchd half of the same two writers. `launchctl` is shadowed
         // so nothing reaches the real service manager.
         //
-        // The audience carries `<` — a character `validate_no_unit_injection_chars`
-        // refuses at the front door, so the encoders here are unreachable in
-        // a real install. That is the point: the plist grammar is encoded at
+        // Every operator-supplied value carries `<` or `&` — characters
+        // `validate_no_unit_injection_chars` refuses at the front door, so
+        // the encoders here are unreachable in a real install. That is the point: the plist grammar is encoded at
         // the site that writes it, so a later relaxation of the deny-list
         // cannot silently turn an operator's value into markup. Driving the
         // writer directly is the only way to see the encoder at all.
@@ -2806,8 +2806,9 @@ mod login_egress_tests {
              VORPAL_INSTALL_DIR=\"$tmp/.vorpal\"\n\
              VORPAL_SYSTEM_DIR=\"$tmp/system\"\n\
              SERVICES='worker'\n\
-             ISSUER='https://idp.example.com/realms/vorpal'\n\
+             ISSUER='https://idp.example.com/realms/v<orpal'\n\
              ISSUER_AUDIENCE='aud<ience'\n\
+             ISSUER_CLIENT_ID='client&id'\n\
              ISSUER_CLIENT_SECRET='s3cr3t-not-in-argv'\n\
              plist_dir=\"$tmp/Library/LaunchAgents\"\n\
              install_service_macos || true\n\
@@ -2817,11 +2818,32 @@ mod login_egress_tests {
              rm -rf \"$tmp\"",
         );
 
-        assert!(
-            transcript.contains("<string>aud&lt;ience</string>"),
-            "a ProgramArguments value must be XML-encoded at the site that \
-             writes it: {transcript}"
-        );
+        for raw in ["v<orpal", "aud<ience", "client&id"] {
+            assert!(
+                !transcript.contains(raw),
+                "no operator value may reach the plist unencoded, found {raw}: \
+                 {transcript}"
+            );
+        }
+        for (site, encoded) in [
+            (
+                "<string>--issuer</string>",
+                "https://idp.example.com/realms/v&lt;orpal",
+            ),
+            ("<string>--issuer-audience</string>", "aud&lt;ience"),
+            ("<string>--issuer-client-id</string>", "client&amp;id"),
+            (
+                "<key>VORPAL_ISSUER</key>",
+                "https://idp.example.com/realms/v&lt;orpal",
+            ),
+        ] {
+            let element = format!("{site}\n        <string>{encoded}</string>");
+            assert!(
+                transcript.contains(&element),
+                "the value after {site} must be XML-encoded at the site that \
+                 writes it: {transcript}"
+            );
+        }
         assert!(
             transcript.contains("plist-mode -rw-------"),
             "the plist carries the client secret and must be mode 600: {transcript}"
