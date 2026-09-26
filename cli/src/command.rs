@@ -1198,7 +1198,7 @@ impl NormalizedIssuer {
             None => "URL has no host".to_string(),
             Some(host) => format!(
                 "scheme {:?} is not allowed for host {host:?}: the OIDC issuer must be https \
-                 (plaintext http is only allowed on localhost or 127.0.0.1)",
+                 (plaintext http is only allowed on localhost, 127.0.0.1, or [::1])",
                 url.scheme()
             ),
         })?;
@@ -1304,7 +1304,7 @@ fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
         .map_err(|cause| {
             format!(
                 "invalid issuer {trimmed:?}: {cause}. Set --issuer or VORPAL_ISSUER to your OIDC \
-                 issuer URL — https, or plaintext http only on localhost or 127.0.0.1 — e.g. \
+                 issuer URL — https, or plaintext http only on localhost, 127.0.0.1, or [::1] — e.g. \
                  https://idp.example.com/realms/vorpal"
             )
         })
@@ -2361,6 +2361,18 @@ mod login_egress_tests {
     }
 
     #[test]
+    fn parse_issuer_accepts_plaintext_bracketed_ipv6_loopback() {
+        assert_eq!(
+            parse_issuer("http://[::1]:8080/realms/vorpal"),
+            Ok("http://[::1]:8080/realms/vorpal".to_string())
+        );
+        assert!(
+            parse_issuer("http://[::2]:8080/realms/vorpal").is_err(),
+            "plaintext to a non-loopback IPv6 host must be refused"
+        );
+    }
+
+    #[test]
     fn parse_issuer_accepts_plaintext_loopback() {
         // The loopback exception, driven by the value the repository actually
         // ships. Asserting the exception is exercised at all — that the
@@ -2558,30 +2570,39 @@ mod login_egress_tests {
         // refusal costs an install — but the reverse writes a unit that
         // restart-loops forever, so it must be impossible. Both sides are
         // executed here rather than searched for a token.
+        // (issuer, CLI accepts, installer accepts)
         let cases = [
-            ("https://idp.example.com/realms/vorpal", true),
-            ("http://localhost:8080/realms/vorpal", true),
-            ("http://127.0.0.1:8080/realms/vorpal", true),
+            ("https://idp.example.com/realms/vorpal", true, true),
+            ("http://localhost:8080/realms/vorpal", true, true),
+            ("http://127.0.0.1:8080/realms/vorpal", true, true),
             // Plaintext off loopback: the trust anchor over a channel an
             // on-path attacker can rewrite.
-            ("http://idp.example.com/realms/vorpal", false),
-            // Bracketed IPv6 loopback: refused by `credential_egress_origin`,
-            // which compares `Url::host_str()` against an unbracketed "::1",
-            // so the installer must refuse it too.
-            ("http://[::1]:8080/realms/vorpal", false),
+            ("http://idp.example.com/realms/vorpal", false, false),
+            // Bracketed IPv6 loopback: the CLI accepts it, the installer
+            // still refuses it. The one row where the sides differ, in the
+            // permitted direction.
+            ("http://[::1]:8080/realms/vorpal", true, false),
             // No host at all.
-            ("https://", false),
+            ("https://", false, false),
             // `localhost:` here is userinfo; the host is off-box.
-            ("http://localhost:pw@evil.example/realms/vorpal", false),
+            (
+                "http://localhost:pw@evil.example/realms/vorpal",
+                false,
+                false,
+            ),
             // Userinfo on an otherwise acceptable https issuer: a credential
             // the value would then carry into the startup log line and the
             // credentials file. Both sides refuse it.
-            ("https://user:pw@idp.example.com/realms/vorpal", false),
+            (
+                "https://user:pw@idp.example.com/realms/vorpal",
+                false,
+                false,
+            ),
             // No scheme.
-            ("idp.example.com/realms/vorpal", false),
+            ("idp.example.com/realms/vorpal", false, false),
         ];
 
-        for (issuer, expected_accepted) in cases {
+        for (issuer, expected_cli_accepted, expected_installer_accepted) in cases {
             let installer_accepted = installer_accepts_issuer(issuer);
             let cli_accepted = parse_issuer(issuer).is_ok();
 
@@ -2592,11 +2613,11 @@ mod login_egress_tests {
             );
 
             assert_eq!(
-                cli_accepted, expected_accepted,
+                cli_accepted, expected_cli_accepted,
                 "the CLI's verdict on {issuer:?} changed"
             );
             assert_eq!(
-                installer_accepted, expected_accepted,
+                installer_accepted, expected_installer_accepted,
                 "script/install.sh's verdict on {issuer:?} changed"
             );
         }
@@ -3352,6 +3373,14 @@ mod login_egress_tests {
             .expect("loopback plaintext must be permitted");
 
         assert_eq!(normalized.as_str(), DEFAULT_DEV_ISSUER);
+    }
+
+    #[test]
+    fn normalize_and_validate_login_issuer_permits_bracketed_ipv6_loopback_plaintext() {
+        let normalized = normalize_and_validate_login_issuer("http://[::1]:8080/realms/vorpal")
+            .expect("plaintext to the IPv6 loopback must be permitted");
+
+        assert_eq!(normalized.as_str(), "http://[::1]:8080/realms/vorpal");
     }
 
     #[test]

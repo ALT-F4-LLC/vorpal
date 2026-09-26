@@ -879,7 +879,7 @@ pub fn credential_egress_origin(raw: &str) -> Result<String> {
         .host_str()
         .ok_or_else(|| anyhow!("OIDC URL has no host: {raw}"))?;
 
-    let is_loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
+    let is_loopback = matches!(host, "localhost" | "127.0.0.1" | "[::1]");
 
     match url.scheme() {
         "https" => {}
@@ -5108,6 +5108,21 @@ mod tests {
         assert!(
             elsewhere.requested_paths().is_empty(),
             "the refresh token must not be replayed to the redirect target"
+        );
+    }
+
+    #[test]
+    fn credential_egress_origin_permits_plaintext_to_bracketed_ipv6_loopback() {
+        assert_eq!(
+            credential_egress_origin("http://[::1]:8080/x").unwrap(),
+            "http://[::1]:8080"
+        );
+
+        let error = credential_egress_origin("http://[::2]:8080/x")
+            .expect_err("plaintext to a non-loopback IPv6 host must be refused");
+        assert!(
+            error.to_string().contains("must be https"),
+            "unexpected error: {error}"
         );
     }
 }
