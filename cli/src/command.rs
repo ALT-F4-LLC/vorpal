@@ -1421,7 +1421,7 @@ fn login_discovery_targets(
     })?;
 
     if normalized_doc_issuer != *issuer {
-        bail!("OIDC discovery issuer {doc_issuer} does not match requested issuer {issuer}");
+        bail!("OIDC discovery issuer {doc_issuer:?} does not match requested issuer {issuer}");
     }
 
     let device_endpoint = doc
@@ -1429,9 +1429,14 @@ fn login_discovery_targets(
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
 
-    if credential_egress_origin(device_endpoint)? != issuer_origin {
+    // The SDK error echoes the raw URL, and main prints the whole cause chain,
+    // so the refusal is composed here with the field Debug-escaped instead.
+    let device_origin = credential_egress_origin(device_endpoint).map_err(|_| {
+        anyhow!("OIDC device_authorization_endpoint {device_endpoint:?} is not a usable credential endpoint URL")
+    })?;
+    if device_origin != issuer_origin {
         bail!(
-            "OIDC device_authorization_endpoint {device_endpoint} does not match issuer origin {issuer_origin}"
+            "OIDC device_authorization_endpoint {device_endpoint:?} does not match issuer origin {issuer_origin}"
         );
     }
 
@@ -1440,8 +1445,13 @@ fn login_discovery_targets(
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("missing token_endpoint"))?;
 
-    if credential_egress_origin(token_endpoint)? != issuer_origin {
-        bail!("OIDC token_endpoint {token_endpoint} does not match issuer origin {issuer_origin}");
+    let token_origin = credential_egress_origin(token_endpoint).map_err(|_| {
+        anyhow!("OIDC token_endpoint {token_endpoint:?} is not a usable credential endpoint URL")
+    })?;
+    if token_origin != issuer_origin {
+        bail!(
+            "OIDC token_endpoint {token_endpoint:?} does not match issuer origin {issuer_origin}"
+        );
     }
 
     Ok((device_endpoint.to_string(), token_endpoint.to_string()))
@@ -3597,6 +3607,74 @@ mod login_egress_tests {
             error.to_string().contains("missing issuer"),
             "unexpected error: {error}"
         );
+    }
+
+    /// `main` prints the refusal's Debug form, which includes the `Caused by`
+    /// chain, so both renderings must be free of terminal control bytes.
+    fn assert_refusal_escapes_control_bytes(error: &anyhow::Error, field: &str) {
+        for rendered in [error.to_string(), format!("{error:?}")] {
+            assert!(
+                !rendered.contains('\u{1b}') && !rendered.contains('\r'),
+                "refusal must escape control bytes: {rendered:?}"
+            );
+            assert!(rendered.contains(field), "unexpected error: {rendered:?}");
+        }
+    }
+
+    const TERMINAL_ESCAPE: &str = "\u{1b}[2K\r";
+
+    #[test]
+    fn login_discovery_targets_escapes_control_bytes_in_a_refused_token_endpoint() {
+        let issuer = "https://idp.example.com";
+        let mut doc = matching_doc(issuer);
+        doc["token_endpoint"] =
+            serde_json::json!(format!("https://attacker.example.com/{TERMINAL_ESCAPE}"));
+
+        let error = login_discovery_targets(&normalized(issuer), &doc)
+            .expect_err("an off-origin token_endpoint must be refused");
+
+        assert_refusal_escapes_control_bytes(&error, "token_endpoint");
+    }
+
+    #[test]
+    fn login_discovery_targets_escapes_control_bytes_in_a_refused_device_endpoint() {
+        let issuer = "https://idp.example.com";
+        let mut doc = matching_doc(issuer);
+        doc["device_authorization_endpoint"] =
+            serde_json::json!(format!("https://attacker.example.com/{TERMINAL_ESCAPE}"));
+
+        let error = login_discovery_targets(&normalized(issuer), &doc)
+            .expect_err("an off-origin device_authorization_endpoint must be refused");
+
+        assert_refusal_escapes_control_bytes(&error, "device_authorization_endpoint");
+    }
+
+    #[test]
+    fn login_discovery_targets_escapes_control_bytes_in_a_mismatching_issuer_claim() {
+        let issuer = "https://idp.example.com/realms/vorpal";
+        let mut doc = matching_doc(issuer);
+        doc["issuer"] = serde_json::json!(format!(
+            "https://idp.example.com/realms/other{TERMINAL_ESCAPE}"
+        ));
+
+        let error = login_discovery_targets(&normalized(issuer), &doc)
+            .expect_err("a document declaring a different issuer must be refused");
+
+        assert_refusal_escapes_control_bytes(&error, "issuer");
+    }
+
+    #[test]
+    fn login_discovery_targets_escapes_control_bytes_in_an_unparseable_endpoint() {
+        let issuer = "https://idp.example.com";
+        for field in ["device_authorization_endpoint", "token_endpoint"] {
+            let mut doc = matching_doc(issuer);
+            doc[field] = serde_json::json!(format!("https://{TERMINAL_ESCAPE}.evil/"));
+
+            let error = login_discovery_targets(&normalized(issuer), &doc)
+                .expect_err("an endpoint with control bytes in its host must be refused");
+
+            assert_refusal_escapes_control_bytes(&error, field);
+        }
     }
 
     // --- login_verification_prompt (VPL-738 AC1, AC2, AC3) -----------------
