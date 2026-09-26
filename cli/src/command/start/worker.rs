@@ -1236,11 +1236,18 @@ async fn run_step(
 
     // Run command
 
+    // The step leads its own process group so that anything it backgrounds
+    // can be found and killed once it exits (see `reap_process_group`).
     let mut child = command
+        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| Status::internal(format!("failed to spawn sandbox: {err}")))?;
+
+    let process_group = child
+        .id()
+        .ok_or_else(|| Status::internal("spawned sandbox has no process id"))?;
 
     let stdout = child
         .stdout
@@ -1277,8 +1284,58 @@ async fn run_step(
         .await
         .map_err(|err| Status::internal(format!("failed to wait for sandbox: {err}")))?;
 
+    reap_process_group(process_group).await?;
+
     if !status.success() {
         return Err(Status::internal(last_line));
+    }
+
+    Ok(())
+}
+
+/// How long `reap_process_group` waits for killed members to disappear.
+const PROCESS_GROUP_REAP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Kills every process remaining in `process_group` and returns only once
+/// none remain, or fails.
+///
+/// A step's detached descendants would otherwise keep writing into the
+/// staging directory after the no-files refusal and the embedded-path scan
+/// have run, publishing content neither check saw. Signalling goes through
+/// `kill(1)` because the crate forbids `unsafe` and so cannot call `killpg`.
+/// A descendant that leaves the group (`setsid`) escapes this; the worker's
+/// threat model already accepts that a step runs unsandboxed.
+async fn reap_process_group(process_group: u32) -> Result<(), Status> {
+    let group = format!("-{process_group}");
+
+    let signal_group = |signal: &'static str| {
+        let group = group.clone();
+
+        async move {
+            Command::new("kill")
+                .args([signal, "--", &group])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await
+                .map(|status| status.success())
+                .map_err(|err| Status::internal(format!("failed to signal step processes: {err}")))
+        }
+    };
+
+    // A failed kill means the group is already empty, which is the goal.
+    signal_group("-KILL").await?;
+
+    let deadline = tokio::time::Instant::now() + PROCESS_GROUP_REAP_TIMEOUT;
+
+    while signal_group("-0").await? {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Status::internal(
+                "step processes survived SIGKILL; refusing to inspect their output",
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     Ok(())
@@ -4186,5 +4243,56 @@ mod tests {
         assert_eq!(staging_max_age_from(Some("")), DEFAULT_STAGING_MAX_AGE);
         assert_eq!(staging_max_age_from(Some("soon")), DEFAULT_STAGING_MAX_AGE);
         assert_eq!(staging_max_age_from(Some("-1")), DEFAULT_STAGING_MAX_AGE);
+    }
+
+    // A step that backgrounds a writer must not return while the writer can
+    // still add files the no-files refusal and the embedded-path scan never saw.
+    #[tokio::test]
+    async fn run_step_reaps_detached_children() {
+        let output = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let pid_path = workspace.path().join("child.pid");
+        let late_path = output.path().join("late");
+
+        let step = ArtifactStep {
+            entrypoint: Some("/bin/sh".to_string()),
+            script: Some(
+                "(sleep 1; echo late > \"$VORPAL_OUTPUT/late\") >/dev/null 2>&1 &\n\
+                 echo $! > \"$VORPAL_WORKSPACE/child.pid\"\n"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let (tx, _rx) = mpsc::channel(100);
+
+        run_step(
+            "digest",
+            "library",
+            output.path(),
+            step,
+            &tx,
+            workspace.path(),
+        )
+        .await
+        .unwrap();
+
+        let pid = std::fs::read_to_string(&pid_path).unwrap();
+
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+
+        assert!(!alive, "the backgrounded child outlived run_step");
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        assert!(
+            !late_path.exists(),
+            "the backgrounded child wrote into the output after run_step returned"
+        );
     }
 }
