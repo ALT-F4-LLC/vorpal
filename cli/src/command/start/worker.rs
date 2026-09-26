@@ -297,6 +297,13 @@ async fn pull_source(
                     return Err(Status::not_found("source archive empty in registry"));
                 }
 
+                // Integrity residual (source pull): these registry bytes are written to a
+                // recipe-addressed store path with no content-hash check. Integrity rests on
+                // the registry channel, as recorded in cli/src/command/store/paths.rs. The
+                // adversary is bounded by `--registry-allowed` (see `resolve_registry`), which
+                // limits which registry is used but not what it serves. The unpacked bytes
+                // execute in the build sandbox. The path is skipped once it exists, so a
+                // poisoned archive persists.
                 publish_archive(&response_data, &source_archive).await?;
             }
         }
@@ -947,6 +954,13 @@ async fn pull_artifact(
                     return Err(Status::not_found("artifact archive empty in registry"));
                 }
 
+                // Integrity residual (artifact pull): the same four points as the source-pull
+                // note in `pull_source` apply here. The archive lands at a recipe-addressed
+                // store path with no content-hash check, integrity rests on the registry
+                // channel per cli/src/command/store/paths.rs, the adversary is bounded by
+                // `--registry-allowed`, and the unpacked bytes execute in the build sandbox.
+                // In addition, a poisoned artifact archive contaminates every artifact this
+                // worker subsequently builds from it, and their registry pushes.
                 publish_archive(&response_data, &artifact_archive_path).await?;
             }
         }
