@@ -1202,6 +1202,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oidc_validator_refuses_same_origin_wrong_issuer_discovery() {
+        // A co-tenant realm on the issuer's own origin passes the path-blind
+        // origin pin on `jwks_uri`, so only the issuer claim keeps its keys
+        // out of the trust anchor.
+        let idp = IdpServer::start(|path, addr| {
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => http_json(&format!(
+                    "{{\"issuer\":\"{origin}/realms/other\",\"jwks_uri\":\"{origin}/jwks\"}}"
+                )),
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        let Err(err) = OidcValidator::new(idp.issuer(), vec![]).await else {
+            panic!("a discovery document naming a different issuer must be refused");
+        };
+
+        assert!(
+            err.to_string().contains("issuer mismatch"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            !idp.requested_paths().contains(&"/jwks".to_string()),
+            "keys must not be fetched for a wrong-issuer document, got {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_validator_accepts_a_trailing_slash_issuer_claim() {
+        // Discriminates the normalized compare from a raw `!=`: a correct IdP
+        // may state its `iss` with a trailing slash the configured value lacks.
+        let idp = IdpServer::start(|path, addr| {
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => http_json(&format!(
+                    "{{\"issuer\":\"{origin}/\",\"jwks_uri\":\"{origin}/jwks\"}}"
+                )),
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("a trailing-slash issuer claim names the same issuer");
+
+        assert!(idp.requested_paths().contains(&"/jwks".to_string()));
+    }
+
+    #[tokio::test]
     async fn oidc_validator_refuses_redirected_discovery() {
         let elsewhere = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
