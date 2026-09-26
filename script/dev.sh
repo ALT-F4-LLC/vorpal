@@ -9,7 +9,7 @@ scripts=("rustup" "protoc")
 
 if [[ "${CI:-}" != "true" ]]; then
     # CI provisions go and bun through setup actions, with its own caching.
-    scripts=("xz" "amber" "${scripts[@]}" "go" "bun" "lima" "terraform")
+    scripts=("xz" "amber" "${scripts[@]}" "go" "bun" "uv" "lima" "terraform")
 fi
 
 if [[ "$(uname -s)" == "Linux" ]]; then
