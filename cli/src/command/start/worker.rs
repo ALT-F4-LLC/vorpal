@@ -690,6 +690,37 @@ fn staging_max_age_from(value: Option<&str>) -> Duration {
     }
 }
 
+/// How long a build waits for another build of the same digest to release its
+/// output lock before refusing with `already_exists`: 600 seconds (ten
+/// minutes). Overridable through `VORPAL_BUILD_LOCK_WAIT` (seconds).
+///
+/// The holder is building the very artifact the waiter wants, so waiting turns
+/// a spurious failure into either a finished output or a lock the waiter can
+/// take over once the holder gives up.
+const DEFAULT_OUTPUT_LOCK_WAIT: Duration = Duration::from_secs(10 * 60);
+
+const OUTPUT_LOCK_WAIT_ENV: &str = "VORPAL_BUILD_LOCK_WAIT";
+
+/// How often a waiting build re-checks a held output lock.
+const OUTPUT_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// An unset or unparseable override keeps the default, as
+/// `staging_max_age_from` does: a typo in a wait window should not fail builds.
+fn output_lock_wait_from(value: Option<&str>) -> Duration {
+    let Some(value) = value else {
+        return DEFAULT_OUTPUT_LOCK_WAIT;
+    };
+
+    match value.trim().parse::<u64>() {
+        Ok(seconds) => Duration::from_secs(seconds),
+        Err(err) => {
+            warn!("worker |> ignoring invalid {OUTPUT_LOCK_WAIT_ENV}={value:?}: {err}");
+
+            DEFAULT_OUTPUT_LOCK_WAIT
+        }
+    }
+}
+
 /// Reclaims staging directories no producer will ever publish, and reports how
 /// many went.
 ///
@@ -1789,6 +1820,54 @@ async fn publish_to_registry(
     Ok(())
 }
 
+/// What `claim_output` settled on for a digest.
+#[derive(Debug, PartialEq, Eq)]
+enum OutputClaim {
+    /// The lock file now exists and belongs to the caller.
+    Locked,
+    /// The output is already at its path; no lock was taken.
+    AlreadyBuilt,
+}
+
+/// Takes the output lock for a digest, or finds its output already built,
+/// waiting up to `wait` for another build holding the lock to finish.
+///
+/// A held lock means another build of this same digest is in flight. When it
+/// publishes, the output appears and this returns `AlreadyBuilt`; when it fails,
+/// it removes its lock and this takes the lock over. Only a lock still held
+/// after `wait` is refused, leaving the holder's lock untouched.
+async fn claim_output(
+    artifact_digest: &str,
+    output_path: &Path,
+    lock_path: &Path,
+    artifact_json: &str,
+    wait: Duration,
+) -> Result<OutputClaim, Status> {
+    let deadline = tokio::time::Instant::now() + wait;
+
+    loop {
+        if output_path.exists() {
+            return Ok(OutputClaim::AlreadyBuilt);
+        }
+
+        match acquire_output_lock(lock_path, artifact_json).await {
+            Ok(()) => return Ok(OutputClaim::Locked),
+            Err(status) if status.code() == tonic::Code::AlreadyExists => {}
+            Err(status) => return Err(status),
+        }
+
+        let now = tokio::time::Instant::now();
+
+        if now >= deadline {
+            return Err(Status::already_exists(format!(
+                "artifact {artifact_digest} is still locked by another build after waiting {wait:?}"
+            )));
+        }
+
+        tokio::time::sleep(OUTPUT_LOCK_POLL_INTERVAL.min(deadline - now)).await;
+    }
+}
+
 /// What `validate_and_lock_artifact` found at the artifact's digest.
 enum LockedArtifact {
     /// Nothing at the output path and no concurrent build holding the lock;
@@ -1807,9 +1886,9 @@ enum LockedArtifact {
     },
 }
 
-/// Validates `artifact` against `worker_target`, computes its digest, checks it is
-/// neither locked by a concurrent build nor already at its output path, and creates
-/// the lock file. Returns the artifact's digest, output path, and lock path for the
+/// Validates `artifact` against `worker_target`, computes its digest, and creates
+/// the lock file unless the output is already at its path, waiting up to
+/// `lock_wait` for a concurrent build of the digest to release its lock. Returns the artifact's digest, output path, and lock path for the
 /// caller to use and eventually remove.
 ///
 /// An artifact already at its output path is reported as
@@ -1824,6 +1903,7 @@ async fn validate_and_lock_artifact(
     artifact: &Artifact,
     artifact_namespace: &str,
     artifact_json: &str,
+    lock_wait: Duration,
 ) -> Result<LockedArtifact, Status> {
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
@@ -1882,31 +1962,34 @@ async fn validate_and_lock_artifact(
     // could ever make the registry copy. `build_artifact` decides whether the
     // registry half still needs finishing; this function has no auth headers
     // or registry to do that itself.
-    if artifact_output_path.exists() {
-        return Ok(LockedArtifact::AlreadyBuilt {
-            artifact_digest,
-            artifact_output_path,
-        });
-    }
-
-    // Take the lock for this digest
-
     let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest, artifact_namespace);
 
-    if let Err(status) = acquire_output_lock(&artifact_output_lock, artifact_json).await {
+    let claim = claim_output(
+        &artifact_digest,
+        &artifact_output_path,
+        &artifact_output_lock,
+        artifact_json,
+        lock_wait,
+    )
+    .await
+    .inspect_err(|status| {
         error!(
             "worker |> could not take the lock for {}: {}",
             artifact_digest,
             status.message()
         );
+    })?;
 
-        return Err(status);
-    }
-
-    Ok(LockedArtifact::Ready {
-        artifact_digest,
-        artifact_output_path,
-        artifact_output_lock,
+    Ok(match claim {
+        OutputClaim::AlreadyBuilt => LockedArtifact::AlreadyBuilt {
+            artifact_digest,
+            artifact_output_path,
+        },
+        OutputClaim::Locked => LockedArtifact::Ready {
+            artifact_digest,
+            artifact_output_path,
+            artifact_output_lock,
+        },
     })
 }
 
@@ -1990,7 +2073,11 @@ async fn build_artifact(
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
 
-    let locked = validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json).await?;
+    let lock_wait = output_lock_wait_from(std::env::var(OUTPUT_LOCK_WAIT_ENV).ok().as_deref());
+
+    let locked =
+        validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json, lock_wait)
+            .await?;
 
     // Obtain service-to-service OAuth2 tokens for archive and artifact services
     let (archive_auth_header, artifact_auth_header) = obtain_build_credentials(
@@ -3457,6 +3544,109 @@ mod tests {
             std::fs::read_to_string(&lock_path).unwrap(),
             "{\"name\":\"abc\"}"
         );
+    }
+
+    #[test]
+    fn output_lock_wait_reads_seconds_and_keeps_the_default_otherwise() {
+        assert_eq!(output_lock_wait_from(Some(" 30 ")), Duration::from_secs(30));
+        assert_eq!(output_lock_wait_from(None), DEFAULT_OUTPUT_LOCK_WAIT);
+        assert_eq!(output_lock_wait_from(Some("")), DEFAULT_OUTPUT_LOCK_WAIT);
+        assert_eq!(
+            output_lock_wait_from(Some("soon")),
+            DEFAULT_OUTPUT_LOCK_WAIT
+        );
+        assert_eq!(output_lock_wait_from(Some("-1")), DEFAULT_OUTPUT_LOCK_WAIT);
+    }
+
+    /// Holds the lock for one digest, starts a second claim concurrently, then
+    /// releases the lock the way the first build would: publishing its output
+    /// first when `first_build_published`, or removing the lock alone when it
+    /// failed.
+    async fn claim_while_another_build_holds_the_lock(
+        first_build_published: bool,
+    ) -> (TempDir, PathBuf, Result<OutputClaim, Status>) {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output").join("abc123");
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+
+        let second = tokio::spawn({
+            let output_path = output_path.clone();
+            let lock_path = lock_path.clone();
+
+            async move {
+                claim_output(
+                    "abc123",
+                    &output_path,
+                    &lock_path,
+                    "held-by-the-second-build",
+                    Duration::from_secs(30),
+                )
+                .await
+            }
+        });
+
+        tokio::time::sleep(OUTPUT_LOCK_POLL_INTERVAL * 2).await;
+        assert!(!second.is_finished(), "the second claim did not wait");
+
+        if first_build_published {
+            std::fs::create_dir_all(&output_path).unwrap();
+        }
+        std::fs::remove_file(&lock_path).unwrap();
+
+        let claim = second.await.unwrap();
+
+        (root, lock_path, claim)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_waiting_claim_finds_the_output_the_lock_holder_published() {
+        let (_root, lock_path, claim) = claim_while_another_build_holds_the_lock(true).await;
+
+        assert_eq!(claim.unwrap(), OutputClaim::AlreadyBuilt);
+        assert!(!lock_path.exists(), "an already-built claim took a lock");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_waiting_claim_takes_the_lock_a_failed_holder_released() {
+        let (_root, lock_path, claim) = claim_while_another_build_holds_the_lock(false).await;
+
+        assert_eq!(claim.unwrap(), OutputClaim::Locked);
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-second-build"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_claim_refuses_a_lock_still_held_when_the_wait_expires() {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output").join("abc123");
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+        let wait = Duration::from_millis(300);
+
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+
+        let status = claim_output("abc123", &output_path, &lock_path, "second", wait)
+            .await
+            .expect_err("a lock held past the wait must be refused");
+
+        assert_eq!(status.code(), tonic::Code::AlreadyExists);
+        assert!(status.message().contains("abc123"), "{}", status.message());
+        assert!(
+            status.message().contains(&format!("{wait:?}")),
+            "{}",
+            status.message()
+        );
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-first-build",
+            "an expired wait overwrote the holder's lock"
+        );
+        assert!(!output_path.exists());
     }
 
     /// Writes a zstd-compressed tar whose entries come from raw ustar headers,
