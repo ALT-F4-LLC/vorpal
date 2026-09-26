@@ -1296,6 +1296,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oidc_validator_refuses_redirected_jwks() {
+        let elsewhere = IdpServer::start(|_, _| http_json(EMPTY_JWKS)).await;
+
+        let target = elsewhere.issuer();
+        let idp = IdpServer::start(move |path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{issuer}/jwks"))
+                }
+                _ => http_redirect("302 Found", &format!("{target}/jwks")),
+            }
+        })
+        .await;
+
+        let err = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .err()
+            .expect("a redirected JWKS response must be refused");
+
+        assert!(
+            err.to_string().contains("refusing to follow redirect"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration", "/jwks"],
+            "the issuer's /jwks must be reached so the redirect is exercised"
+        );
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the redirect target must never be contacted, got {:?}",
+            elsewhere.requested_paths()
+        );
+    }
+
+    #[tokio::test]
     async fn oidc_validator_refuses_cross_origin_jwks_uri() {
         let elsewhere = IdpServer::start(|_, _| http_json(EMPTY_JWKS)).await;
 
