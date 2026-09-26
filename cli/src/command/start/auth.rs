@@ -208,6 +208,10 @@ enum AuthError {
 
 pub struct OidcValidator {
     pub issuer: String,
+    /// The discovery document's own issuer spelling, which tokens carry.
+    /// Startup proved it normalizes equal to `issuer`, but token `iss`
+    /// matching is exact, so both spellings are accepted.
+    discovered_issuer: String,
     pub issuer_audiences: Vec<String>,
     pub jwks_uri: String,
     /// OAuth client IDs whose tokens are classified as `TrustedService` when
@@ -282,6 +286,7 @@ impl OidcValidator {
 
         Ok(Self {
             issuer: issuer.as_str().to_string(),
+            discovered_issuer: disc.issuer.trim_end_matches('/').to_string(),
             issuer_audiences,
             jwks: Arc::new(RwLock::new(jwks)),
             // The pinned URL is what gets stored, so the refresh below reuses
@@ -403,7 +408,12 @@ impl OidcValidator {
         validation.set_audience(aud);
         validation.validate_aud = true;
         // Accept issuer with or without trailing slash (Auth0 includes it, others may not)
-        validation.set_issuer(&[&self.issuer, &format!("{}/", self.issuer)]);
+        validation.set_issuer(&[
+            &self.issuer,
+            &format!("{}/", self.issuer),
+            &self.discovered_issuer,
+            &format!("{}/", self.discovered_issuer),
+        ]);
         validation.validate_exp = true;
         validation.validate_nbf = true;
 
@@ -1816,6 +1826,126 @@ mod tests {
             1,
             "8 concurrent misses must coalesce into one refresh, served: {:?}",
             idp.requested_paths()
+        );
+    }
+
+    // ===== Per-token `iss` against the discovery document's spelling =====
+
+    const SIGNED_KID: &str = "signing-key";
+    const SIGNED_AUDIENCE: &str = "vorpal";
+
+    /// An `IdP` at `/realms/x` whose discovery document spells its issuer with
+    /// an upper-case scheme, which normalizes equal to the configured issuer,
+    /// and whose JWKS serves the public half of a freshly generated RSA key.
+    struct SpelledIdp {
+        server: IdpServer,
+        signing_key: jsonwebtoken::EncodingKey,
+    }
+
+    impl SpelledIdp {
+        async fn start() -> Self {
+            use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
+
+            let private_key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048)
+                .expect("generate rsa key");
+            let jwks = {
+                use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+                format!(
+                    "{{\"keys\":[{{\"kid\":\"{SIGNED_KID}\",\"kty\":\"RSA\",\"n\":\"{}\",\"e\":\"{}\"}}]}}",
+                    URL_SAFE_NO_PAD.encode(private_key.n().to_bytes_be()),
+                    URL_SAFE_NO_PAD.encode(private_key.e().to_bytes_be()),
+                )
+            };
+            let signing_key = jsonwebtoken::EncodingKey::from_rsa_der(
+                private_key
+                    .to_pkcs1_der()
+                    .expect("encode rsa key")
+                    .as_bytes(),
+            );
+
+            let server = IdpServer::start(move |path, addr| {
+                let canonical = format!("http://127.0.0.1:{}/realms/x", addr.port());
+                let spelled = format!("HTTP://127.0.0.1:{}/realms/x", addr.port());
+
+                match path {
+                    "/realms/x/.well-known/openid-configuration" => {
+                        discovery_document(&spelled, &format!("{canonical}/jwks"))
+                    }
+                    _ => http_json(&jwks),
+                }
+            })
+            .await;
+
+            Self {
+                server,
+                signing_key,
+            }
+        }
+
+        fn configured_issuer(&self) -> String {
+            format!("{}/realms/x", self.server.issuer())
+        }
+
+        fn document_issuer(&self) -> String {
+            format!("HTTP://127.0.0.1:{}/realms/x", self.server.addr.port())
+        }
+
+        async fn validator(&self) -> OidcValidator {
+            OidcValidator::new(self.configured_issuer(), vec![SIGNED_AUDIENCE.to_string()])
+                .await
+                .expect("a document issuer that normalizes equal must pass startup")
+        }
+
+        fn bearer(&self, iss: &str) -> String {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_secs();
+            let claims = serde_json::json!({
+                "iss": iss,
+                "aud": SIGNED_AUDIENCE,
+                "sub": "someone",
+                "exp": now + 300,
+                "nbf": now - 10,
+            });
+            let mut header = jsonwebtoken::Header::new(Algorithm::RS256);
+            header.kid = Some(SIGNED_KID.to_string());
+
+            let token =
+                jsonwebtoken::encode(&header, &claims, &self.signing_key).expect("sign token");
+
+            format!("Bearer {token}")
+        }
+    }
+
+    // Mutant check: restore the canonical-only `set_issuer` list and this
+    // fails with `InvalidIssuer`.
+    #[tokio::test]
+    async fn a_token_carrying_the_discovery_documents_issuer_spelling_validates() {
+        let idp = SpelledIdp::start().await;
+        let validator = idp.validator().await;
+
+        let claims = validator
+            .validate(&idp.bearer(&idp.document_issuer()))
+            .await
+            .expect("the spelling startup accepted must validate per token");
+
+        assert_eq!(claims.sub.as_deref(), Some("someone"));
+    }
+
+    // Mutant check: drop `set_issuer`, or add the token's own `iss` to it, and
+    // this co-tenant realm's token is accepted.
+    #[tokio::test]
+    async fn a_signed_token_from_another_realm_is_still_refused() {
+        let idp = SpelledIdp::start().await;
+        let validator = idp.validator().await;
+
+        let foreign = format!("{}/realms/y", idp.server.issuer());
+        let result = validator.validate(&idp.bearer(&foreign)).await;
+
+        assert!(
+            matches!(&result, Err(AuthError::Jwt(message)) if message.contains("InvalidIssuer")),
+            "a foreign realm's issuer must be refused, got {result:?}"
         );
     }
 }
