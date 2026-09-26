@@ -1464,6 +1464,48 @@ mod anonymous_start_refused_tests {
     }
 }
 
+#[cfg(test)]
+mod resolve_required_issuer_tests {
+    use super::*;
+
+    const ISSUER: &str = "https://issuer.example.com";
+
+    fn services(has_worker: bool, has_registry: bool, has_agent: bool) -> StartupServices {
+        StartupServices {
+            has_worker,
+            has_registry,
+            has_agent,
+        }
+    }
+
+    #[test]
+    fn agent_only_with_an_issuer_resolves_that_issuer() {
+        let resolved = resolve_required_issuer(services(false, false, true), Some(ISSUER.into()));
+        assert_eq!(resolved.ok(), Some(Some(ISSUER.to_string())));
+    }
+
+    #[test]
+    fn none_of_the_services_with_an_issuer_resolves_no_issuer() {
+        let resolved = resolve_required_issuer(services(false, false, false), Some(ISSUER.into()));
+        assert_eq!(resolved.ok(), Some(None));
+    }
+
+    #[test]
+    fn agent_only_without_an_issuer_errors() {
+        assert!(resolve_required_issuer(services(false, false, true), None).is_err());
+    }
+
+    #[test]
+    fn worker_only_without_an_issuer_errors() {
+        assert!(resolve_required_issuer(services(true, false, false), None).is_err());
+    }
+
+    #[test]
+    fn registry_only_without_an_issuer_errors() {
+        assert!(resolve_required_issuer(services(false, true, false), None).is_err());
+    }
+}
+
 // VPL-434-CLUSTER-6: `anonymous_start_refused` is unit-tested above, but
 // nothing previously pinned that `run` actually calls it before binding a
 // listener — a mutation that deleted the `if anonymous_start_refused(..) {
