@@ -1086,67 +1086,7 @@ mod tests {
     // requests" and "the fixture never worked" are the same observation
     // otherwise.
 
-    /// A minimal HTTP/1.1 stand-in for an `IdP`, answering each request with
-    /// whatever `respond` returns for that request's path and recording the
-    /// paths it served.
-    struct IdpServer {
-        addr: std::net::SocketAddr,
-        paths: Arc<std::sync::Mutex<Vec<String>>>,
-    }
-
-    impl IdpServer {
-        async fn start(
-            respond: impl Fn(&str, std::net::SocketAddr) -> String + Send + Sync + 'static,
-        ) -> Self {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .expect("bind idp fixture");
-            let addr = listener.local_addr().expect("fixture address");
-            let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let respond = Arc::new(respond);
-            let accepted = std::sync::Arc::clone(&paths);
-
-            tokio::spawn(async move {
-                loop {
-                    let Ok((mut socket, _)) = listener.accept().await else {
-                        return;
-                    };
-
-                    let respond = std::sync::Arc::clone(&respond);
-                    let accepted = std::sync::Arc::clone(&accepted);
-
-                    tokio::spawn(async move {
-                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-                        let mut buffer = vec![0u8; 8192];
-                        let read = socket.read(&mut buffer).await.unwrap_or(0);
-                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
-                        let path = request
-                            .split_whitespace()
-                            .nth(1)
-                            .unwrap_or_default()
-                            .to_string();
-
-                        accepted.lock().unwrap().push(path.clone());
-
-                        let response = respond(&path, addr);
-
-                        let _ = socket.write_all(response.as_bytes()).await;
-                    });
-                }
-            });
-
-            Self { addr, paths }
-        }
-
-        fn issuer(&self) -> String {
-            format!("http://127.0.0.1:{}", self.addr.port())
-        }
-
-        fn requested_paths(&self) -> Vec<String> {
-            self.paths.lock().unwrap().clone()
-        }
-    }
+    use crate::command::idp_fixture::IdpServer;
 
     fn http_json(body: &str) -> String {
         format!(
@@ -1177,12 +1117,12 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
@@ -1209,12 +1149,12 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => http_json(&format!(
                     "{{\"issuer\":\"{origin}/realms/other\",\"jwks_uri\":\"{origin}/jwks\"}}"
                 )),
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
@@ -1240,12 +1180,12 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => http_json(&format!(
                     "{{\"issuer\":\"{origin}/\",\"jwks_uri\":\"{origin}/jwks\"}}"
                 )),
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
@@ -1261,21 +1201,21 @@ mod tests {
         let elsewhere = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
         let target = elsewhere.issuer();
         let idp = IdpServer::start(move |_, _| {
-            http_redirect(
+            Some(http_redirect(
                 "302 Found",
                 &format!("{target}/.well-known/openid-configuration"),
-            )
+            ))
         })
         .await;
 
@@ -1297,18 +1237,18 @@ mod tests {
 
     #[tokio::test]
     async fn oidc_validator_refuses_redirected_jwks() {
-        let elsewhere = IdpServer::start(|_, _| http_json(EMPTY_JWKS)).await;
+        let elsewhere = IdpServer::start(|_, _| Some(http_json(EMPTY_JWKS))).await;
 
         let target = elsewhere.issuer();
         let idp = IdpServer::start(move |path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_redirect("302 Found", &format!("{target}/jwks")),
-            }
+            })
         })
         .await;
 
@@ -1335,18 +1275,18 @@ mod tests {
 
     #[tokio::test]
     async fn oidc_validator_refuses_cross_origin_jwks_uri() {
-        let elsewhere = IdpServer::start(|_, _| http_json(EMPTY_JWKS)).await;
+        let elsewhere = IdpServer::start(|_, _| Some(http_json(EMPTY_JWKS))).await;
 
         let attacker_jwks = format!("{}/jwks", elsewhere.issuer());
         let idp = IdpServer::start(move |path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 // The document's own `issuer` claim is honest; only
                 // `jwks_uri` points elsewhere.
                 "/.well-known/openid-configuration" => discovery_document(&issuer, &attacker_jwks),
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
@@ -1388,7 +1328,7 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
@@ -1396,7 +1336,7 @@ mod tests {
                     "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
                      \"token_type\":\"Bearer\"}",
                 ),
-            }
+            })
         })
         .await;
 
@@ -1412,15 +1352,15 @@ mod tests {
 
     #[tokio::test]
     async fn client_credentials_exchange_refuses_cross_origin_token_endpoint() {
-        let elsewhere = IdpServer::start(|_, _| http_json("{}")).await;
+        let elsewhere = IdpServer::start(|_, _| Some(http_json("{}"))).await;
 
         let attacker_token_endpoint = format!("{}/token", elsewhere.issuer());
         let idp = IdpServer::start(move |_, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            http_json(&format!(
+            Some(http_json(&format!(
                 "{{\"issuer\":\"{issuer}\",\"jwks_uri\":\"{issuer}/jwks\",\"token_endpoint\":\"{attacker_token_endpoint}\"}}"
-            ))
+            )))
         })
         .await;
 
@@ -1449,10 +1389,10 @@ mod tests {
         let idp = IdpServer::start(|_, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            http_json(&format!(
+            Some(http_json(&format!(
                 "{{\"issuer\":\"{origin}/realms/other\",\"jwks_uri\":\"{origin}/jwks\",\
                  \"token_endpoint\":\"{origin}/realms/other/token\"}}"
-            ))
+            )))
         })
         .await;
 
@@ -1480,7 +1420,9 @@ mod tests {
         let idp = IdpServer::start(|_, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            http_json(&format!("{{\"token_endpoint\":\"{origin}/token\"}}"))
+            Some(http_json(&format!(
+                "{{\"token_endpoint\":\"{origin}/token\"}}"
+            )))
         })
         .await;
 
@@ -1509,7 +1451,7 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let origin = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => http_json(&format!(
                     "{{\"issuer\":\"{origin}/\",\"jwks_uri\":\"{origin}/jwks\",\
                      \"token_endpoint\":\"{origin}/token\"}}"
@@ -1518,7 +1460,7 @@ mod tests {
                     "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
                      \"token_type\":\"Bearer\"}",
                 ),
-            }
+            })
         })
         .await;
 
@@ -1535,18 +1477,18 @@ mod tests {
     async fn client_credentials_exchange_refuses_redirected_token_endpoint() {
         // A 307 replays the request body, so following it would hand the
         // client secret to the redirect target.
-        let elsewhere = IdpServer::start(|_, _| http_json("{}")).await;
+        let elsewhere = IdpServer::start(|_, _| Some(http_json("{}"))).await;
 
         let target = format!("{}/token", elsewhere.issuer());
         let idp = IdpServer::start(move |path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_redirect("307 Temporary Redirect", &target),
-            }
+            })
         })
         .await;
 
@@ -1573,7 +1515,7 @@ mod tests {
             "A".repeat(RESPONSE_EXCERPT_LIMIT)
         );
 
-        let idp = IdpServer::start(move |_, _| http_json(&forged)).await;
+        let idp = IdpServer::start(move |_, _| Some(http_json(&forged))).await;
 
         let err =
             exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
@@ -1645,12 +1587,12 @@ mod tests {
         let idp = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(EMPTY_JWKS),
-            }
+            })
         })
         .await;
 
@@ -1742,12 +1684,12 @@ mod tests {
         let idp = IdpServer::start(move |path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
-            match path {
+            Some(match path {
                 "/.well-known/openid-configuration" => {
                     discovery_document(&issuer, &format!("{issuer}/jwks"))
                 }
                 _ => http_json(&jwks.lock().unwrap().clone()),
-            }
+            })
         })
         .await;
 
@@ -1960,12 +1902,12 @@ mod tests {
                 let canonical = format!("http://127.0.0.1:{}/realms/x", addr.port());
                 let spelled = format!("HTTP://127.0.0.1:{}/realms/x", addr.port());
 
-                match path {
+                Some(match path {
                     "/realms/x/.well-known/openid-configuration" => {
                         discovery_document(&spelled, &format!("{canonical}/jwks"))
                     }
                     _ => http_json(&jwks),
-                }
+                })
             })
             .await;
 

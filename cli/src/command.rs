@@ -2198,6 +2198,88 @@ pub async fn run() -> Result<()> {
     }
 }
 
+/// A minimal HTTP/1.1 stand-in for an `IdP`, shared by this module's login
+/// tests and `start/auth.rs`'s validator tests. The CLI cannot import
+/// `sdk/rust/src/context.rs`'s own `IdpServer` across the crate boundary
+/// (it is `#[cfg(test)]`-private to the SDK).
+#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "a fixture failure is the test failing"
+)]
+mod idp_fixture {
+    use std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    };
+
+    pub(crate) struct IdpServer {
+        pub(crate) addr: SocketAddr,
+        paths: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl IdpServer {
+        /// Answers each request with `respond`'s result for its path and
+        /// records the path. `None` accepts the connection and never answers,
+        /// so the caller's own timeout is the only thing that ends the request.
+        pub(crate) async fn start(
+            respond: impl Fn(&str, SocketAddr) -> Option<String> + Send + Sync + 'static,
+        ) -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind idp fixture");
+            let addr = listener.local_addr().expect("fixture address");
+            let paths = Arc::new(Mutex::new(Vec::new()));
+            let respond = Arc::new(respond);
+            let accepted = Arc::clone(&paths);
+
+            tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        return;
+                    };
+
+                    let respond = Arc::clone(&respond);
+                    let accepted = Arc::clone(&accepted);
+
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                        let mut buffer = vec![0u8; 8192];
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                        let path = request
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+
+                        accepted.lock().unwrap().push(path.clone());
+
+                        match respond(&path, addr) {
+                            Some(response) => {
+                                let _ = socket.write_all(response.as_bytes()).await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    });
+                }
+            });
+
+            Self { addr, paths }
+        }
+
+        pub(crate) fn issuer(&self) -> String {
+            format!("http://127.0.0.1:{}", self.addr.port())
+        }
+
+        pub(crate) fn requested_paths(&self) -> Vec<String> {
+            self.paths.lock().unwrap().clone()
+        }
+    }
+}
+
 #[cfg(test)]
 #[expect(
     clippy::expect_used,
@@ -3864,76 +3946,8 @@ mod login_egress_tests {
     }
 
     // --- fetch_login_discovery_endpoints (AC2, AC3, AC5) -------------------
-    //
-    // A minimal HTTP/1.1 stand-in for an IdP, mirroring
-    // `sdk/rust/src/context.rs`'s own `IdpServer` fixture: the CLI's
-    // discovery fetch cannot import that one across the crate boundary
-    // (it is `#[cfg(test)]`-private to the SDK), so AC5's "local HTTP
-    // double" is this equivalent in the CLI's own test module.
 
-    struct IdpServer {
-        addr: std::net::SocketAddr,
-        paths: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    }
-
-    impl IdpServer {
-        async fn start(
-            respond: impl Fn(&str, std::net::SocketAddr) -> Option<String> + Send + Sync + 'static,
-        ) -> Self {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .expect("bind idp fixture");
-            let addr = listener.local_addr().expect("fixture address");
-            let paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let respond = std::sync::Arc::new(respond);
-            let accepted = std::sync::Arc::clone(&paths);
-
-            tokio::spawn(async move {
-                loop {
-                    let Ok((mut socket, _)) = listener.accept().await else {
-                        return;
-                    };
-
-                    let respond = std::sync::Arc::clone(&respond);
-                    let accepted = std::sync::Arc::clone(&accepted);
-
-                    tokio::spawn(async move {
-                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-                        let mut buffer = vec![0u8; 8192];
-                        let read = socket.read(&mut buffer).await.unwrap_or(0);
-                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
-                        let path = request
-                            .split_whitespace()
-                            .nth(1)
-                            .unwrap_or_default()
-                            .to_string();
-
-                        accepted.lock().unwrap().push(path.clone());
-
-                        match respond(&path, addr) {
-                            Some(response) => {
-                                let _ = socket.write_all(response.as_bytes()).await;
-                            }
-                            // Accept and never answer, so the caller's own
-                            // timeout is the only thing that ends the request.
-                            None => std::future::pending::<()>().await,
-                        }
-                    });
-                }
-            });
-
-            Self { addr, paths }
-        }
-
-        fn issuer(&self) -> String {
-            format!("http://127.0.0.1:{}", self.addr.port())
-        }
-
-        fn requested_paths(&self) -> Vec<String> {
-            self.paths.lock().unwrap().clone()
-        }
-    }
+    use super::idp_fixture::IdpServer;
 
     fn http_json_status(status: &str, body: &str) -> String {
         format!(
