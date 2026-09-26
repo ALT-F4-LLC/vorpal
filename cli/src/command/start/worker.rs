@@ -1335,8 +1335,8 @@ const PROCESS_GROUP_REAP_TIMEOUT: Duration = Duration::from_secs(10);
 /// the group id from being reused, so the group-wide `SIGKILL` cannot reach
 /// an unrelated group even after the step itself has been reaped.
 ///
-/// Signalling goes through `kill(1)` because adding a crate that exposes
-/// `killpg` is outside this module. A descendant that leaves the group
+/// Signalling goes through `kill(1)` because no dependency of this crate
+/// exposes a safe `killpg`. A descendant that leaves the group
 /// (`setsid`) escapes; the worker's threat model already accepts that a step
 /// runs unsandboxed.
 struct StepProcessGroup {
