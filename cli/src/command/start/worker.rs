@@ -4649,7 +4649,7 @@ mod tests {
 
     #[tokio::test]
     async fn pull_source_publishes_no_archive_when_the_stream_fails_mid_transfer() {
-        let root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let root = crate::command::store::paths::test_support::ScratchRoot::new();
         let registry = serve_registry_failing_mid_pull().await;
         let (tx, _rx) = mpsc::channel(16);
         let source = ArtifactSource {
@@ -4678,7 +4678,7 @@ mod tests {
 
     #[tokio::test]
     async fn pull_artifact_publishes_no_archive_when_the_stream_fails_mid_transfer() {
-        let _root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let _root = crate::command::store::paths::test_support::ScratchRoot::new();
         let registry = serve_registry_failing_mid_pull().await;
         let (tx, _rx) = mpsc::channel(16);
 

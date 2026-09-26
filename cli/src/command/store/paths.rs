@@ -1283,22 +1283,22 @@ mod tests {
     }
 }
 
-/// Store-root override tests.
+/// Crate-wide test guard for `VORPAL_ROOT_PATH`.
 ///
-/// `VORPAL_ROOT_PATH` is process-global state that every path builder above
-/// reads, so these tests serialize on [`ROOT_PATH_ENV_LOCK`]. Any future test
-/// that sets the variable, or that asserts on a value derived from
-/// `get_root_dir_path`, must take the same lock.
+/// The variable is process-global state that every path builder above reads.
+/// Any test in the crate that sets it, or that asserts on a value derived from
+/// `get_root_dir_path`, must hold [`ROOT_PATH_ENV_LOCK`], usually through
+/// [`ScratchRoot`].
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
-    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+    reason = "test fixture: an unwrap failure is the test failing, which is the point"
 )]
-pub(crate) mod root_path_override_tests {
-    use super::*;
+pub(crate) mod test_support {
+    use std::path::Path;
     use tempfile::TempDir;
 
-    static ROOT_PATH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(crate) static ROOT_PATH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Sets `VORPAL_ROOT_PATH` to a fresh temporary directory for the caller's
     /// lifetime and restores the previous value on drop, so the variable never
@@ -1340,6 +1340,17 @@ pub(crate) mod root_path_override_tests {
             }
         }
     }
+}
+
+/// Store-root override tests.
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
+)]
+mod root_path_override_tests {
+    use super::test_support::{ScratchRoot, ROOT_PATH_ENV_LOCK};
+    use super::*;
 
     /// Holds `VORPAL_ROOT_PATH` at a chosen raw value, including an empty one,
     /// which `ScratchRoot` cannot express.
