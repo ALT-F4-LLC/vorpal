@@ -2057,7 +2057,16 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
 /// at this level and passing the value down is exactly the pre-lock sample
 /// that caused the refresh storm (VPL-283 C-1), and this is the function
 /// where that regression would reappear.
-async fn client_auth_header_live(
+///
+/// Public so callers outside this crate can point the header lookup at a
+/// credentials file of their choosing, such as a test fixture, instead of the
+/// host's live `credentials.json`.
+///
+/// # Errors
+///
+/// The same conditions as [`client_auth_header`], evaluated against
+/// `credentials_path`.
+pub async fn client_auth_header_live(
     credentials_path: &Path,
     registry: &str,
 ) -> Result<Option<MetadataValue<Ascii>>> {

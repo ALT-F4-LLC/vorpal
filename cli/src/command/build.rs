@@ -46,7 +46,7 @@ use vorpal_sdk::{
         protoc_gen_go_grpc::ProtocGenGoGrpc,
         system::get_system_default_str,
     },
-    context::{build_channel, client_auth_header, ConfigContext},
+    context::{build_channel, client_auth_header_live, get_key_credentials_path, ConfigContext},
 };
 use walkdir::WalkDir;
 
@@ -547,6 +547,7 @@ async fn pull_archive(
     archive_path: &Path,
     artifact_digest: &str,
     artifact_namespace: &str,
+    credentials_path: &Path,
     registry: &str,
     error_label: &str,
     on_not_found: impl FnOnce(),
@@ -561,7 +562,7 @@ async fn pull_archive(
     };
 
     let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
+    let request_auth_header = client_auth_header_live(credentials_path, registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
@@ -756,6 +757,7 @@ async fn build(
         &get_artifact_archive_path(artifact_digest, artifact_namespace),
         client_archive,
         client_worker,
+        &get_key_credentials_path(),
         registry,
     )
     .await
@@ -769,6 +771,7 @@ async fn registry_has_archive(
     client_archive: &mut ArchiveServiceClient<Channel>,
     artifact_digest: &str,
     artifact_namespace: &str,
+    credentials_path: &Path,
     registry: &str,
 ) -> Result<bool> {
     let request = ArchivePullRequest {
@@ -777,7 +780,7 @@ async fn registry_has_archive(
     };
 
     let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
+    let request_auth_header = client_auth_header_live(credentials_path, registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
@@ -814,6 +817,7 @@ async fn build_at_paths(
     archive_path: &Path,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
+    credentials_path: &Path,
     registry: &str,
 ) -> Result<()> {
     // 1. Check artifact
@@ -834,6 +838,7 @@ async fn build_at_paths(
             client_archive,
             artifact_digest,
             artifact_namespace,
+            credentials_path,
             registry,
         )
         .await?;
@@ -849,6 +854,7 @@ async fn build_at_paths(
             archive_path,
             artifact_digest,
             artifact_namespace,
+            credentials_path,
             registry,
             "registry pull error",
             || {},
@@ -883,7 +889,7 @@ async fn build_at_paths(
     };
 
     let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
+    let request_auth_header = client_auth_header_live(credentials_path, registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
@@ -931,6 +937,7 @@ async fn build_at_paths(
             archive_path,
             artifact_digest,
             artifact_namespace,
+            credentials_path,
             registry,
             "registry pull error after build",
             || {
@@ -3650,6 +3657,7 @@ mod tests {
             &archive_path,
             &mut client_archive,
             &mut client_worker,
+            &root.path().join("credentials.json"),
             "http://registry.invalid",
         )
         .await
@@ -3686,6 +3694,7 @@ mod tests {
             &archive_path,
             &mut client_archive,
             &mut client_worker,
+            &root.path().join("credentials.json"),
             "http://registry.invalid",
         )
         .await
@@ -3694,6 +3703,47 @@ mod tests {
         assert!(
             dispatched.lock().await.is_empty(),
             "a digest the registry already holds was rebuilt anyway"
+        );
+    }
+
+    // The registry auth header is read from the injected credentials path, so
+    // an unreadable file there fails the build rather than falling back to the
+    // host's live credentials.
+    #[tokio::test]
+    async fn build_fails_when_the_injected_credentials_file_is_malformed() {
+        let root = TempDir::new().unwrap();
+        let artifact_path = root.path().join("output");
+        let archive_path = root.path().join("archive.tar.zst");
+        let credentials_path = root.path().join("credentials.json");
+
+        std::fs::create_dir_all(&artifact_path).unwrap();
+        std::fs::write(&archive_path, b"local-archive").unwrap();
+        std::fs::write(&credentials_path, b"{ not json").unwrap();
+
+        let (mut client_archive, mut client_worker, dispatched) =
+            serve_stubs(root.path(), false).await;
+
+        let result = build_at_paths(
+            &stub_artifact(),
+            vec![],
+            "0".repeat(ARTIFACT_DIGEST_LENGTH).as_str(),
+            "library",
+            &artifact_path,
+            &archive_path,
+            &mut client_archive,
+            &mut client_worker,
+            &credentials_path,
+            "http://registry.invalid",
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a malformed credentials file at the injected path was ignored"
+        );
+        assert!(
+            dispatched.lock().await.is_empty(),
+            "a build was dispatched without a usable auth header"
         );
     }
 }
