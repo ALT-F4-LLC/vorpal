@@ -80,6 +80,7 @@ pub struct WorkerServer {
     /// One permit per `build_artifact` execution this worker may run at once.
     /// Sized from `--worker-jobs` (or `VORPAL_WORKER_JOBS`).
     build_permits: Arc<Semaphore>,
+    service_tokens: ServiceTokenCache,
 }
 
 impl WorkerServer {
@@ -98,6 +99,7 @@ impl WorkerServer {
             issuer,
             registry_allowed,
             build_permits: Arc::new(Semaphore::new(worker_jobs.clamp(1, Semaphore::MAX_PERMITS))),
+            service_tokens: ServiceTokenCache::new(),
         }
     }
 }
@@ -115,6 +117,82 @@ where
         .map_err(|_| Status::internal("worker build admission is closed"))?;
 
     build.await
+}
+
+/// How long before the `IdP`'s `expires_in` a cached service token stops being
+/// reused, so a token handed to a build still has at least this long to live.
+/// A token issued with `expires_in` at or below this margin is never reused.
+const SERVICE_TOKEN_EXPIRY_MARGIN: Duration = Duration::from_secs(60);
+
+/// Upper bound on how long a service token stays cached, whatever `expires_in`
+/// the `IdP` reports.
+const SERVICE_TOKEN_MAX_CACHE_LIFETIME: Duration = Duration::from_secs(3600);
+
+#[derive(Clone)]
+struct ServiceToken {
+    header: MetadataValue<Ascii>,
+    cache_lifetime: Duration,
+}
+
+struct ServiceTokenExpiry;
+
+impl moka::Expiry<&'static str, ServiceToken> for ServiceTokenExpiry {
+    fn expire_after_create(
+        &self,
+        _scope: &&'static str,
+        token: &ServiceToken,
+        _created_at: std::time::Instant,
+    ) -> Option<Duration> {
+        Some(token.cache_lifetime)
+    }
+}
+
+/// The worker's client-credentials tokens, keyed by scope and held only in
+/// process memory. Loads are single-flight per scope, and a failed exchange is
+/// never cached.
+#[derive(Clone)]
+struct ServiceTokenCache(moka::future::Cache<&'static str, ServiceToken>);
+
+impl std::fmt::Debug for ServiceTokenCache {
+    // moka's own `Debug` prints every entry, which would put live tokens in
+    // any log line that formats `WorkerServer`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceTokenCache")
+            .field("entries", &self.0.entry_count())
+            .finish()
+    }
+}
+
+impl ServiceTokenCache {
+    fn new() -> Self {
+        Self(
+            moka::future::Cache::builder()
+                .expire_after(ServiceTokenExpiry)
+                .build(),
+        )
+    }
+
+    async fn get_or_obtain(
+        &self,
+        scope: &'static str,
+        obtain: impl Future<Output = Option<(MetadataValue<Ascii>, u64)>>,
+    ) -> Option<MetadataValue<Ascii>> {
+        self.0
+            .try_get_with(scope, async {
+                let (header, expires_in) = obtain.await.ok_or(())?;
+                let cache_lifetime = Duration::from_secs(expires_in)
+                    .saturating_sub(SERVICE_TOKEN_EXPIRY_MARGIN)
+                    .min(SERVICE_TOKEN_MAX_CACHE_LIFETIME);
+
+                Ok::<_, ()>(ServiceToken {
+                    header,
+                    cache_lifetime,
+                })
+            })
+            .await
+            .ok()
+            .map(|token| token.header)
+    }
 }
 
 // `resolve_registry`/`ResolvedRegistry` live in `cli/src/command/start.rs`
@@ -1994,32 +2072,43 @@ async fn validate_and_lock_artifact(
 }
 
 /// Obtains the pair of service-to-service `OAuth2` tokens `build_artifact` needs: one
-/// scoped to the archive service, one to the artifact service.
+/// scoped to the archive service, one to the artifact service. Each is reused from
+/// `service_tokens` while still valid.
 async fn obtain_build_credentials(
+    service_tokens: &ServiceTokenCache,
     issuer: Option<&str>,
     issuer_audience: Option<&str>,
     issuer_client_id: Option<&str>,
     issuer_client_secret: Option<&str>,
 ) -> (Option<MetadataValue<Ascii>>, Option<MetadataValue<Ascii>>) {
-    let archive_auth_header = obtain_service_credentials(
-        issuer,
-        issuer_audience,
-        issuer_client_id,
-        issuer_client_secret,
-        "read:archive write:archive",
-    )
-    .await
-    .map(|(token, _expires_in)| token);
+    const ARCHIVE_SCOPE: &str = "read:archive write:archive";
+    const ARTIFACT_SCOPE: &str = "read:artifact write:artifact";
 
-    let artifact_auth_header = obtain_service_credentials(
-        issuer,
-        issuer_audience,
-        issuer_client_id,
-        issuer_client_secret,
-        "read:artifact write:artifact",
-    )
-    .await
-    .map(|(token, _expires_in)| token);
+    let archive_auth_header = service_tokens
+        .get_or_obtain(
+            ARCHIVE_SCOPE,
+            obtain_service_credentials(
+                issuer,
+                issuer_audience,
+                issuer_client_id,
+                issuer_client_secret,
+                ARCHIVE_SCOPE,
+            ),
+        )
+        .await;
+
+    let artifact_auth_header = service_tokens
+        .get_or_obtain(
+            ARTIFACT_SCOPE,
+            obtain_service_credentials(
+                issuer,
+                issuer_audience,
+                issuer_client_id,
+                issuer_client_secret,
+                ARTIFACT_SCOPE,
+            ),
+        )
+        .await;
 
     (archive_auth_header, artifact_auth_header)
 }
@@ -2038,7 +2127,13 @@ async fn obtain_build_credentials(
               renaming either for lexical distance would lose the name that documents \
               its role"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the spawned task cannot borrow `WorkerServer`, so each field it needs \
+              arrives as its own owned-then-borrowed argument"
+)]
 async fn build_artifact(
+    service_tokens: &ServiceTokenCache,
     issuer: Option<&str>,
     issuer_audience: Option<&str>,
     issuer_client_id: Option<&str>,
@@ -2081,6 +2176,7 @@ async fn build_artifact(
 
     // Obtain service-to-service OAuth2 tokens for archive and artifact services
     let (archive_auth_header, artifact_auth_header) = obtain_build_credentials(
+        service_tokens,
         issuer,
         issuer_audience,
         issuer_client_id,
@@ -2439,11 +2535,13 @@ impl WorkerService for WorkerServer {
         let issuer = self.issuer.clone();
         let registry_allowed = self.registry_allowed.clone();
         let build_permits = Arc::clone(&self.build_permits);
+        let service_tokens = self.service_tokens.clone();
 
         tokio::spawn(async move {
             if let Err(err) = run_admitted(
                 build_permits,
                 build_artifact(
+                    &service_tokens,
                     issuer.as_deref(),
                     issuer_audience.as_deref(),
                     issuer_client_id.as_deref(),
@@ -3848,9 +3946,18 @@ mod tests {
     ) -> Status {
         let (tx, _rx) = mpsc::channel(100);
 
-        build_artifact(None, None, None, None, registry_allowed, request, &tx)
-            .await
-            .expect_err("a build request with an invalid field is refused")
+        build_artifact(
+            &ServiceTokenCache::new(),
+            None,
+            None,
+            None,
+            None,
+            registry_allowed,
+            request,
+            &tx,
+        )
+        .await
+        .expect_err("a build request with an invalid field is refused")
     }
 
     fn valid_digest(fill: &str) -> String {
@@ -4023,6 +4130,7 @@ mod tests {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             build_artifact(
+                &ServiceTokenCache::new(),
                 Some(&issuer),
                 None,
                 Some("client-id"),
@@ -4966,5 +5074,157 @@ mod tests {
             !get_artifact_archive_path(PULLED_DIGEST, PULLED_NAMESPACE).exists(),
             "a truncated artifact archive must not be cached under its digest"
         );
+    }
+
+    mod service_token_cache {
+        use super::*;
+        use crate::command::idp_fixture::IdpServer;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        fn http_json(body: &str) -> String {
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+        }
+
+        fn discovery_document(issuer: &str) -> String {
+            http_json(&format!(
+                "{{\"issuer\":\"{issuer}\",\"jwks_uri\":\"{issuer}/jwks\",\"token_endpoint\":\"{issuer}/token\"}}"
+            ))
+        }
+
+        fn token_response(expires_in: u64) -> String {
+            http_json(&format!(
+                "{{\"access_token\":\"header.payload.signature\",\"expires_in\":{expires_in},\"token_type\":\"Bearer\"}}"
+            ))
+        }
+
+        /// An `IdP` whose token endpoint answers with `token(n)` for its
+        /// `n`th request (zero-based).
+        async fn idp(token: impl Fn(usize) -> String + Send + Sync + 'static) -> IdpServer {
+            let token_requests = AtomicUsize::new(0);
+
+            IdpServer::start(move |path, addr| {
+                Some(match path {
+                    "/.well-known/openid-configuration" => {
+                        discovery_document(&format!("http://127.0.0.1:{}", addr.port()))
+                    }
+                    _ => token(token_requests.fetch_add(1, Ordering::SeqCst)),
+                })
+            })
+            .await
+        }
+
+        fn token_requests(idp: &IdpServer) -> usize {
+            idp.requested_paths()
+                .iter()
+                .filter(|path| *path == "/token")
+                .count()
+        }
+
+        async fn fetch(
+            cache: &ServiceTokenCache,
+            idp: &IdpServer,
+        ) -> (Option<MetadataValue<Ascii>>, Option<MetadataValue<Ascii>>) {
+            obtain_build_credentials(
+                cache,
+                Some(&idp.issuer()),
+                None,
+                Some("vorpal-worker"),
+                Some("s3cr3t"),
+            )
+            .await
+        }
+
+        #[tokio::test]
+        async fn reuses_each_scope_token_within_its_validity_window() {
+            let idp = idp(|_| token_response(300)).await;
+            let cache = ServiceTokenCache::new();
+
+            let first = fetch(&cache, &idp).await;
+            let second = fetch(&cache, &idp).await;
+
+            assert!(first.0.is_some() && first.1.is_some());
+            assert_eq!(first, second);
+            assert_eq!(token_requests(&idp), 2, "one token request per scope");
+        }
+
+        #[tokio::test]
+        async fn refetches_a_token_whose_lifetime_is_inside_the_margin() {
+            let inside_margin = SERVICE_TOKEN_EXPIRY_MARGIN.as_secs() - 1;
+            let idp = idp(move |_| token_response(inside_margin)).await;
+            let cache = ServiceTokenCache::new();
+
+            fetch(&cache, &idp).await;
+            let second = fetch(&cache, &idp).await;
+
+            assert!(second.0.is_some() && second.1.is_some());
+            assert_eq!(token_requests(&idp), 4, "two token requests per scope");
+        }
+
+        #[tokio::test]
+        async fn does_not_cache_a_failed_exchange() {
+            let idp = idp(|n| {
+                if n == 0 {
+                    "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                        .to_string()
+                } else {
+                    token_response(300)
+                }
+            })
+            .await;
+            let cache = ServiceTokenCache::new();
+
+            let first = fetch(&cache, &idp).await;
+            assert!(first.0.is_none(), "the first exchange fails");
+
+            let second = fetch(&cache, &idp).await;
+            assert!(second.0.is_some(), "the failure must not be cached");
+            assert!(second.1.is_some());
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn concurrent_cold_fetches_share_one_request_per_scope() {
+            let idp = idp(|_| {
+                // Holds the token response open so every concurrent fetch
+                // arrives while the first load is still in flight.
+                std::thread::sleep(Duration::from_millis(200));
+                token_response(300)
+            })
+            .await;
+            let cache = ServiceTokenCache::new();
+
+            let mut fetches = tokio::task::JoinSet::new();
+            for _ in 0..8 {
+                let cache = cache.clone();
+                let issuer = idp.issuer();
+                fetches.spawn(async move {
+                    obtain_build_credentials(
+                        &cache,
+                        Some(&issuer),
+                        None,
+                        Some("vorpal-worker"),
+                        Some("s3cr3t"),
+                    )
+                    .await
+                });
+            }
+            let results = fetches.join_all().await;
+
+            assert!(results.iter().all(|(a, b)| a.is_some() && b.is_some()));
+            assert_eq!(token_requests(&idp), 2, "one token request per scope");
+        }
+
+        #[tokio::test]
+        async fn debug_output_omits_cached_tokens() {
+            let idp = idp(|_| token_response(300)).await;
+            let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), 1);
+
+            fetch(&server.service_tokens, &idp).await;
+
+            assert!(!format!("{server:?}").contains("header.payload.signature"));
+        }
     }
 }
