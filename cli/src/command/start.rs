@@ -62,6 +62,10 @@ pub struct RunArgs {
     pub registry_allowed: Option<Vec<String>>,
     pub services: Vec<String>,
     pub tls: bool,
+    /// Maximum concurrent `build_artifact` executions on the worker, already
+    /// floored to `1`. Populated from `--worker-jobs` (or
+    /// `VORPAL_WORKER_JOBS`) in `cli/src/command.rs`.
+    pub worker_jobs: usize,
     /// The directory a caller-supplied `artifact_context` must resolve inside
     /// before the agent reads, walks or writes it. Populated from
     /// `--workspace-root` (or `VORPAL_WORKSPACE_ROOT`) in
@@ -889,6 +893,7 @@ where
         args.issuer_client_id.clone(),
         args.issuer_client_secret.clone(),
         registry_allowed,
+        args.worker_jobs,
     );
 
     registrar.intercepted(WorkerServiceServer::new(worker_server), interceptor)
@@ -1553,6 +1558,7 @@ mod run_startup_refusal_tests {
             workspace_root: None,
             services: vec![service.to_string()],
             tls: false,
+            worker_jobs: 1,
         }
     }
 
@@ -1961,6 +1967,7 @@ mod registration_enumeration_tests {
                 "worker".to_string(),
             ],
             tls: false,
+            worker_jobs: 1,
         };
 
         let planned = planned_registrations(StartupServices::from_run_args(&args));
@@ -1999,6 +2006,7 @@ mod registration_enumeration_tests {
             workspace_root: None,
             services: vec!["workers".to_string()],
             tls: false,
+            worker_jobs: 1,
         };
 
         let planned = planned_registrations(StartupServices::from_run_args(&args));

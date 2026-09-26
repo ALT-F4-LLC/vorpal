@@ -151,6 +151,7 @@ mod registry_allowed_tests {
             registry_allowed,
             services: vec!["worker".to_string()],
             tls: false,
+            worker_jobs: 1,
             workspace_root: None,
         };
 
@@ -270,6 +271,18 @@ pub enum CommandSystemServices {
         /// deliberately on a combined deployment too.
         #[arg(env = "VORPAL_REGISTRY_ALLOWED", long)]
         registry_allowed: Option<String>,
+
+        /// Maximum `build_artifact` executions the worker runs at once. A
+        /// request beyond the limit waits for a free slot rather than being
+        /// refused. Defaults to the host's available CPU parallelism; `0`
+        /// floors to `1`.
+        #[arg(
+            default_value_t = get_default_jobs(),
+            env = "VORPAL_WORKER_JOBS",
+            long,
+            value_parser = parse_worker_jobs
+        )]
+        worker_jobs: usize,
 
         /// Enable TLS for the main gRPC listener (requires keys in /var/lib/vorpal/key/)
         #[arg(default_value_t = false, long)]
@@ -956,6 +969,25 @@ mod unlock_parse_tests {
             _ => panic!("expected Prepare command"),
         }
     }
+
+    fn services_start_worker_jobs(args: &[&str]) -> usize {
+        let mut full = vec!["system", "services", "start"];
+        full.extend_from_slice(args);
+        match parse(&full).expect("should parse").command {
+            Command::System(CommandSystem::Services(CommandSystemServices::Start {
+                worker_jobs,
+                ..
+            })) => worker_jobs,
+            _ => panic!("expected `system services start`"),
+        }
+    }
+
+    #[test]
+    fn services_start_worker_jobs_resolves_set_unset_and_zero_values() {
+        assert_eq!(services_start_worker_jobs(&["--worker-jobs", "3"]), 3);
+        assert_eq!(services_start_worker_jobs(&[]), get_default_jobs());
+        assert_eq!(services_start_worker_jobs(&["--worker-jobs", "0"]), 1);
+    }
 }
 
 #[cfg(test)]
@@ -1111,6 +1143,15 @@ fn clamp_jobs(requested: usize) -> usize {
     }
 
     requested
+}
+
+/// Parses `--worker-jobs`/`VORPAL_WORKER_JOBS`, flooring `0` to `1` as
+/// `clamp_jobs` does for the client's `--jobs`. No ceiling applies: the
+/// operator sizes their own worker.
+fn parse_worker_jobs(raw: &str) -> std::result::Result<usize, String> {
+    raw.parse::<usize>()
+        .map(|limit| limit.max(1))
+        .map_err(|err| format!("invalid worker jobs value {raw:?}: {err}"))
 }
 
 /// Bounds every HTTP request `Command::Login` makes so a hung or malicious
@@ -1947,6 +1988,7 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                 registry_allowed,
                 services,
                 tls,
+                worker_jobs,
                 workspace_root,
             } => {
                 // State the trust anchor and the channel it arrived on.
@@ -2016,6 +2058,7 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                     registry_allowed,
                     services,
                     tls,
+                    worker_jobs,
                     workspace_root,
                 };
 

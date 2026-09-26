@@ -22,6 +22,7 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use tokio::{
@@ -31,7 +32,7 @@ use tokio::{
     },
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
-    sync::{mpsc, mpsc::Sender},
+    sync::{mpsc, mpsc::Sender, Semaphore},
 };
 use tokio_stream::{
     wrappers::{LinesStream, ReceiverStream},
@@ -76,6 +77,9 @@ pub struct WorkerServer {
     /// from `--registry-allowed` (or `VORPAL_REGISTRY_ALLOWED`) in
     /// `cli/src/command.rs`.
     pub registry_allowed: Vec<String>,
+    /// One permit per `build_artifact` execution this worker may run at once.
+    /// Sized from `--worker-jobs` (or `VORPAL_WORKER_JOBS`).
+    build_permits: Arc<Semaphore>,
 }
 
 impl WorkerServer {
@@ -85,6 +89,7 @@ impl WorkerServer {
         issuer_client_id: Option<String>,
         issuer_client_secret: Option<String>,
         registry_allowed: Vec<String>,
+        worker_jobs: usize,
     ) -> Self {
         Self {
             issuer_audience,
@@ -92,8 +97,24 @@ impl WorkerServer {
             issuer_client_secret,
             issuer,
             registry_allowed,
+            build_permits: Arc::new(Semaphore::new(worker_jobs.clamp(1, Semaphore::MAX_PERMITS))),
         }
     }
+}
+
+/// Runs `build` once a permit from `build_permits` is free. An admission
+/// beyond the limit waits rather than being refused: the client's `--jobs`
+/// scheduler turns any error into a failed build.
+async fn run_admitted<F>(build_permits: Arc<Semaphore>, build: F) -> Result<(), Status>
+where
+    F: Future<Output = Result<(), Status>>,
+{
+    let _permit = build_permits
+        .acquire_owned()
+        .await
+        .map_err(|_| Status::internal("worker build admission is closed"))?;
+
+    build.await
 }
 
 // `resolve_registry`/`ResolvedRegistry` live in `cli/src/command/start.rs`
@@ -2330,16 +2351,20 @@ impl WorkerService for WorkerServer {
         let issuer_client_secret = self.issuer_client_secret.clone();
         let issuer = self.issuer.clone();
         let registry_allowed = self.registry_allowed.clone();
+        let build_permits = Arc::clone(&self.build_permits);
 
         tokio::spawn(async move {
-            if let Err(err) = build_artifact(
-                issuer.as_deref(),
-                issuer_audience.as_deref(),
-                issuer_client_id.as_deref(),
-                issuer_client_secret.as_deref(),
-                &registry_allowed,
-                request.into_inner(),
-                &tx,
+            if let Err(err) = run_admitted(
+                build_permits,
+                build_artifact(
+                    issuer.as_deref(),
+                    issuer_audience.as_deref(),
+                    issuer_client_id.as_deref(),
+                    issuer_client_secret.as_deref(),
+                    &registry_allowed,
+                    request.into_inner(),
+                    &tx,
+                ),
             )
             .await
             {
@@ -2366,7 +2391,10 @@ mod tests {
     use std::{
         collections::BTreeSet,
         os::unix::fs::MetadataExt,
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
     };
     use tempfile::TempDir;
     use tokio::sync::Barrier;
@@ -2922,6 +2950,63 @@ mod tests {
     // holds only that winner's bytes, no staging directory is left behind
     // either way, and the result matches what publishing the winner alone,
     // sequentially, would have produced.
+    // Every admission is held at a gate once it starts, so the in-flight count
+    // can only fall when the test opens it. Admissions past the limit must
+    // wait, not start and not fail.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn build_admissions_beyond_the_limit_wait_and_then_run() {
+        const LIMIT: usize = 2;
+        const ADMISSIONS: usize = LIMIT + 3;
+
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), LIMIT);
+        let gate = Arc::new(Semaphore::new(0));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = (0..ADMISSIONS)
+            .map(|_| {
+                let build_permits = Arc::clone(&server.build_permits);
+                let gate = Arc::clone(&gate);
+                let in_flight = Arc::clone(&in_flight);
+                let max_in_flight = Arc::clone(&max_in_flight);
+
+                tokio::spawn(run_admitted(build_permits, async move {
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_in_flight.fetch_max(now, Ordering::SeqCst);
+
+                    gate.acquire().await.unwrap().forget();
+
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                }))
+            })
+            .collect();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while in_flight.load(Ordering::SeqCst) < LIMIT {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the first admissions up to the limit must start");
+
+        // Give any admission that bypassed the limit time to start.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(in_flight.load(Ordering::SeqCst), LIMIT);
+
+        gate.add_permits(ADMISSIONS);
+
+        for handle in handles {
+            let outcome = tokio::time::timeout(Duration::from_secs(5), handle)
+                .await
+                .expect("every waiting admission must eventually run")
+                .unwrap();
+            assert!(outcome.is_ok(), "no admission may be refused: {outcome:?}");
+        }
+
+        assert_eq!(max_in_flight.load(Ordering::SeqCst), LIMIT);
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn two_concurrent_publishers_of_the_same_digest_race_cleanly() {
         let (_root, store_path, output_path) = store_dir();
@@ -3791,7 +3876,7 @@ mod tests {
     // configuration.
     #[tokio::test]
     async fn build_artifact_service_denies_a_request_with_no_claims() {
-        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), 1);
 
         let digest = valid_digest("a");
         let request = Request::new(build_request("library", &digest, &digest));
@@ -3816,7 +3901,7 @@ mod tests {
     // that no lock file exists for this digest does.
     #[tokio::test]
     async fn build_artifact_denial_creates_no_lock_file() {
-        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), 1);
 
         let digest = valid_digest("a");
         let request = Request::new(build_request("library", &digest, &digest));
@@ -3841,7 +3926,7 @@ mod tests {
     // construction error.
     #[tokio::test]
     async fn build_artifact_service_admits_a_request_with_namespace_write_claims() {
-        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), 1);
 
         let digest = valid_digest("a");
         let mut request = Request::new(build_request("library", &digest, &digest));
@@ -3923,7 +4008,7 @@ mod tests {
         let subscriber = tracing_subscriber::Registry::default().with(events.clone());
         let _guard = tracing::subscriber::set_default(subscriber);
 
-        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed(), 1);
         server
             .build_artifact(request)
             .await
