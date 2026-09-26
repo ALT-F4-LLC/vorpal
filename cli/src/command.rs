@@ -1328,18 +1328,6 @@ fn services_start_value_source(matches: &ArgMatches, arg_id: &str) -> Option<Val
         .value_source(arg_id)
 }
 
-/// Whether a `--services` list starts a service that `resolve_required_issuer`
-/// (`cli/src/command/start.rs`) refuses to run without an OIDC issuer.
-///
-/// Split the same way `RunArgs` splits it, so the answer describes the list
-/// this process is actually about to start rather than a second reading of
-/// the same text.
-fn starts_an_authenticated_service(services: &str) -> bool {
-    services
-        .split(',')
-        .any(|service| service == "registry" || service == "worker")
-}
-
 /// Human-readable name for a channel, for the startup log line that states
 /// the effective OIDC trust anchor.
 ///
@@ -1952,20 +1940,23 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                 // the environment is invisible after the fact. The sibling
                 // lines for the trusted-service client list and the
                 // registry allow-list already exist for the same reason.
+                let services: Vec<String> = services
+                    .split(',')
+                    .map(std::string::ToString::to_string)
+                    .collect();
+
                 match &issuer {
                     Some(value) => tracing::info!(
                         "OIDC trust anchor: {value} (from {})",
                         value_source_label(services_start_value_source(matches, ISSUER_ARG_ID))
                     ),
-                    // Only the worker and the registry refuse to start
-                    // without an anchor, so only a start that includes one
-                    // of them is told they will. `--services agent` with no
-                    // issuer is a supported configuration; a warning about
-                    // a refusal that will not happen trains an operator to
-                    // ignore the line that matters.
-                    None if starts_an_authenticated_service(&services) => tracing::info!(
-                        "no OIDC trust anchor configured; worker and registry services \
-                         will refuse to start"
+                    // Only a start that includes a service `start::run`
+                    // refuses without an anchor is told it will refuse; a
+                    // warning about a refusal that will not happen trains an
+                    // operator to ignore the line that matters.
+                    None if start::requires_issuer(&services) => tracing::info!(
+                        "no OIDC trust anchor configured; worker, registry, and agent \
+                         services will refuse to start"
                     ),
                     None => tracing::info!("no OIDC trust anchor configured"),
                 }
@@ -2006,10 +1997,7 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                     registry_backend_s3_bucket,
                     registry_backend_s3_force_path_style,
                     registry_allowed,
-                    services: services
-                        .split(',')
-                        .map(std::string::ToString::to_string)
-                        .collect(),
+                    services,
                     tls,
                     workspace_root,
                 };
@@ -3357,20 +3345,22 @@ mod login_egress_tests {
     }
 
     #[test]
-    fn only_a_worker_or_registry_start_is_told_a_missing_anchor_refuses() {
-        // The startup log warns that worker and registry services "will
-        // refuse to start" when no anchor is configured. Said on an
-        // agent-only start, where nothing refuses, it is a warning about an
-        // event that cannot happen — which is how operators learn to skim
-        // the line that matters.
-        assert!(starts_an_authenticated_service("worker"));
-        assert!(starts_an_authenticated_service("agent,registry"));
-        assert!(!starts_an_authenticated_service("agent"));
+    fn only_an_issuer_requiring_start_is_told_a_missing_anchor_refuses() {
+        // The log arm and `start::run`'s refusal both decide through
+        // `start::requires_issuer`, over the list split as `RunArgs` splits it.
+        let requires_issuer = |services: &str| {
+            let services: Vec<String> = services
+                .split(',')
+                .map(std::string::ToString::to_string)
+                .collect();
+            start::requires_issuer(&services)
+        };
 
-        // Split exactly as `start::run` splits it (`services.split(',')`,
-        // then equality against "worker"/"registry"), so the log line and
-        // the refusal cannot disagree about a padded list.
-        assert!(!starts_an_authenticated_service(" worker"));
+        assert!(requires_issuer("worker"));
+        assert!(requires_issuer("agent"));
+        assert!(requires_issuer("agent,registry"));
+        assert!(!requires_issuer("other"));
+        assert!(!requires_issuer(" worker"));
     }
 
     // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------

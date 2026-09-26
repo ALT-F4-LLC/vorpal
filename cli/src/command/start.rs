@@ -434,7 +434,15 @@ fn default_registry_allowed(
 /// Refusing here is what leaves only two states — authenticated, or refused
 /// to start — with no third in which the agent registers bare.
 fn anonymous_start_refused(services: StartupServices, issuer: Option<&str>) -> bool {
-    (services.has_worker || services.has_registry || services.has_agent) && issuer.is_none()
+    services.requires_issuer() && issuer.is_none()
+}
+
+/// Whether a `--services` list, split into `RunArgs::services`, starts a
+/// service that refuses to run without an OIDC issuer: the worker, the
+/// registry, or the agent. The startup log reads this so it describes the
+/// same refusal `run` enforces.
+pub(crate) fn requires_issuer(services: &[String]) -> bool {
+    StartupServices::from_services(services).requires_issuer()
 }
 
 /// Resolves the credential the worker and registry (archive/artifact)
@@ -472,11 +480,19 @@ impl StartupServices {
     /// service-name literals is a test failure rather than a service that
     /// silently never registers.
     fn from_run_args(args: &RunArgs) -> Self {
+        Self::from_services(&args.services)
+    }
+
+    fn from_services(services: &[String]) -> Self {
         Self {
-            has_worker: args.services.iter().any(|service| service == "worker"),
-            has_registry: args.services.iter().any(|service| service == "registry"),
-            has_agent: args.services.iter().any(|service| service == "agent"),
+            has_worker: services.iter().any(|service| service == "worker"),
+            has_registry: services.iter().any(|service| service == "registry"),
+            has_agent: services.iter().any(|service| service == "agent"),
         }
+    }
+
+    fn requires_issuer(self) -> bool {
+        self.has_worker || self.has_registry || self.has_agent
     }
 }
 
@@ -493,13 +509,11 @@ fn resolve_required_issuer(
         );
     }
 
-    Ok(
-        if services.has_worker || services.has_registry || services.has_agent {
-            issuer
-        } else {
-            None
-        },
-    )
+    Ok(if services.requires_issuer() {
+        issuer
+    } else {
+        None
+    })
 }
 
 /// VPL-713 (C3): the registration invariant — every gRPC service this
