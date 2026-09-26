@@ -58,7 +58,7 @@ async fn publish_alias(
                 "alias '{alias}' already exists"
             )))
         }
-        Err(err) => Err(Status::internal(format!("failed to publish alias: {err}"))),
+        Err(err) => Err(Status::internal(err.to_string())),
     }
 }
 

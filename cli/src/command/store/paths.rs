@@ -482,7 +482,7 @@ pub async fn publish_exclusively(
 
         Err(err) if err.kind() == ErrorKind::AlreadyExists => {
             info!(
-                "store |> discarded staged copy of {}: published concurrently",
+                "store |> discarded staged copy of {}: target name already taken",
                 target_path.display()
             );
 
