@@ -240,6 +240,25 @@ pub struct OidcValidator {
 
 impl OidcValidator {
     pub async fn new(issuer: String, issuer_audiences: Vec<String>) -> Result<Self> {
+        Self::connect(issuer, issuer_audiences, OIDC_HTTP_TIMEOUT).await
+    }
+
+    /// Builds the validator with a shorter client timeout so a test can prove
+    /// that timeout, not the test harness, ends a stalled `IdP` fetch.
+    #[cfg(test)]
+    async fn new_with_http_timeout(
+        issuer: String,
+        issuer_audiences: Vec<String>,
+        http_timeout: Duration,
+    ) -> Result<Self> {
+        Self::connect(issuer, issuer_audiences, http_timeout).await
+    }
+
+    async fn connect(
+        issuer: String,
+        issuer_audiences: Vec<String>,
+        http_timeout: Duration,
+    ) -> Result<Self> {
         // The issuer is validated here, at the chokepoint, and not only by
         // the `--issuer` value parser: this constructor is `pub` and takes a
         // bare `String`, so a caller added later would otherwise reintroduce
@@ -248,7 +267,7 @@ impl OidcValidator {
         let issuer = NormalizedIssuer::parse(&issuer)
             .map_err(|cause| anyhow!("invalid OIDC issuer {issuer:?}: {cause}"))?;
         let issuer_origin = credential_egress_origin(issuer.as_str())?;
-        let client = login_http_client(OIDC_HTTP_TIMEOUT)?;
+        let client = login_http_client(http_timeout)?;
 
         // 1) Discover the realm (/.well-known/openid-configuration)
         let discovery_url = format!("{issuer}/.well-known/openid-configuration");
@@ -1138,6 +1157,36 @@ mod tests {
                 "/.well-known/openid-configuration".to_string(),
                 "/jwks".to_string()
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_validator_new_times_out_on_a_hung_idp() {
+        let idp = IdpServer::start(|path, _| match path {
+            "/.well-known/openid-configuration" => None,
+            _ => Some(http_json(EMPTY_JWKS)),
+        })
+        .await;
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            OidcValidator::new_with_http_timeout(idp.issuer(), vec![], Duration::from_millis(250)),
+        )
+        .await
+        .expect("the client timeout, not this outer bound, must end the stalled discovery")
+        .err()
+        .expect("a hung discovery fetch must fail construction");
+
+        let cause = error
+            .downcast_ref::<reqwest::Error>()
+            .expect("the failure must be the HTTP client's own error");
+        assert!(
+            cause.is_timeout(),
+            "expected a client timeout, got {cause:?}"
+        );
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()]
         );
     }
 
