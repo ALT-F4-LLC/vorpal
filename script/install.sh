@@ -1634,7 +1634,8 @@ install_service_macos() {
     # Every operator-supplied value in this document goes through
     # `xml_escape`, in both the ProgramArguments array and the
     # EnvironmentVariables dict. `validate_no_unit_injection_chars` already
-    # refuses the XML metacharacters, so the encoders are no-ops today; the
+    # refuses the XML metacharacters in every value except
+    # `$ISSUER_CLIENT_SECRET`, for which `xml_escape` is the only control; the
     # point is that the plist grammar is encoded at the site that writes it,
     # so relaxing the deny-list later cannot silently turn a value into
     # markup. `$SERVICES` is exempt — `validate_services` allow-lists it

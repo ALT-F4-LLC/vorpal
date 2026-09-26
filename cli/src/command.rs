@@ -2791,12 +2791,14 @@ mod login_egress_tests {
         // The launchd half of the same two writers. `launchctl` is shadowed
         // so nothing reaches the real service manager.
         //
-        // Every operator-supplied value carries `<` or `&` — characters
-        // `validate_no_unit_injection_chars` refuses at the front door, so
-        // the encoders here are unreachable in a real install. That is the point: the plist grammar is encoded at
-        // the site that writes it, so a later relaxation of the deny-list
-        // cannot silently turn an operator's value into markup. Driving the
-        // writer directly is the only way to see the encoder at all.
+        // Every operator-supplied value carries `<` or `&`. For the issuer,
+        // audience, and client id, `validate_no_unit_injection_chars` refuses
+        // those at the front door, so their encoders are unreachable in a real
+        // install; the plist grammar is still encoded at the site that writes
+        // it, so a later relaxation of the deny-list cannot silently turn an
+        // operator's value into markup. The client secret is IdP-generated and
+        // exempt from the deny-list, so `xml_escape` is its only control.
+        // Driving the writer directly is the only way to see the encoder.
         let transcript = source_installer(
             "launchctl() { return 1; }\n\
              tmp=$(mktemp -d)\n\
@@ -2807,7 +2809,7 @@ mod login_egress_tests {
              ISSUER='https://idp.example.com/realms/v<orpal'\n\
              ISSUER_AUDIENCE='aud<ience'\n\
              ISSUER_CLIENT_ID='client&id'\n\
-             ISSUER_CLIENT_SECRET='s3cr3t-not-in-argv'\n\
+             ISSUER_CLIENT_SECRET='s3<cr&et</string><string>x'\n\
              plist_dir=\"$tmp/Library/LaunchAgents\"\n\
              install_service_macos || true\n\
              printf 'plist-mode %s\\n' \"$(ls -l \"$plist_dir/com.altf4llc.vorpal.plist\" | cut -c1-10)\"\n\
@@ -2816,7 +2818,7 @@ mod login_egress_tests {
              rm -rf \"$tmp\"",
         );
 
-        for raw in ["v<orpal", "aud<ience", "client&id"] {
+        for raw in ["v<orpal", "aud<ience", "client&id", "</string><string>x"] {
             assert!(
                 !transcript.contains(raw),
                 "no operator value may reach the plist unencoded, found {raw}: \
@@ -2833,6 +2835,10 @@ mod login_egress_tests {
             (
                 "<key>VORPAL_ISSUER</key>",
                 "https://idp.example.com/realms/v&lt;orpal",
+            ),
+            (
+                "<key>VORPAL_ISSUER_CLIENT_SECRET</key>",
+                "s3&lt;cr&amp;et&lt;/string&gt;&lt;string&gt;x",
             ),
         ] {
             let element = format!("{site}\n        <string>{encoded}</string>");
