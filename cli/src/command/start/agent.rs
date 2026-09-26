@@ -1600,6 +1600,64 @@ mod tests {
             .expect("a claims-bearing request with namespace write permission is admitted");
     }
 
+    /// A Human-principal request for `namespace` whose claims grant exactly
+    /// `granted` (namespace -> permissions), with no `*` key.
+    fn human_prepare_request(
+        namespace: &str,
+        granted: &[(&str, &str)],
+    ) -> Request<PrepareArtifactRequest> {
+        let mut request = Request::new(prepare_request(namespace));
+
+        let mut namespaces: HashMap<String, Vec<String>> = HashMap::new();
+        for (ns, permission) in granted {
+            namespaces
+                .entry(ns.to_string())
+                .or_default()
+                .push(permission.to_string());
+        }
+
+        request.extensions_mut().insert(auth::Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("tester".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(namespaces),
+        });
+        request.extensions_mut().insert(auth::PrincipalKind::Human);
+        request
+    }
+
+    // The gate must bind to the namespace the request names, not merely to
+    // the presence of some write grant.
+    #[tokio::test]
+    async fn prepare_artifact_denies_write_claims_for_a_different_namespace() {
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()], cwd_root());
+
+        let status = server
+            .prepare_artifact(human_prepare_request("other", &[("library", "write")]))
+            .await
+            .expect_err("write on another namespace must not admit this one");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+    }
+
+    // The gate must require `write`; a read-only grant on the requested
+    // namespace is not enough to push.
+    #[tokio::test]
+    async fn prepare_artifact_denies_read_only_claims_on_the_requested_namespace() {
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()], cwd_root());
+
+        let status = server
+            .prepare_artifact(human_prepare_request("library", &[("library", "read")]))
+            .await
+            .expect_err("read-only claims must not admit a push");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+    }
+
     /// A local-source request naming `context` as its read root. The source
     /// path is `"."`, which always exists and therefore classifies `Local` —
     /// the branch that walks and copies `artifact_context` itself.
