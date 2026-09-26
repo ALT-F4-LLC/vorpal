@@ -4481,7 +4481,7 @@ mod tests {
     async fn run_step_reaps_detached_children() {
         // `run_step` refuses to start without a service key; give it one in a
         // private root so the test does not depend on the host's store.
-        let _root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let _root = crate::command::store::paths::test_support::ScratchRoot::new();
         let key_path = get_key_service_key_path();
         std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
         std::fs::write(&key_path, "").unwrap();
