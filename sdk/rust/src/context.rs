@@ -4959,10 +4959,11 @@ mod tests {
         );
 
         let error = anyhow::Error::from(failure);
+        // A rejected grant arrives as an IdP response, never as a transport
+        // error, so it carries no reqwest::Error at all and cannot read as
+        // a client timeout.
         assert!(
-            error
-                .downcast_ref::<reqwest::Error>()
-                .map_or(true, |e| !e.is_timeout()),
+            error.downcast_ref::<reqwest::Error>().is_none(),
             "a rejected grant must stay distinguishable from a hung IdP: {error:#}"
         );
 
