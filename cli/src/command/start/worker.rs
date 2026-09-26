@@ -3772,6 +3772,127 @@ mod tests {
             .expect("a claims-bearing request with namespace write permission is admitted");
     }
 
+    /// Records the level and formatted message of every event dispatched to
+    /// it. Installed per test with `set_default`, never globally: the
+    /// `command.rs` tests own this binary's global subscriber.
+    #[derive(Clone, Default)]
+    struct RecordedEvents(Arc<Mutex<Vec<(tracing::Level, String)>>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordedEvents {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            struct Message(String);
+
+            impl tracing::field::Visit for Message {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{value:?}");
+                    }
+                }
+            }
+
+            let mut message = Message(String::new());
+            event.record(&mut message);
+            self.0
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), message.0));
+        }
+    }
+
+    impl RecordedEvents {
+        fn info_messages(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(level, _)| *level == tracing::Level::INFO)
+                .map(|(_, message)| message.clone())
+                .collect()
+        }
+    }
+
+    async fn build_artifact_capturing_events(
+        request: Request<BuildArtifactRequest>,
+    ) -> RecordedEvents {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let events = RecordedEvents::default();
+        let subscriber = tracing_subscriber::Registry::default().with(events.clone());
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+        server
+            .build_artifact(request)
+            .await
+            .expect("the request passes the namespace-or-service-trust gate");
+
+        events
+    }
+
+    #[tokio::test]
+    async fn build_artifact_attribution_names_the_trusted_service() {
+        let digest = valid_digest("a");
+        let mut request = Request::new(build_request("attrib-ns", &digest, &digest));
+        request
+            .extensions_mut()
+            .insert(auth::PrincipalKind::TrustedService {
+                azp: "attrib-service-azp".to_string(),
+            });
+
+        let messages = build_artifact_capturing_events(request)
+            .await
+            .info_messages();
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("build_artifact by service=attrib-service-azp")
+                    && message.contains("attrib-ns")
+            }),
+            "no INFO event attributes the build to the service and namespace: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_artifact_attribution_names_the_human_user() {
+        let digest = valid_digest("a");
+        let mut request = Request::new(build_request("attrib-ns", &digest, &digest));
+
+        let mut namespaces = std::collections::HashMap::new();
+        namespaces.insert("attrib-ns".to_string(), vec!["write".to_string()]);
+
+        request.extensions_mut().insert(auth::Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attrib-user-sub".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(namespaces),
+        });
+        request.extensions_mut().insert(auth::PrincipalKind::Human);
+
+        let messages = build_artifact_capturing_events(request)
+            .await
+            .info_messages();
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("build_artifact by user=attrib-user-sub")
+                    && message.contains("attrib-ns")
+            }),
+            "no INFO event attributes the build to the user and namespace: {messages:?}"
+        );
+    }
+
     /// A registry double for the publication seam: it holds the two halves a
     /// build sends — the archive and the recipe — and can be told to refuse a
     /// number of pushes or stores first, or to fail the recipe check. One
