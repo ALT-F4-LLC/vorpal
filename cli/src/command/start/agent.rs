@@ -1703,12 +1703,7 @@ mod tests {
         .await
     }
 
-    /// A workspace root with a sibling `escape` directory outside it, holding
-    /// a `Vorpal.lock` that pins `source` to a digest the request does not
-    /// carry. Reading that lockfile would make the handler refuse with
-    /// `failed_precondition` ("changed - use '--unlock'"), so a
-    /// `permission_denied` is positive evidence the read never happened —
-    /// not merely that the status differs.
+    /// A workspace root with an empty sibling `escape` directory outside it.
     fn root_and_escape() -> (TempDir, PathBuf, PathBuf) {
         let parent = TempDir::new().expect("parent dir");
         let parent_path = parent.path().canonicalize().expect("canonical parent");
@@ -1719,13 +1714,28 @@ mod tests {
         std::fs::create_dir(&root).expect("root dir");
         std::fs::create_dir(&escape).expect("escape dir");
 
-        std::fs::write(
-            escape.join("Vorpal.lock"),
-            "lockfile = 1\n\n[[sources]]\ndigest = \"deadbeef\"\nexcludes = []\nincludes = []\nname = \"source\"\npath = \"https://elsewhere.example.com/other.tar.gz\"\nplatform = \"unknown\"\n",
-        )
-        .expect("escape lockfile");
-
         (parent, root, escape)
+    }
+
+    /// The local-source request plus a pinned http source, with unlock set so
+    /// an unconfined handler would upsert `<context>/Vorpal.lock`. A refusal
+    /// test built on it can observe both the walk and the lockfile write.
+    fn local_and_http_source_request(context: &Path) -> PrepareArtifactRequest {
+        let mut request = local_source_request(context);
+
+        request.artifact_unlock = true;
+
+        if let Some(artifact) = request.artifact.as_mut() {
+            artifact.sources.push(ArtifactSource {
+                digest: Some(SOURCE_DIGEST.to_string()),
+                excludes: vec![],
+                includes: vec![],
+                name: "remote".to_string(),
+                path: SOURCE_URL.to_string(),
+            });
+        }
+
+        request
     }
 
     // AC2: a `..`-escaping context is refused before anything reads or walks
@@ -1739,7 +1749,7 @@ mod tests {
 
         let context = root.join("..").join("escape");
 
-        let status = prepare_with_root(local_source_request(&context), &root, &builder)
+        let status = prepare_with_root(local_and_http_source_request(&context), &root, &builder)
             .await
             .expect_err("a context outside the workspace root is refused");
 
@@ -1749,8 +1759,8 @@ mod tests {
             "a refused context must never reach the source builder"
         );
         assert!(
-            !escape.join("Vorpal.lock.written").exists(),
-            "nothing may be written outside the root"
+            !escape.join("Vorpal.lock").exists(),
+            "no Vorpal.lock may exist outside the root"
         );
     }
 
@@ -1762,7 +1772,7 @@ mod tests {
         let (_parent, root, escape) = root_and_escape();
         let builder = RecordingSourceBuilder::new();
 
-        let status = prepare_with_root(local_source_request(&escape), &root, &builder)
+        let status = prepare_with_root(local_and_http_source_request(&escape), &root, &builder)
             .await
             .expect_err("an absolute context outside the workspace root is refused");
 
@@ -1770,6 +1780,10 @@ mod tests {
         assert!(
             builder.contexts().await.is_empty(),
             "a refused context must never reach the source builder"
+        );
+        assert!(
+            !escape.join("Vorpal.lock").exists(),
+            "no Vorpal.lock may exist outside the root"
         );
     }
 
