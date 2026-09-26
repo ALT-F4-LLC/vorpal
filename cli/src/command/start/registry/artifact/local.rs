@@ -2,12 +2,13 @@ use crate::command::{
     start::registry::{ArtifactBackend, LocalBackend},
     store::paths::{
         discard_staging, get_artifact_alias_path, get_artifact_config_path, publish_atomically,
-        set_timestamps, split_alias_name_tag, staging_path_for, PublishOutcome,
+        publish_exclusively, set_timestamps, split_alias_name_tag, staging_path_for,
+        PublishOutcome,
     },
 };
 use sha256::digest;
-use std::{io::ErrorKind, path::Path};
-use tokio::fs::{create_dir_all, hard_link, read, write};
+use std::path::Path;
+use tokio::fs::{create_dir_all, read, write};
 use tonic::{async_trait, Status};
 use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
@@ -16,13 +17,9 @@ use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 /// reports `already_exists` from the create itself rather than from a prior
 /// stat.
 ///
-/// The publish is a hard link, not the `publish_atomically` rename the rest of
-/// the store uses. A rename onto an existing *file* succeeds and replaces it,
-/// so publishing an alias that way would silently overwrite the mapping a name
-/// already has — the immutability this backend promises. `hard_link` fails
-/// `AlreadyExists` when the name is taken, including when the name is a
-/// dangling symlink an untrusted build step left behind, and never writes
-/// through it.
+/// The publish goes through `publish_exclusively`, not `publish_atomically`:
+/// an alias must never be re-pointed once its name is taken, the immutability
+/// this backend promises.
 ///
 /// A taken name that already holds this exact digest is the state the caller
 /// asked for, so it is accepted: a publication that failed part way through is
@@ -49,13 +46,9 @@ async fn publish_alias(
         return Err(Status::internal(format!("failed to sanitize alias: {err}")));
     }
 
-    let link = hard_link(&staging_path, alias_path).await;
-
-    discard_staging(&staging_path).await;
-
-    match link {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+    match publish_exclusively(&staging_path, alias_path).await {
+        Ok(PublishOutcome::Published) => Ok(()),
+        Ok(PublishOutcome::Superseded) => {
             let published_digest = read(alias_path).await.ok();
 
             if published_digest.as_deref() == Some(artifact_digest.as_bytes()) {
