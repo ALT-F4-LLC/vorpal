@@ -672,7 +672,7 @@ validate_issuer() {
             ;;
         *)
             print_error "Invalid issuer: '$ISSUER'" \
-                "The issuer must be an https URL (plaintext http is only allowed on localhost or 127.0.0.1)." \
+                "The issuer must be an https URL (plaintext http is only allowed on localhost, 127.0.0.1, or [::1])." \
                 "Example: install.sh --issuer https://idp.example.com/realms/vorpal"
             exit 1
             ;;
@@ -702,25 +702,10 @@ validate_issuer() {
 
     if [[ "$scheme" = "http" ]]; then
         case "$host" in
-            localhost | 127.0.0.1) ;;
-            '[::1]')
-                # Refused even though it is loopback, because the CLI refuses
-                # it: `credential_egress_origin` (sdk/rust/src/context.rs)
-                # compares `Url::host_str()` against the unbracketed "::1",
-                # and the url crate always serializes an IPv6 host with its
-                # brackets, so that comparison never matches. Installing this
-                # value would write a unit that restart-loops. This script's
-                # rule must stay a subset of the CLI's: refusing something the
-                # CLI would accept costs an install, accepting something the
-                # CLI refuses costs a service that can never start.
-                print_error "Invalid issuer: '$ISSUER'" \
-                    "A bracketed IPv6 loopback issuer is not supported yet: 'vorpal system services start' refuses it, so the installed service would not start." \
-                    "Use http://localhost:PORT/... or http://127.0.0.1:PORT/... instead."
-                exit 1
-                ;;
+            localhost | 127.0.0.1 | '[::1]') ;;
             *)
                 print_error "Invalid issuer: '$ISSUER'" \
-                    "Plaintext http is only allowed on localhost or 127.0.0.1; '$host' is neither." \
+                    "Plaintext http is only allowed on localhost, 127.0.0.1, or [::1]; '$host' is none of them." \
                     "Example: install.sh --issuer https://idp.example.com/realms/vorpal"
                 exit 1
                 ;;

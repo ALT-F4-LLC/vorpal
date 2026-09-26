@@ -2664,10 +2664,7 @@ mod login_egress_tests {
             // Plaintext off loopback: the trust anchor over a channel an
             // on-path attacker can rewrite.
             ("http://idp.example.com/realms/vorpal", false, false),
-            // Bracketed IPv6 loopback: the CLI accepts it, the installer
-            // still refuses it. The one row where the sides differ, in the
-            // permitted direction.
-            ("http://[::1]:8080/realms/vorpal", true, false),
+            ("http://[::1]:8080/realms/vorpal", true, true),
             // No host at all.
             ("https://", false, false),
             // `localhost:` here is userinfo; the host is off-box.
