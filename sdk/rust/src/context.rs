@@ -13,7 +13,10 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse, TokenUrl};
+use oauth2::{
+    basic::BasicClient, AuthUrl, ClientId, HttpClientError, RefreshToken, RequestTokenError,
+    TokenResponse, TokenUrl,
+};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
@@ -998,10 +1001,17 @@ async fn refresh_access_token(
 
     // From here on the token is on the wire: a transport error, a timeout and
     // a rejection are indistinguishable from the IdP having consumed it.
-    let token_result = request
-        .request_async(&http_client)
-        .await
-        .map_err(|e| RefreshFailure::Sent(anyhow!("OAuth refresh-token exchange failed: {e}")))?;
+    let token_result = request.request_async(&http_client).await.map_err(|e| {
+        // Keep the reqwest error as the source so callers can tell a
+        // hung IdP (`is_timeout`) from a rejected grant.
+        let cause = match e {
+            RequestTokenError::Request(HttpClientError::Reqwest(source)) => {
+                anyhow::Error::from(*source).context("OAuth refresh-token exchange failed")
+            }
+            other => anyhow!("OAuth refresh-token exchange failed: {other}"),
+        };
+        RefreshFailure::Sent(cause)
+    })?;
 
     let new_access_token = token_result.access_token().secret().clone();
     let new_expires_in = token_result.expires_in().map_or(3600, |d| d.as_secs());
@@ -4939,6 +4949,14 @@ mod tests {
             "a rejected token POST must be classified Sent: the IdP may already have consumed the token"
         );
 
+        let error = anyhow::Error::from(failure);
+        assert!(
+            error
+                .downcast_ref::<reqwest::Error>()
+                .map_or(true, |e| !e.is_timeout()),
+            "a rejected grant must stay distinguishable from a hung IdP: {error:#}"
+        );
+
         // Positive control discriminating against AB-283-6: without this,
         // the assertion above cannot tell "classified Sent by the real POST"
         // from "rejected as NotSent at the origin check before the POST was
@@ -4998,6 +5016,15 @@ mod tests {
         assert!(
             matches!(failure, RefreshFailure::Sent(_)),
             "a token POST that timed out must be classified Sent: the IdP has the token whether or not it answered"
+        );
+
+        let error = anyhow::Error::from(failure);
+        let reqwest_error = error
+            .downcast_ref::<reqwest::Error>()
+            .expect("the client timeout must surface as a reqwest::Error");
+        assert!(
+            reqwest_error.is_timeout(),
+            "unexpected error: {reqwest_error}"
         );
 
         let allowance = NEVER_ANSWER_TIMEOUT * NEVER_ANSWER_ELAPSED_ALLOWANCE;
