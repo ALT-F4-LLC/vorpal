@@ -1,9 +1,8 @@
 use crate::command::{
     start::registry::{ArtifactBackend, LocalBackend},
     store::paths::{
-        discard_staging, get_artifact_alias_path, get_artifact_config_path, publish_atomically,
-        publish_exclusively, set_timestamps, split_alias_name_tag, staging_path_for,
-        PublishOutcome,
+        discard_staging, publish_atomically, publish_exclusively, set_timestamps,
+        split_alias_name_tag, staging_path_for, PublishOutcome,
     },
 };
 use sha256::digest;
@@ -107,7 +106,7 @@ async fn publish_artifact_config(
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
     async fn get_artifact(&self, digest: &str, namespace: &str) -> Result<Artifact, Status> {
-        let artifact_config_path = get_artifact_config_path(digest, namespace);
+        let artifact_config_path = self.config_path(digest, namespace);
 
         if !artifact_config_path.exists() {
             return Err(Status::not_found("config not found"));
@@ -130,8 +129,7 @@ impl ArtifactBackend for LocalBackend {
         system: ArtifactSystem,
         tag: &str,
     ) -> Result<String, Status> {
-        let artifact_alias_path = get_artifact_alias_path(name, namespace, system, tag)
-            .map_err(|err| Status::internal(format!("failed to get artifact alias path: {err}")))?;
+        let artifact_alias_path = self.alias_path(name, namespace, system, tag);
 
         if !artifact_alias_path.exists() {
             return Err(Status::not_found("alias not found"));
@@ -156,7 +154,7 @@ impl ArtifactBackend for LocalBackend {
         let artifact_json = serde_json::to_vec(&artifact)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {err}")))?;
         let artifact_digest = digest(&artifact_json);
-        let artifact_config_path = get_artifact_config_path(&artifact_digest, &artifact_namespace);
+        let artifact_config_path = self.config_path(&artifact_digest, &artifact_namespace);
 
         if let Some(parent) = artifact_config_path.parent() {
             if !parent.exists() {
@@ -190,13 +188,8 @@ impl ArtifactBackend for LocalBackend {
             // (`split_alias_name_tag`), so the pair validated there is the
             // same pair joined into a path here.
 
-            let alias_path = get_artifact_alias_path(
-                alias_name,
-                &artifact_namespace,
-                artifact_system,
-                alias_tag,
-            )
-            .map_err(|err| Status::internal(format!("failed to get artifact alias path: {err}")))?;
+            let alias_path =
+                self.alias_path(alias_name, &artifact_namespace, artifact_system, alias_tag);
 
             if let Some(parent) = alias_path.parent() {
                 if !parent.exists() {
@@ -228,15 +221,81 @@ mod tests {
     use tempfile::TempDir;
     use tonic::Code;
 
-    // The store root is a fixed absolute path, so `store_artifact` itself
-    // cannot be exercised against a temporary directory. `publish_alias` is
-    // the seam that carries every property under test: it owns the create,
-    // the conflict decision and the staging cleanup.
+    // `store_artifact` and `get_artifact_alias` run against a backend rooted
+    // in a temporary directory. The concurrency and failure properties are
+    // pinned on `publish_alias` and `publish_artifact_config` directly, since
+    // those own the create, the conflict decision and the staging cleanup.
     fn dir_entry_names(dir: &Path) -> BTreeSet<String> {
         std::fs::read_dir(dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect()
+    }
+
+    fn artifact_for(system: ArtifactSystem) -> Artifact {
+        Artifact {
+            name: "rust".to_string(),
+            target: system.into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn store_artifact_writes_the_config_under_the_backend_root() {
+        let root = TempDir::new().unwrap();
+        let backend = LocalBackend::new(root.path().to_path_buf());
+        let artifact = artifact_for(ArtifactSystem::Aarch64Darwin);
+        let expected_json = serde_json::to_vec(&artifact).unwrap();
+
+        let artifact_digest = backend
+            .store_artifact(artifact, Vec::new(), "library".to_string())
+            .await
+            .unwrap();
+
+        let config_path = root
+            .path()
+            .join("config")
+            .join("library")
+            .join(format!("{artifact_digest}.json"));
+
+        assert_eq!(artifact_digest, digest(&expected_json));
+        assert_eq!(std::fs::read(&config_path).unwrap(), expected_json);
+    }
+
+    #[tokio::test]
+    async fn get_artifact_alias_reads_an_alias_stored_under_the_backend_root() {
+        let root = TempDir::new().unwrap();
+        let backend = LocalBackend::new(root.path().to_path_buf());
+        let system = ArtifactSystem::Aarch64Darwin;
+
+        let artifact_digest = backend
+            .store_artifact(
+                artifact_for(system),
+                vec!["rust:1.0".to_string()],
+                "library".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let alias_path = root
+            .path()
+            .join("alias")
+            .join("library")
+            .join(system.as_str_name())
+            .join("rust")
+            .join("1.0");
+
+        assert_eq!(
+            std::fs::read_to_string(&alias_path).unwrap(),
+            artifact_digest
+        );
+        assert_eq!(
+            backend
+                .get_artifact_alias("rust", "library", system, "1.0")
+                .await
+                .unwrap(),
+            artifact_digest
+        );
     }
 
     // Two publishers race for one alias name with different digests. Exactly

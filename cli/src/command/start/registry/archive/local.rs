@@ -172,7 +172,7 @@ mod tests {
     async fn a_stream_error_mid_body_removes_the_temp_file_it_had_written() {
         let root = TempDir::new().unwrap();
         let backend = LocalBackend::new(root.path().to_path_buf());
-        let namespace_dir = root.path().join(NAMESPACE);
+        let namespace_dir = root.path().join("archive").join(NAMESPACE);
 
         let observed_dir = namespace_dir.clone();
         let observed_mid_stream = std::sync::Arc::new(std::sync::Mutex::new(BTreeSet::new()));
@@ -230,11 +230,12 @@ mod tests {
 
         let archive_path = root
             .path()
+            .join("archive")
             .join(NAMESPACE)
             .join(format!("{DIGEST}.tar.zst"));
 
         assert_eq!(
-            dir_entry_names(&root.path().join(NAMESPACE)),
+            dir_entry_names(&root.path().join("archive").join(NAMESPACE)),
             BTreeSet::from([format!("{DIGEST}.tar.zst")]),
             "the archive must be the only entry the push leaves"
         );

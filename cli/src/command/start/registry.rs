@@ -1,8 +1,8 @@
 use crate::command::{
     start::auth::{get_user_context, require_namespace_or_service_trust, Claims, PrincipalKind},
     store::paths::{
-        get_root_artifact_archive_dir_path, parse_alias_name, parse_artifact_digest,
-        parse_store_path_component, split_alias_name_tag,
+        get_artifact_dir_path, parse_alias_name, parse_artifact_digest, parse_store_path_component,
+        split_alias_name_tag,
     },
 };
 use anyhow::{bail, Result};
@@ -47,7 +47,7 @@ pub enum ServerBackend {
 
 #[derive(Clone, Debug)]
 pub struct LocalBackend {
-    archive_dir: PathBuf,
+    artifact_dir: PathBuf,
 }
 
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
@@ -84,18 +84,47 @@ pub struct S3Backend {
 }
 
 impl LocalBackend {
-    pub fn new(archive_dir: PathBuf) -> Self {
-        Self { archive_dir }
+    /// `artifact_dir` is the root holding the `alias`, `archive` and `config`
+    /// trees; production passes `get_artifact_dir_path()`.
+    pub fn new(artifact_dir: PathBuf) -> Self {
+        Self { artifact_dir }
     }
 
-    /// Mirrors the trailing `<namespace>/<digest>.tar.zst` of
-    /// `get_artifact_archive_path`, rooted at this backend's own archive
+    /// Mirrors `get_artifact_alias_path`, rooted at this backend's artifact
+    /// directory rather than the process-wide store.
+    pub(super) fn alias_path(
+        &self,
+        name: &str,
+        namespace: &str,
+        system: ArtifactSystem,
+        tag: &str,
+    ) -> PathBuf {
+        self.artifact_dir
+            .join("alias")
+            .join(namespace)
+            .join(system.as_str_name())
+            .join(name)
+            .join(tag)
+    }
+
+    /// Mirrors `get_artifact_archive_path`, rooted at this backend's artifact
     /// directory rather than the process-wide store.
     pub(super) fn archive_path(&self, digest: &str, namespace: &str) -> PathBuf {
-        self.archive_dir
+        self.artifact_dir
+            .join("archive")
             .join(namespace)
             .join(digest)
             .with_extension("tar.zst")
+    }
+
+    /// Mirrors `get_artifact_config_path`, rooted at this backend's artifact
+    /// directory rather than the process-wide store.
+    pub(super) fn config_path(&self, digest: &str, namespace: &str) -> PathBuf {
+        self.artifact_dir
+            .join("config")
+            .join(namespace)
+            .join(digest)
+            .with_extension("json")
     }
 }
 
@@ -616,7 +645,7 @@ pub async fn backend_archive(
     };
 
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new(get_root_artifact_archive_dir_path())),
+        ServerBackend::Local => Box::new(LocalBackend::new(get_artifact_dir_path())),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
                 registry_backend_s3_bucket,
@@ -642,7 +671,7 @@ pub async fn backend_artifact(
     };
 
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new(get_root_artifact_archive_dir_path())),
+        ServerBackend::Local => Box::new(LocalBackend::new(get_artifact_dir_path())),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
                 registry_backend_s3_bucket,
