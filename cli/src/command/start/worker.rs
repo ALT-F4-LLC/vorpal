@@ -754,16 +754,23 @@ const STAGING_SWEEP_AGE_ENV: &str = "VORPAL_STAGING_SWEEP_AGE";
 /// startup: this threshold decides only how long debris lingers, and refusing
 /// to serve builds over a typo in it would be the worse outcome.
 fn staging_max_age_from(value: Option<&str>) -> Duration {
+    seconds_from_env(STAGING_SWEEP_AGE_ENV, value, DEFAULT_STAGING_MAX_AGE)
+}
+
+/// Reads a whole-seconds override from the value of environment variable
+/// `name`. An unset value keeps `default` silently; an unparseable one keeps it
+/// and logs a warning naming the variable.
+fn seconds_from_env(name: &str, value: Option<&str>, default: Duration) -> Duration {
     let Some(value) = value else {
-        return DEFAULT_STAGING_MAX_AGE;
+        return default;
     };
 
     match value.trim().parse::<u64>() {
         Ok(seconds) => Duration::from_secs(seconds),
         Err(err) => {
-            warn!("worker |> ignoring invalid {STAGING_SWEEP_AGE_ENV}={value:?}: {err}");
+            warn!("worker |> ignoring invalid {name}={value:?}: {err}");
 
-            DEFAULT_STAGING_MAX_AGE
+            default
         }
     }
 }
@@ -785,18 +792,7 @@ const OUTPUT_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// An unset or unparseable override keeps the default, as
 /// `staging_max_age_from` does: a typo in a wait window should not fail builds.
 fn output_lock_wait_from(value: Option<&str>) -> Duration {
-    let Some(value) = value else {
-        return DEFAULT_OUTPUT_LOCK_WAIT;
-    };
-
-    match value.trim().parse::<u64>() {
-        Ok(seconds) => Duration::from_secs(seconds),
-        Err(err) => {
-            warn!("worker |> ignoring invalid {OUTPUT_LOCK_WAIT_ENV}={value:?}: {err}");
-
-            DEFAULT_OUTPUT_LOCK_WAIT
-        }
-    }
+    seconds_from_env(OUTPUT_LOCK_WAIT_ENV, value, DEFAULT_OUTPUT_LOCK_WAIT)
 }
 
 /// Reclaims staging directories no producer will ever publish, and reports how
@@ -1913,15 +1909,20 @@ enum OutputClaim {
 /// A held lock means another build of this same digest is in flight. When it
 /// publishes, the output appears and this returns `AlreadyBuilt`; when it fails,
 /// it removes its lock and this takes the lock over. Only a lock still held
-/// after `wait` is refused, leaving the holder's lock untouched.
+/// after `wait` is refused, leaving the holder's lock untouched. The client
+/// hears once, through `tx`, that the build is waiting, so a lock orphaned by
+/// a dead holder shows up as a named wait rather than a silent stall.
 async fn claim_output(
     artifact_digest: &str,
     output_path: &Path,
     lock_path: &Path,
     artifact_json: &str,
     wait: Duration,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<OutputClaim, Status> {
-    let deadline = tokio::time::Instant::now() + wait;
+    // A window too large to add to the clock has no reachable deadline.
+    let deadline = tokio::time::Instant::now().checked_add(wait);
+    let mut announced = false;
 
     loop {
         if output_path.exists() {
@@ -1929,6 +1930,16 @@ async fn claim_output(
         }
 
         match acquire_output_lock(lock_path, artifact_json).await {
+            // The holder may have published and released between the output
+            // check above and taking the lock; the output then already exists
+            // and the lock just taken is not needed.
+            Ok(()) if output_path.exists() => {
+                remove_file(lock_path).await.map_err(|err| {
+                    Status::internal(format!("failed to remove lock file: {err}"))
+                })?;
+
+                return Ok(OutputClaim::AlreadyBuilt);
+            }
             Ok(()) => return Ok(OutputClaim::Locked),
             Err(status) if status.code() == tonic::Code::AlreadyExists => {}
             Err(status) => return Err(status),
@@ -1936,13 +1947,31 @@ async fn claim_output(
 
         let now = tokio::time::Instant::now();
 
-        if now >= deadline {
+        if deadline.is_some_and(|deadline| now >= deadline) {
             return Err(Status::already_exists(format!(
-                "artifact {artifact_digest} is still locked by another build after waiting {wait:?}"
+                "artifact {artifact_digest} is still locked by another build after waiting \
+                 {wait:?}; remove {} if no build holds it",
+                lock_path.display()
             )));
         }
 
-        tokio::time::sleep(OUTPUT_LOCK_POLL_INTERVAL.min(deadline - now)).await;
+        if !announced {
+            send_message(
+                format!(
+                    "waiting up to {wait:?} for another build holding the lock on {artifact_digest}"
+                ),
+                tx,
+            )
+            .await?;
+            announced = true;
+        }
+
+        let pause = match deadline {
+            Some(deadline) => OUTPUT_LOCK_POLL_INTERVAL.min(deadline - now),
+            None => OUTPUT_LOCK_POLL_INTERVAL,
+        };
+
+        tokio::time::sleep(pause).await;
     }
 }
 
@@ -1982,6 +2011,7 @@ async fn validate_and_lock_artifact(
     artifact_namespace: &str,
     artifact_json: &str,
     lock_wait: Duration,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<LockedArtifact, Status> {
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
@@ -2048,6 +2078,7 @@ async fn validate_and_lock_artifact(
         &artifact_output_lock,
         artifact_json,
         lock_wait,
+        tx,
     )
     .await
     .inspect_err(|status| {
@@ -2171,7 +2202,7 @@ async fn build_artifact(
     let lock_wait = output_lock_wait_from(std::env::var(OUTPUT_LOCK_WAIT_ENV).ok().as_deref());
 
     let locked =
-        validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json, lock_wait)
+        validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json, lock_wait, tx)
             .await?;
 
     // Obtain service-to-service OAuth2 tokens for archive and artifact services
@@ -3654,6 +3685,7 @@ mod tests {
             DEFAULT_OUTPUT_LOCK_WAIT
         );
         assert_eq!(output_lock_wait_from(Some("-1")), DEFAULT_OUTPUT_LOCK_WAIT);
+        assert_eq!(output_lock_wait_from(Some("0")), Duration::ZERO);
     }
 
     /// Holds the lock for one digest, starts a second claim concurrently, then
@@ -3670,6 +3702,8 @@ mod tests {
         std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
         std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
 
+        let (tx, mut rx) = mpsc::channel(16);
+
         let second = tokio::spawn({
             let output_path = output_path.clone();
             let lock_path = lock_path.clone();
@@ -3681,6 +3715,7 @@ mod tests {
                     &lock_path,
                     "held-by-the-second-build",
                     Duration::from_secs(30),
+                    &tx,
                 )
                 .await
             }
@@ -3688,6 +3723,16 @@ mod tests {
 
         tokio::time::sleep(OUTPUT_LOCK_POLL_INTERVAL * 2).await;
         assert!(!second.is_finished(), "the second claim did not wait");
+
+        let announced = rx.try_recv().expect("the waiting claim told the client");
+        assert!(
+            announced.unwrap().output.contains("abc123"),
+            "the wait message names the digest"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "the wait was announced more than once"
+        );
 
         if first_build_published {
             std::fs::create_dir_all(&output_path).unwrap();
@@ -3728,7 +3773,9 @@ mod tests {
         std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
         std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
 
-        let status = claim_output("abc123", &output_path, &lock_path, "second", wait)
+        let (tx, _rx) = mpsc::channel(16);
+
+        let status = claim_output("abc123", &output_path, &lock_path, "second", wait, &tx)
             .await
             .expect_err("a lock held past the wait must be refused");
 
@@ -3739,12 +3786,64 @@ mod tests {
             "{}",
             status.message()
         );
+        assert!(
+            status.message().contains(&lock_path.display().to_string()),
+            "{}",
+            status.message()
+        );
         assert_eq!(
             std::fs::read(&lock_path).unwrap(),
             b"held-by-the-first-build",
             "an expired wait overwrote the holder's lock"
         );
         assert!(!output_path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_zero_wait_refuses_a_held_lock_without_waiting() {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output").join("abc123");
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+        let (tx, mut rx) = mpsc::channel(16);
+
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+
+        let started = std::time::Instant::now();
+        let status = claim_output(
+            "abc123",
+            &output_path,
+            &lock_path,
+            "second",
+            Duration::ZERO,
+            &tx,
+        )
+        .await
+        .expect_err("a zero wait must refuse a held lock");
+
+        assert_eq!(status.code(), tonic::Code::AlreadyExists);
+        assert!(started.elapsed() < OUTPUT_LOCK_POLL_INTERVAL);
+        assert!(rx.try_recv().is_err(), "a zero wait announced a wait");
+    }
+
+    #[tokio::test]
+    async fn a_window_past_the_clock_range_still_claims_a_free_digest() {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output").join("abc123");
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+        let (tx, _rx) = mpsc::channel(16);
+
+        let claim = claim_output(
+            "abc123",
+            &output_path,
+            &lock_path,
+            "second",
+            Duration::from_secs(u64::MAX),
+            &tx,
+        )
+        .await;
+
+        assert_eq!(claim.unwrap(), OutputClaim::Locked);
     }
 
     /// Writes a zstd-compressed tar whose entries come from raw ustar headers,
