@@ -21,7 +21,7 @@ use std::{
     io::ErrorKind,
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::{Path, PathBuf},
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     time::{Duration, SystemTime},
 };
 use tokio::{
@@ -30,7 +30,7 @@ use tokio::{
         symlink_metadata, write, File, OpenOptions,
     },
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::Command,
+    process::{Child, Command},
     sync::{mpsc, mpsc::Sender},
 };
 use tokio_stream::{
@@ -1250,19 +1250,40 @@ async fn run_step(
 
     // Run command
 
-    // The step leads its own process group so that anything it backgrounds
-    // can be found and killed once it exits (see `reap_process_group`).
+    let group = StepProcessGroup::new()?;
+
+    // The step joins the group so that anything it backgrounds can be found
+    // and killed once it exits (see `StepProcessGroup::reap`).
     let mut child = command
-        .process_group(0)
+        .process_group(group.id)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| Status::internal(format!("failed to spawn sandbox: {err}")))?;
 
-    let process_group = child
-        .id()
-        .ok_or_else(|| Status::internal("spawned sandbox has no process id"))?;
+    let outcome = stream_step_output(&mut child, tx).await;
 
+    // Reap on every path, so an output or send failure cannot leave the step
+    // and its descendants running.
+    let reaped = group.reap(&mut child, PROCESS_GROUP_REAP_TIMEOUT).await;
+
+    let (status, last_line) = outcome?;
+
+    reaped?;
+
+    if !status.success() {
+        return Err(Status::internal(last_line));
+    }
+
+    Ok(())
+}
+
+/// Forwards the step's output to the client until both streams close, then
+/// waits for the step and returns its exit status with its last output line.
+async fn stream_step_output(
+    child: &mut Child,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+) -> Result<(ExitStatus, String), Status> {
     let stdout = child
         .stdout
         .take()
@@ -1298,61 +1319,135 @@ async fn run_step(
         .await
         .map_err(|err| Status::internal(format!("failed to wait for sandbox: {err}")))?;
 
-    reap_process_group(process_group).await?;
-
-    if !status.success() {
-        return Err(Status::internal(last_line));
-    }
-
-    Ok(())
+    Ok((status, last_line))
 }
 
-/// How long `reap_process_group` waits for killed members to disappear.
+/// How long `StepProcessGroup::reap` waits for killed members to disappear.
 const PROCESS_GROUP_REAP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Kills every process remaining in `process_group` and returns only once
-/// none remain, or fails.
+/// A process group for one build step, led by a sentinel the worker owns.
 ///
 /// A step's detached descendants would otherwise keep writing into the
 /// staging directory after the no-files refusal and the embedded-path scan
-/// have run, publishing content neither check saw. Signalling goes through
-/// `kill(1)` because the crate forbids `unsafe` and so cannot call `killpg`.
-/// A descendant that leaves the group (`setsid`) escapes this; the worker's
-/// threat model already accepts that a step runs unsandboxed.
-async fn reap_process_group(process_group: u32) -> Result<(), Status> {
-    let group = format!("-{process_group}");
+/// have run, publishing content neither check saw.
+///
+/// The sentinel, not the step, leads the group: an unreaped sentinel keeps
+/// the group id from being reused, so the group-wide `SIGKILL` cannot reach
+/// an unrelated group even after the step itself has been reaped.
+///
+/// Signalling goes through `kill(1)` because adding a crate that exposes
+/// `killpg` is outside this module. A descendant that leaves the group
+/// (`setsid`) escapes; the worker's threat model already accepts that a step
+/// runs unsandboxed.
+struct StepProcessGroup {
+    id: i32,
+    sentinel: Child,
+}
 
-    let signal_group = |signal: &'static str| {
-        let group = group.clone();
+impl StepProcessGroup {
+    fn new() -> Result<Self, Status> {
+        // `cat` blocks on the stdin pipe held in `sentinel` until it is killed.
+        let sentinel = Command::new("cat")
+            .process_group(0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|err| Status::internal(format!("failed to spawn step group: {err}")))?;
 
-        async move {
-            Command::new("kill")
-                .args([signal, "--", &group])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await
-                .map(|status| status.success())
-                .map_err(|err| Status::internal(format!("failed to signal step processes: {err}")))
-        }
-    };
+        let id = sentinel
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .ok_or_else(|| Status::internal("step group sentinel has no process id"))?;
 
-    // A failed kill means the group is already empty, which is the goal.
-    signal_group("-KILL").await?;
-
-    let deadline = tokio::time::Instant::now() + PROCESS_GROUP_REAP_TIMEOUT;
-
-    while signal_group("-0").await? {
-        if tokio::time::Instant::now() >= deadline {
-            return Err(Status::internal(
-                "step processes survived SIGKILL; refusing to inspect their output",
-            ));
-        }
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        Ok(Self { id, sentinel })
     }
 
-    Ok(())
+    /// Kills every process in the group, reaps `step` and the sentinel, and
+    /// returns only once no member remains, or fails.
+    async fn reap(mut self, step: &mut Child, timeout: Duration) -> Result<(), Status> {
+        let group = format!("-{}", self.id);
+
+        // The unreaped sentinel pins the group, so this cannot miss it: any
+        // failure means members may be left alive.
+        match signal_group("-KILL", &group).await? {
+            GroupSignal::Delivered => {}
+            GroupSignal::Empty => {
+                return Err(Status::internal(
+                    "failed to kill step processes: group is gone",
+                ))
+            }
+            GroupSignal::Refused(reason) => {
+                return Err(Status::internal(format!(
+                    "failed to kill step processes: {reason}"
+                )))
+            }
+        }
+
+        step.wait()
+            .await
+            .map_err(|err| Status::internal(format!("failed to wait for sandbox: {err}")))?;
+
+        self.sentinel
+            .wait()
+            .await
+            .map_err(|err| Status::internal(format!("failed to wait for step group: {err}")))?;
+
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        // Only "no such process" proves the group empty. A refusal can be
+        // transient (macOS refuses to signal a group of unreaped zombies), so
+        // it is polled like a live member until the deadline.
+        loop {
+            let reason = match signal_group("-0", &group).await? {
+                GroupSignal::Empty => return Ok(()),
+                GroupSignal::Delivered => "members still running".to_string(),
+                GroupSignal::Refused(reason) => reason,
+            };
+
+            if tokio::time::Instant::now() >= deadline {
+                return Err(Status::internal(format!(
+                    "step processes survived SIGKILL ({reason}); refusing to inspect their output"
+                )));
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+enum GroupSignal {
+    Delivered,
+    /// `kill` reported that no process is in the group.
+    Empty,
+    /// `kill` failed for any other reason, such as a member it may not
+    /// signal; carries its error output.
+    Refused(String),
+}
+
+async fn signal_group(signal: &str, group: &str) -> Result<GroupSignal, Status> {
+    // The C locale fixes the wording of the "no such process" error.
+    let output = Command::new("kill")
+        .args([signal, "--", group])
+        .env("LC_ALL", "C")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|err| Status::internal(format!("failed to signal step processes: {err}")))?;
+
+    if output.status.success() {
+        return Ok(GroupSignal::Delivered);
+    }
+
+    let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if reason.contains("No such process") {
+        return Ok(GroupSignal::Empty);
+    }
+
+    Ok(GroupSignal::Refused(reason))
 }
 
 /// Sends a response to the client and logs errors if any.
@@ -4384,6 +4479,13 @@ mod tests {
     // still add files the no-files refusal and the embedded-path scan never saw.
     #[tokio::test]
     async fn run_step_reaps_detached_children() {
+        // `run_step` refuses to start without a service key; give it one in a
+        // private root so the test does not depend on the host's store.
+        let _root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let key_path = get_key_service_key_path();
+        std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
+        std::fs::write(&key_path, "").unwrap();
+
         let output = TempDir::new().unwrap();
         let workspace = TempDir::new().unwrap();
         let pid_path = workspace.path().join("child.pid");
@@ -4428,6 +4530,42 @@ mod tests {
         assert!(
             !late_path.exists(),
             "the backgrounded child wrote into the output after run_step returned"
+        );
+    }
+
+    // A member that outlasts the kill must fail the step rather than let its
+    // output be inspected. The test holds such a member: a child of its own
+    // that it leaves unreaped, so it stays in the group after SIGKILL.
+    #[tokio::test]
+    async fn step_group_reap_fails_when_a_member_outlasts_the_kill() {
+        use std::os::unix::process::CommandExt;
+
+        let group = StepProcessGroup::new().unwrap();
+
+        let mut step = Command::new("sleep")
+            .arg("60")
+            .process_group(group.id)
+            .spawn()
+            .unwrap();
+
+        let mut unreaped = std::process::Command::new("sleep")
+            .arg("60")
+            .process_group(group.id)
+            .spawn()
+            .unwrap();
+
+        let err = group
+            .reap(&mut step, Duration::from_millis(200))
+            .await
+            .expect_err("a surviving group member must fail the reap");
+
+        unreaped.wait().unwrap();
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(
+            err.message().contains("survived SIGKILL"),
+            "unexpected error: {}",
+            err.message()
         );
     }
 
