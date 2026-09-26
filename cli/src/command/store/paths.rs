@@ -1294,7 +1294,7 @@ mod tests {
     clippy::unwrap_used,
     reason = "test assertions read as intent, not defensive code: an unwrap failure is the test failing, which is the point"
 )]
-mod root_path_override_tests {
+pub(crate) mod root_path_override_tests {
     use super::*;
     use tempfile::TempDir;
 
@@ -1303,14 +1303,14 @@ mod root_path_override_tests {
     /// Sets `VORPAL_ROOT_PATH` to a fresh temporary directory for the caller's
     /// lifetime and restores the previous value on drop, so the variable never
     /// leaks into another test or into the rest of the process.
-    struct ScratchRoot {
+    pub(crate) struct ScratchRoot {
         _guard: std::sync::MutexGuard<'static, ()>,
         previous: Option<String>,
         dir: TempDir,
     }
 
     impl ScratchRoot {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let guard = ROOT_PATH_ENV_LOCK
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1327,7 +1327,7 @@ mod root_path_override_tests {
             }
         }
 
-        fn path(&self) -> &Path {
+        pub(crate) fn path(&self) -> &Path {
             self.dir.path()
         }
     }

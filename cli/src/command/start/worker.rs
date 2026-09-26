@@ -4309,4 +4309,128 @@ mod tests {
             "the backgrounded child wrote into the output after run_step returned"
         );
     }
+
+    const PULLED_DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const PULLED_NAMESPACE: &str = "library";
+
+    /// A registry whose `pull` delivers `first_chunk` and then fails the
+    /// stream, as a connection drop mid-transfer does.
+    struct FailingMidPullRegistry {
+        first_chunk: Vec<u8>,
+    }
+
+    #[tonic::async_trait]
+    impl vorpal_sdk::api::archive::archive_service_server::ArchiveService for FailingMidPullRegistry {
+        type PullStream = ReceiverStream<Result<ArchivePullResponse, Status>>;
+
+        async fn check(
+            &self,
+            _request: Request<ArchivePullRequest>,
+        ) -> Result<Response<vorpal_sdk::api::archive::ArchiveResponse>, Status> {
+            Err(Status::unimplemented("check is not scripted"))
+        }
+
+        async fn pull(
+            &self,
+            _request: Request<ArchivePullRequest>,
+        ) -> Result<Response<Self::PullStream>, Status> {
+            let (tx, rx) = mpsc::channel(2);
+
+            tx.send(Ok(ArchivePullResponse {
+                data: self.first_chunk.clone(),
+            }))
+            .await
+            .unwrap();
+            tx.send(Err(Status::internal("connection reset")))
+                .await
+                .unwrap();
+
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+
+        async fn push(
+            &self,
+            _request: Request<Streaming<ArchivePushRequest>>,
+        ) -> Result<Response<vorpal_sdk::api::archive::ArchiveResponse>, Status> {
+            Err(Status::unimplemented("push is not scripted"))
+        }
+    }
+
+    /// Serves [`FailingMidPullRegistry`] on a loopback port and returns the
+    /// registry the pull functions accept.
+    ///
+    /// The first chunk is a complete, valid archive, so a caller that took the
+    /// stream error for a clean end would publish and unpack it successfully:
+    /// only the mid-stream error distinguishes a truncated transfer here.
+    async fn serve_registry_failing_mid_pull() -> ResolvedRegistry {
+        let scratch = TempDir::new().unwrap();
+        let archive_path = scratch.path().join("archive.tar.zst");
+
+        write_zstd_archive(&archive_path, &[("file.txt", Some("contents"))]).await;
+
+        let registry = FailingMidPullRegistry {
+            first_chunk: std::fs::read(&archive_path).unwrap(),
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(
+                    vorpal_sdk::api::archive::archive_service_server::ArchiveServiceServer::new(
+                        registry,
+                    ),
+                )
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
+
+        resolve_registry("", &[format!("http://{address}")]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn pull_source_publishes_no_archive_when_the_stream_fails_mid_transfer() {
+        let root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let registry = serve_registry_failing_mid_pull().await;
+        let (tx, _rx) = mpsc::channel(16);
+        let source = ArtifactSource {
+            name: "source".to_string(),
+            digest: Some(PULLED_DIGEST.to_string()),
+            ..Default::default()
+        };
+
+        let err = pull_source(
+            None,
+            PULLED_NAMESPACE.to_string(),
+            &source,
+            root.path(),
+            registry,
+            &tx,
+        )
+        .await
+        .expect_err("a stream that fails mid-transfer must not pull the source");
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(
+            !get_artifact_archive_path(PULLED_DIGEST, PULLED_NAMESPACE).exists(),
+            "a truncated source archive must not be cached under its digest"
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_artifact_publishes_no_archive_when_the_stream_fails_mid_transfer() {
+        let _root = crate::command::store::paths::root_path_override_tests::ScratchRoot::new();
+        let registry = serve_registry_failing_mid_pull().await;
+        let (tx, _rx) = mpsc::channel(16);
+
+        let err = pull_artifact(None, PULLED_NAMESPACE, PULLED_DIGEST, &registry, &tx)
+            .await
+            .expect_err("a stream that fails mid-transfer must not pull the artifact");
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(
+            !get_artifact_archive_path(PULLED_DIGEST, PULLED_NAMESPACE).exists(),
+            "a truncated artifact archive must not be cached under its digest"
+        );
+    }
 }
