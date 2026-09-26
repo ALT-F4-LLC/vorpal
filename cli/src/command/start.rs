@@ -772,9 +772,10 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
 }
 
 /// Builds an `OidcValidator` for `issuer`/`args.issuer_audience`, wrapped as
-/// an interceptor. Each caller constructs its own validator instance (a
-/// deliberate choice: sharing one validator across services would share one
-/// JWKS cache between them, which is outside the scope of this refactor).
+/// an interceptor. `run` calls this once inside
+/// `if let Some(issuer) = required_issuer` and shares clones of the returned
+/// interceptor across the agent, registry and worker registrations, so every
+/// service uses one validator and one JWKS cache.
 async fn new_validator_interceptor(
     issuer: &str,
     issuer_audience: Option<&str>,
