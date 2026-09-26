@@ -1531,13 +1531,20 @@ async fn fetch_login_discovery_endpoints(
 ) -> Result<(String, String)> {
     let discovery_url = format!("{issuer}/.well-known/openid-configuration");
 
-    let doc: serde_json::Value = client
-        .get(&discovery_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let response = client.get(&discovery_url).send().await?;
+
+    // The client refuses to follow redirects, so a 3xx arrives here as a
+    // response that `error_for_status` passes; refuse it by status rather
+    // than letting its body fail (or pass) JSON parsing.
+    if response.status().is_redirection() {
+        bail!(
+            "refusing to follow redirect ({}) from {discovery_url}: OIDC discovery must \
+             answer on the issuer's own origin",
+            response.status()
+        );
+    }
+
+    let doc: serde_json::Value = response.error_for_status()?.json().await?;
 
     login_discovery_targets(issuer, &doc)
 }
@@ -4023,9 +4030,8 @@ mod login_egress_tests {
     #[tokio::test]
     async fn fetch_login_discovery_endpoints_refuses_a_redirected_discovery_response() {
         // C-5(a): the discovery GET must not follow a redirect to another
-        // origin. A 302 with no JSON body fails `.json()` parsing once the
-        // client refuses to follow it — mirroring the SDK's own
-        // `refresh_access_token_does_not_follow_a_redirected_token_endpoint`.
+        // origin, and the refusal must name the redirect rather than
+        // surface as a JSON-decode failure of the empty 302 body.
         let elsewhere = IdpServer::start(|_, _| Some(http_json("{}"))).await;
         let elsewhere_port = elsewhere.addr.port();
 
@@ -4040,10 +4046,15 @@ mod login_egress_tests {
         .await;
 
         let client = login_http_client(Duration::from_secs(5)).expect("test client must build");
-        fetch_login_discovery_endpoints(&client, &normalized(&idp.issuer()))
+        let err = fetch_login_discovery_endpoints(&client, &normalized(&idp.issuer()))
             .await
             .expect_err("a redirected discovery response must not be followed");
 
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("redirect") && message.contains("302"),
+            "the refusal must name the redirect and its status, got: {message}"
+        );
         assert!(
             elsewhere.requested_paths().is_empty(),
             "the redirect target must never be reached"
