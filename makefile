@@ -31,9 +31,10 @@ GO_TEST_ENV := $(if $(OFFLINE),GOFLAGS="$$GOFLAGS -mod=readonly" GOPROXY=off,)
 # network.
 BUN_INSTALL_ENV := $(if $(OFFLINE),BUN_CONFIG_REGISTRY=http://127.0.0.1:1,)
 # vorpal-start and lima-vorpal-start pass this issuer to `system services
-# start`. Empty it (`make vorpal-start VORPAL_ISSUER=`) for an anonymous
-# unix-socket start: both targets then omit `--issuer`, and vorpal-start skips
-# keycloak-start. This development default
+# start`. Empty it (`make vorpal-start VORPAL_ISSUER=`) for an issuer-less
+# unix-socket start: both targets then omit `--issuer` and keep VORPAL_ISSUER
+# out of the recipe environment, and vorpal-start skips keycloak-start.
+# This development default
 # is the realm `vorpal login`'s clap default names and the realm
 # script/test/keycloak.sh's clients live in (KC_REALM=vorpal), so all three
 # agree. `docker-compose.yaml` provisions that realm and its OIDC clients from
@@ -84,6 +85,13 @@ CHECK_VORPAL_ISSUER = $(if $(strip $(findstring ",$(value VORPAL_ISSUER))$(finds
 # reference would run an operator's `$(shell ...)` before any guard.
 VORPAL_ISSUER_SET = $(strip $(value VORPAL_ISSUER))
 VORPAL_ISSUER_FLAG = $(if $(VORPAL_ISSUER_SET),--issuer "$(VORPAL_ISSUER)")
+
+# Make exports a VORPAL_ISSUER set on the command line or in the environment,
+# and the CLI reads VORPAL_ISSUER as `--issuer`, refusing an empty value. An
+# emptied issuer therefore has to leave recipe environments as well as argv.
+ifeq ($(VORPAL_ISSUER_SET),)
+unexport VORPAL_ISSUER
+endif
 
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
