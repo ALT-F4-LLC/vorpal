@@ -30,13 +30,16 @@ GO_TEST_ENV := $(if $(OFFLINE),GOFLAGS="$$GOFLAGS -mod=readonly" GOPROXY=off,)
 # the restored bun cache are both warm in CI — it proves the leg took no
 # network.
 BUN_INSTALL_ENV := $(if $(OFFLINE),BUN_CONFIG_REGISTRY=http://127.0.0.1:1,)
-# `system services start` refuses a worker/registry with no issuer, so
-# vorpal-start and lima-vorpal-start must name one. This development default
+# vorpal-start and lima-vorpal-start pass this issuer to `system services
+# start`. Empty it (`make vorpal-start VORPAL_ISSUER=`) for an anonymous
+# unix-socket start: both targets then omit `--issuer`, and vorpal-start skips
+# keycloak-start. This development default
 # is the realm `vorpal login`'s clap default names and the realm
 # script/test/keycloak.sh's clients live in (KC_REALM=vorpal), so all three
 # agree. `docker-compose.yaml` provisions that realm and its OIDC clients from
 # an inline realm import, and `keycloak-start` — which `vorpal-start` depends
-# on — brings it up and waits for its discovery document. `realms/master` was a
+# on while an issuer is set — brings it up and waits for its discovery
+# document. `realms/master` was a
 # prior default and is worse, not simpler — it is Keycloak's administrative
 # realm, holds none of Vorpal's clients, and ships with a published
 # admin/password bootstrap credential, so it satisfies "an issuer is
@@ -74,6 +77,13 @@ VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
 # here can prevent it. Nothing in this file can; the guard covers the
 # recursively-expanded forms, which are the ones an operator writes.
 CHECK_VORPAL_ISSUER = $(if $(strip $(findstring ",$(value VORPAL_ISSUER))$(findstring ',$(value VORPAL_ISSUER))$(findstring `,$(value VORPAL_ISSUER))$(findstring \,$(value VORPAL_ISSUER))$(findstring $$,$(value VORPAL_ISSUER))),$(error VORPAL_ISSUER may not contain a quote, an apostrophe, a backtick, a backslash, or '$$'))
+
+# Non-empty when an issuer is configured. Tests `$(value ...)` for the same
+# reason CHECK_VORPAL_ISSUER does, and matters more here: the vorpal-start
+# prerequisite list expands at parse time for every target, so a plain
+# reference would run an operator's `$(shell ...)` before any guard.
+VORPAL_ISSUER_SET = $(strip $(value VORPAL_ISSUER))
+VORPAL_ISSUER_FLAG = $(if $(VORPAL_ISSUER_SET),--issuer "$(VORPAL_ISSUER)")
 
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
@@ -415,6 +425,7 @@ vorpal-prepare:
 KEYCLOAK_READY_TIMEOUT ?= 120
 
 keycloak-start:
+	$(if $(VORPAL_ISSUER_SET),,$(error keycloak-start needs a non-empty VORPAL_ISSUER to poll for readiness))
 	$(CHECK_VORPAL_ISSUER)
 	docker compose up --detach
 	deadline=$$(($$(date +%s) + $(KEYCLOAK_READY_TIMEOUT))); \
@@ -427,9 +438,9 @@ keycloak-start:
 	done
 	echo "keycloak-start: $(VORPAL_ISSUER) is serving OIDC discovery"
 
-vorpal-start: keycloak-start
+vorpal-start: $(if $(VORPAL_ISSUER_SET),keycloak-start)
 	$(CHECK_VORPAL_ISSUER)
-	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)
+	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_ISSUER_FLAG) $(VORPAL_FLAGS)
 
 vorpal-website-start:
 	bun run --cwd=website dev
@@ -455,4 +466,4 @@ lima-vorpal:
 
 lima-vorpal-start:
 	$(CHECK_VORPAL_ISSUER)
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start $(VORPAL_ISSUER_FLAG) $(VORPAL_FLAGS)'
