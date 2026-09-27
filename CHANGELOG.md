@@ -17,8 +17,11 @@ All notable changes to this project will be documented in this file.
   binds TCP 23151) refuses to start the agent, registry, or worker without
   `--issuer`. With `--issuer`, OIDC authentication is unchanged.
 
-- **Makefile**: `make vorpal-start VORPAL_ISSUER=` starts the services
-  without an issuer on the Unix socket and skips starting Keycloak.
+- **Makefile**: `make vorpal-start` starts only Vorpal. `VORPAL_ISSUER` is
+  empty by default, so the services start without an issuer on the Unix
+  socket, and the target no longer starts Keycloak. For an authenticated
+  start, run `make keycloak-start`, then
+  `make vorpal-start VORPAL_ISSUER=http://localhost:8080/realms/vorpal`.
 
 ## [0.4.1] - 2026-09-12
 

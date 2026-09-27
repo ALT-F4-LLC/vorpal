@@ -2458,28 +2458,59 @@ mod login_egress_tests {
         );
     }
 
-    /// The `VORPAL_ISSUER` default `makefile` ships, read from the file
-    /// itself. `makefile` names it in the recipes for `vorpal-start` and
-    /// `lima-vorpal-start`; `DEFAULT_DEV_ISSUER` names it for `vorpal login`.
-    /// Reading the real text is what turns a one-sided edit into a failing
-    /// test rather than a silent divergence between the two.
-    fn makefile_default_vorpal_issuer() -> String {
+    /// The default `makefile` assigns to `variable`, read from the file
+    /// itself. Reading the real text is what turns a one-sided edit into a
+    /// failing test rather than a silent divergence.
+    fn makefile_default(variable: &str) -> String {
         let makefile = include_str!("../../makefile");
         makefile
             .lines()
             .find_map(|line| {
                 // Match the assignment by variable name and split on the
-                // operator, rather than on the exact `VORPAL_ISSUER ?= `
-                // text: `?=`, `:=`, `+=` and a bare `=` all mean the same
-                // thing to this test, and pinning one spelling made
-                // reformatting the makefile fail here as a missing default.
+                // operator, rather than on the exact `NAME ?= ` text: `?=`,
+                // `:=`, `+=` and a bare `=` all mean the same thing to this
+                // test, and pinning one spelling made reformatting the
+                // makefile fail here as a missing default.
                 let (name, value) = line.split_once('=')?;
                 let name = name.trim_end_matches(['?', ':', '+']);
 
-                (name.trim() == "VORPAL_ISSUER").then(|| value.trim())
+                (name.trim() == variable).then(|| value.trim())
             })
-            .expect("makefile must define a default VORPAL_ISSUER")
+            .unwrap_or_else(|| panic!("makefile must define a default {variable}"))
             .to_string()
+    }
+
+    /// The development realm `makefile` ships as `KEYCLOAK_ISSUER`, which
+    /// `keycloak-start` brings up; `DEFAULT_DEV_ISSUER` names it for
+    /// `vorpal login`.
+    fn makefile_default_vorpal_issuer() -> String {
+        makefile_default("KEYCLOAK_ISSUER")
+    }
+
+    #[test]
+    fn makefile_starts_only_vorpal_by_default() {
+        // `make vorpal-start` must start Vorpal and nothing else: no default
+        // issuer (so no identity provider is needed) and no Keycloak
+        // prerequisite on the target.
+        assert_eq!(
+            makefile_default("VORPAL_ISSUER"),
+            "",
+            "makefile's VORPAL_ISSUER default must be empty so vorpal-start \
+             needs no identity provider"
+        );
+
+        let makefile = include_str!("../../makefile");
+        let target = makefile
+            .lines()
+            .find(|line| line.starts_with("vorpal-start:"))
+            .expect("makefile must define a vorpal-start target");
+
+        assert_eq!(
+            target.trim_end(),
+            "vorpal-start:",
+            "vorpal-start must have no prerequisites, so it starts nothing \
+             besides Vorpal"
+        );
     }
 
     #[test]
