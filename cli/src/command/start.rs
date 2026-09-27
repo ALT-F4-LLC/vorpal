@@ -415,58 +415,52 @@ fn default_registry_allowed(
     })
 }
 
-/// VPL-434 (C1): whether starting with the given service set and `--issuer`
-/// value must be refused. Worker, archive and artifact requests reach
-/// `run_step`/the store with no isolation at all (`worker.rs`), so an
-/// unauthenticated registration of any of them is not a narrower-permission
-/// mode — it is unauthenticated arbitrary code execution as this process's
-/// uid. `issuer == None` used to register those three services with no
-/// interceptor (`WorkerServiceServer::new`/`ArchiveServiceServer::new`/
-/// `ArtifactServiceServer::new`, no `with_interceptor`), so a peer that could
-/// merely reach the listener needed no credential at all. The governing rule
-/// (VPL-434 threat model §4): the absence of a credential in a request must
-/// never be what authorizes it, which means "this deployment is anonymous"
-/// cannot be inferred per request — it has to be refused at the one place
-/// that is outside the attacker's reach, process construction. Extracted as
-/// a pure predicate, mirroring `registry_allowed_log_is_active`, so this
-/// decision is unit-testable without standing up a server (TDD §11).
+/// VPL-434 (C1): whether starting with the given service set, `--issuer`
+/// value and main listener must be refused. Worker, archive and artifact
+/// requests reach `run_step`/the store with no isolation at all
+/// (`worker.rs`), and the agent reads caller-named paths and pushes them
+/// under the host user's stored credentials, so serving any of them to a
+/// caller with no identity is unauthenticated code execution as this
+/// process's uid. The governing rule (VPL-434 threat model §4): the absence
+/// of a credential in a request must never be what authorizes it, so the
+/// decision is made here, at process construction, never per request.
 ///
-/// The agent is covered by the same rule: it reads caller-named filesystem
-/// paths and pushes what it reads into a caller-named registry namespace
-/// under the host user's own stored OAuth credentials, so an unauthenticated
-/// agent is a confused deputy for arbitrary file read and namespace forgery.
-/// Refusing here is what leaves only two states — authenticated, or refused
-/// to start — with no third in which the agent registers bare.
-fn anonymous_start_refused(services: StartupServices, issuer: Option<&str>) -> bool {
-    services.requires_issuer() && issuer.is_none()
+/// Without an issuer the services start only on the unix socket, where
+/// `auth::LocalPeerInterceptor` identifies every caller by its
+/// kernel-reported uid. A TCP or TLS listener has no such identity, so an
+/// issuer-less start there is refused. `main_port` is the value
+/// `resolve_effective_port` returns and `run` binds, so the decision cannot
+/// describe a different listener from the one that serves.
+fn anonymous_start_refused(
+    services: StartupServices,
+    issuer: Option<&str>,
+    main_port: Option<u16>,
+) -> bool {
+    services.requires_authentication() && issuer.is_none() && main_port.is_some()
 }
 
 /// Whether a `--services` list, split into `RunArgs::services`, starts a
-/// service that refuses to run without an OIDC issuer: the worker, the
-/// registry, or the agent. The startup log reads this so it describes the
-/// same refusal `run` enforces.
-pub(crate) fn requires_issuer(services: &[String]) -> bool {
-    StartupServices::from_services(services).requires_issuer()
+/// service that must authenticate its callers: the worker, the registry, or
+/// the agent. The startup log reads this so it describes the same mode `run`
+/// resolves.
+pub(crate) fn requires_authentication(services: &[String]) -> bool {
+    StartupServices::from_services(services).requires_authentication()
 }
 
-/// Resolves the credential the worker and registry (archive/artifact)
-/// services need, once, at the single point their requirement is
-/// established — rather than each registration site re-deriving "an issuer
-/// is present" for itself. Before this, `run` carried two `.expect()`s, 165
-/// and 210 lines apart, each independently re-asserting a guarantee that
-/// `anonymous_start_refused` had already checked (VPL-434-CORRECTNESS-3,
-/// VPL434-ARCH-2): a bare bool told the caller *that* an issuer was
-/// required, not *what* it was, so every call site had to go back to
-/// `args.issuer` and re-justify pulling it out of the `Option`. Returning
-/// the validated issuer itself, once, removes both `.expect()`s and the
-/// bool in between.
-///
-/// Takes a named `StartupServices` rather than two adjacent `bool`s
-/// (VPL434-ARCH-7): `resolve_required_issuer(has_registry, has_worker, ..)`
-/// transposed from the intended `resolve_required_issuer(has_worker,
-/// has_registry, ..)` would read identically at any call site and compile
-/// either way, which is what made the swap invisible in `bool`-parameter
-/// form.
+/// Whether `run` refuses a start with this `--services` list, `--port` and
+/// `--tls` when no `--issuer` is configured. The startup log reads this so a
+/// refusal it announces is the one `run` enforces.
+pub(crate) fn issuerless_start_refused(services: &[String], port: Option<u16>, tls: bool) -> bool {
+    anonymous_start_refused(
+        StartupServices::from_services(services),
+        None,
+        main_listener_port(port, tls),
+    )
+}
+
+/// Takes a named `StartupServices` rather than adjacent `bool`s
+/// (VPL434-ARCH-7): a transposed `(has_registry, has_worker, ..)` would read
+/// identically at any call site and compile either way.
 #[derive(Clone, Copy)]
 struct StartupServices {
     has_worker: bool,
@@ -495,29 +489,68 @@ impl StartupServices {
         }
     }
 
-    fn requires_issuer(self) -> bool {
+    fn requires_authentication(self) -> bool {
         self.has_worker || self.has_registry || self.has_agent
     }
 }
 
-fn resolve_required_issuer(
+/// How agent, registry and worker callers are identified, decided once at
+/// process construction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServiceAuthMode {
+    /// Every request carries a bearer token validated against this issuer.
+    Oidc { issuer: String },
+    /// No issuer: the main listener is the unix socket, and every request is
+    /// identified by its peer's kernel-reported uid.
+    LocalPeer,
+}
+
+impl ServiceAuthMode {
+    fn issuer(&self) -> Option<&str> {
+        match self {
+            Self::Oidc { issuer } => Some(issuer),
+            Self::LocalPeer => None,
+        }
+    }
+
+    /// The disposition every agent/registry/worker registration must carry
+    /// in this mode.
+    fn disposition(&self) -> Disposition {
+        match self {
+            Self::Oidc { .. } => Disposition::Intercepted,
+            Self::LocalPeer => Disposition::LocalPeer,
+        }
+    }
+}
+
+/// Resolves the authentication mode once, at the single point the
+/// requirement is established, rather than each registration site
+/// re-deriving it (VPL-434-CORRECTNESS-3, VPL434-ARCH-2). `None` means the
+/// service set has nothing to authenticate.
+fn resolve_service_auth(
     services: StartupServices,
     issuer: Option<String>,
-) -> Result<Option<String>> {
-    if anonymous_start_refused(services, issuer.as_deref()) {
+    main_port: Option<u16>,
+) -> Result<Option<ServiceAuthMode>> {
+    if anonymous_start_refused(services, issuer.as_deref(), main_port) {
         bail!(
-            "agent, worker and archive/artifact services require --issuer for authentication; \
-             refusing to start unauthenticated — an anonymous peer could otherwise run \
-             arbitrary build entrypoints as this process's uid, or have the agent read local \
-             files and push them to the registry under this user's credentials"
+            "agent, worker and archive/artifact services on a TCP or TLS listener require \
+             --issuer for authentication; refusing to start unauthenticated — any peer that \
+             can reach the listener could otherwise run arbitrary build entrypoints as this \
+             process's uid, or have the agent read local files and push them to the registry \
+             under this user's credentials. Without --issuer, omit --port and --tls to serve \
+             them on the unix socket to peers running as this process's uid"
         );
     }
 
-    Ok(if services.requires_issuer() {
-        issuer
-    } else {
-        None
-    })
+    if !services.requires_authentication() {
+        return Ok(None);
+    }
+
+    Ok(Some(match issuer {
+        Some(issuer) => ServiceAuthMode::Oidc { issuer },
+        None => ServiceAuthMode::LocalPeer,
+    }))
 }
 
 /// VPL-713 (C3): the registration invariant — every gRPC service this
@@ -535,21 +568,35 @@ fn resolve_required_issuer(
 /// defeated by a rename or a new file.
 ///
 /// The ledger `ledger()` returns is not a second list that has to be kept in
-/// step with the router: `intercepted` and `exempt` each record and register
-/// in the same call, so there is no state in which the router holds a route
-/// the ledger does not describe.
+/// step with the router: `authenticated` and `exempt` each record and
+/// register in the same call, so there is no state in which the router holds
+/// a route the ledger does not describe.
 mod service_registrar {
+    use super::auth::{LocalPeerInterceptor, OidcInterceptor};
     use tonic::{
         codegen::{http, Service},
         server::NamedService,
-        service::{interceptor::InterceptedService, Interceptor, Routes},
+        service::{interceptor::InterceptedService, Routes},
         transport::server::{Router, Server},
     };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(super) enum Disposition {
+        /// Wrapped in the OIDC token interceptor.
         Intercepted,
+        /// Wrapped in the unix-socket peer-uid interceptor.
+        LocalPeer,
         Exempt,
+    }
+
+    /// The interceptor a service is registered behind. Each variant holds
+    /// its own nominal interceptor type, so the disposition the ledger
+    /// records follows from the interceptor that wraps the service and
+    /// cannot be claimed for a different one.
+    #[derive(Clone)]
+    pub(super) enum ServiceAuth {
+        Oidc(OidcInterceptor),
+        LocalPeer(LocalPeerInterceptor),
     }
 
     /// Services allowed on the main router with no interceptor. Each entry
@@ -589,7 +636,7 @@ mod service_registrar {
         /// Takes the configured `Server` builder rather than an already-built
         /// `Router`, so that no service — including the health service, which
         /// used to be the argument that turned the builder into a router —
-        /// can reach the routes without passing `intercepted` or `exempt`.
+        /// can reach the routes without passing `authenticated` or `exempt`.
         pub(super) fn new(mut server: Server) -> Self {
             Self {
                 router: server.add_routes(Routes::default()),
@@ -597,10 +644,10 @@ mod service_registrar {
             }
         }
 
-        /// Registers `service` wrapped in `interceptor`. The wrapping happens
-        /// here rather than at the call site, so a caller cannot hand this
-        /// method a bare service and have it recorded as intercepted.
-        pub(super) fn intercepted<S, I>(mut self, service: S, interceptor: I) -> Self
+        /// Registers `service` wrapped in `auth`'s interceptor. The wrapping
+        /// happens here rather than at the call site, so a caller cannot hand
+        /// this method a bare service and have it recorded as authenticated.
+        pub(super) fn authenticated<S>(mut self, service: S, auth: ServiceAuth) -> Self
         where
             S: NamedService
                 + Service<
@@ -612,12 +659,22 @@ mod service_registrar {
                 + Sync
                 + 'static,
             S::Future: Send + 'static,
-            I: Interceptor + Clone + Send + Sync + 'static,
         {
-            self.registered.push((S::NAME, Disposition::Intercepted));
-            self.router = self
-                .router
-                .add_service(InterceptedService::new(service, interceptor));
+            let (disposition, router) = match auth {
+                ServiceAuth::Oidc(interceptor) => (
+                    Disposition::Intercepted,
+                    self.router
+                        .add_service(InterceptedService::new(service, interceptor)),
+                ),
+                ServiceAuth::LocalPeer(interceptor) => (
+                    Disposition::LocalPeer,
+                    self.router
+                        .add_service(InterceptedService::new(service, interceptor)),
+                ),
+            };
+
+            self.registered.push((S::NAME, disposition));
+            self.router = router;
             self
         }
 
@@ -661,7 +718,7 @@ mod service_registrar {
     }
 }
 
-use service_registrar::{Disposition, ServiceRegistrar};
+use service_registrar::{Disposition, ServiceAuth, ServiceRegistrar};
 
 #[cfg(test)]
 use service_registrar::EXEMPT_SERVICES;
@@ -678,10 +735,16 @@ use service_registrar::EXEMPT_SERVICES;
 /// disagree, so a plan that drifts from what was registered stops the
 /// process rather than becoming a comment that quietly goes stale.
 ///
-/// Taking `StartupServices` rather than `RunArgs` keeps this free of the
-/// network I/O `OidcValidator::new` performs, so the enumeration test can
-/// cover every service subset without an issuer to reach.
-fn planned_registrations(services: StartupServices) -> Vec<(&'static str, Disposition)> {
+/// Taking `StartupServices` and the resolved `ServiceAuthMode` rather than
+/// `RunArgs` keeps this free of the network I/O `OidcValidator::new`
+/// performs, so the enumeration test can cover every service subset in both
+/// modes without an issuer to reach. The disposition comes from the mode,
+/// independently of the interceptor `run` builds, so the plan-vs-ledger
+/// comparison catches a registration wrapped for the wrong mode.
+fn planned_registrations(
+    services: StartupServices,
+    mode: Option<&ServiceAuthMode>,
+) -> Vec<(&'static str, Disposition)> {
     use tonic::server::NamedService;
 
     let mut planned = vec![(
@@ -689,36 +752,41 @@ fn planned_registrations(services: StartupServices) -> Vec<(&'static str, Dispos
         Disposition::Exempt,
     )];
 
+    let Some(mode) = mode else {
+        return planned;
+    };
+    let disposition = mode.disposition();
+
     if services.has_agent {
         planned.push((
             <AgentServiceServer<AgentServer> as NamedService>::NAME,
-            Disposition::Intercepted,
+            disposition,
         ));
     }
 
     if services.has_registry {
         planned.push((
             <ArchiveServiceServer<ArchiveServer> as NamedService>::NAME,
-            Disposition::Intercepted,
+            disposition,
         ));
         planned.push((
             <ArtifactServiceServer<ArtifactServer> as NamedService>::NAME,
-            Disposition::Intercepted,
+            disposition,
         ));
     }
 
     if services.has_worker {
         planned.push((
             <WorkerServiceServer<WorkerServer> as NamedService>::NAME,
-            Disposition::Intercepted,
+            disposition,
         ));
     }
 
     planned
 }
 
-/// Whether every planned registration is either intercepted or named in
-/// `EXEMPT_SERVICES`.
+/// Whether every planned registration is either wrapped in an interceptor
+/// (OIDC or local-peer) or named in `EXEMPT_SERVICES`.
 ///
 /// Production enforcement of this rule is `ServiceRegistrar::exempt`, which
 /// refuses an unlisted service at the registration statement itself. This is
@@ -728,7 +796,7 @@ fn planned_registrations(services: StartupServices) -> Vec<(&'static str, Dispos
 #[cfg(test)]
 fn registrations_are_intercepted_or_exempt(planned: &[(&'static str, Disposition)]) -> bool {
     planned.iter().all(|(name, disposition)| match disposition {
-        Disposition::Intercepted => true,
+        Disposition::Intercepted | Disposition::LocalPeer => true,
         Disposition::Exempt => EXEMPT_SERVICES.iter().any(|(exempt, _)| exempt == name),
     })
 }
@@ -790,15 +858,14 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
 }
 
 /// Builds an `OidcValidator` for `issuer`/`args.issuer_audience`, wrapped as
-/// an interceptor. `run` calls this once inside
-/// `if let Some(issuer) = required_issuer` and shares clones of the returned
-/// interceptor across the agent, registry and worker registrations, so every
-/// service uses one validator and one JWKS cache.
+/// an interceptor. `run` calls this once in OIDC mode and shares clones of
+/// the returned interceptor across the agent, registry and worker
+/// registrations, so every service uses one validator and one JWKS cache.
 async fn new_validator_interceptor(
     issuer: &str,
     issuer_audience: Option<&str>,
     issuer_service_client_ids: &[String],
-) -> Result<impl Fn(tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> + Clone> {
+) -> Result<auth::OidcInterceptor> {
     let mut validator_audiences = vec![];
 
     if let Some(audience) = issuer_audience {
@@ -815,17 +882,14 @@ async fn new_validator_interceptor(
 }
 
 /// Adds the archive/artifact (registry) services to `registrar` when
-/// `args.services` requests them, wrapped in the shared `interceptor`
+/// `args.services` requests them, wrapped in the shared `auth` interceptor
 /// (VPL-713/C3-f: one interceptor per `run`, not one per service block).
-async fn add_registry_services<I>(
+async fn add_registry_services(
     mut registrar: ServiceRegistrar,
     args: &RunArgs,
-    interceptor: I,
+    auth: ServiceAuth,
     transport_label: &str,
-) -> Result<ServiceRegistrar>
-where
-    I: tonic::service::Interceptor + Clone + Send + Sync + 'static,
-{
+) -> Result<ServiceRegistrar> {
     let backend = match args.registry_backend.as_str() {
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
@@ -859,13 +923,13 @@ where
     let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
     let artifact_server = ArtifactServer::new(backend_artifact);
 
-    registrar = registrar.intercepted(
+    registrar = registrar.authenticated(
         ArchiveServiceServer::new(archive_server),
         // shared with the artifact service registered just below
-        interceptor.clone(),
+        auth.clone(),
     );
 
-    registrar = registrar.intercepted(ArtifactServiceServer::new(artifact_server), interceptor);
+    registrar = registrar.authenticated(ArtifactServiceServer::new(artifact_server), auth);
 
     info!("archive |> service: {}", transport_label);
     info!("artifact |> service: {}", transport_label);
@@ -874,21 +938,19 @@ where
 }
 
 /// Adds the worker service to `registrar` when `args.services` requests it,
-/// wrapped in the shared `interceptor` (VPL-713/C3-f: one interceptor per
-/// `run`, not one per service block).
-fn add_worker_service<I>(
+/// wrapped in the shared `auth` interceptor (VPL-713/C3-f: one interceptor
+/// per `run`, not one per service block). `issuer` is `None` in local-peer
+/// mode, where the worker mints no service token for its registry dials.
+fn add_worker_service(
     registrar: ServiceRegistrar,
     args: &RunArgs,
-    issuer: &str,
-    interceptor: I,
+    issuer: Option<&str>,
+    auth: ServiceAuth,
     registry_allowed: Vec<String>,
-) -> ServiceRegistrar
-where
-    I: tonic::service::Interceptor + Clone + Send + Sync + 'static,
-{
+) -> ServiceRegistrar {
     // callee in start/worker.rs takes ownership; `args` is a shared reference reused below
     let worker_server = WorkerServer::new(
-        Some(issuer.to_string()),
+        issuer.map(str::to_string),
         args.issuer_audience.clone(),
         args.issuer_client_id.clone(),
         args.issuer_client_secret.clone(),
@@ -896,7 +958,7 @@ where
         args.worker_jobs,
     );
 
-    registrar.intercepted(WorkerServiceServer::new(worker_server), interceptor)
+    registrar.authenticated(WorkerServiceServer::new(worker_server), auth)
 }
 
 /// If `socket_path` exists, checks whether it is still backed by a live
@@ -1081,8 +1143,17 @@ fn log_trusted_service_clients(issuer_service_client_ids: &[String]) {
     }
 }
 
-/// Determines the effective listen port (TLS implies TCP on 23151 by
-/// default; an explicit `--port` also uses TCP; otherwise UDS), and rejects
+/// The main listener's TCP port: TLS implies TCP on 23151 by default, an
+/// explicit `--port` also uses TCP, and `None` means the unix socket.
+fn main_listener_port(port: Option<u16>, tls: bool) -> Option<u16> {
+    match (port, tls) {
+        (Some(port), _) => Some(port),
+        (None, true) => Some(23151),
+        (None, false) => None,
+    }
+}
+
+/// Determines the effective listen port (`main_listener_port`), and rejects
 /// a health-check port that collides with it.
 fn resolve_effective_port(
     port: Option<u16>,
@@ -1090,11 +1161,7 @@ fn resolve_effective_port(
     health_check: bool,
     health_check_port: u16,
 ) -> Result<Option<u16>> {
-    let effective_port = match (port, tls) {
-        (Some(port), _) => Some(port),
-        (None, true) => Some(23151),
-        (None, false) => None, // UDS mode
-    };
+    let effective_port = main_listener_port(port, tls);
 
     if let Some(port) = effective_port {
         if health_check && health_check_port == port {
@@ -1152,9 +1219,10 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     // VPL-434 (C1): refuse to start with an unauthenticated agent, worker or
     // registry (archive/artifact) service rather than defaulting into one.
-    // See `resolve_required_issuer` for why this returns the validated
-    // issuer itself rather than a bare refusal bool.
-    let required_issuer = resolve_required_issuer(startup_services, args.issuer.clone())?;
+    // The mode is resolved from `effective_port`, the same value the bind
+    // below uses, so an issuer-less start can only serve the unix socket.
+    let service_auth_mode =
+        resolve_service_auth(startup_services, args.issuer.clone(), effective_port)?;
 
     // An omitted `--registry-allowed` resolves to this process's own
     // listening address, computed from the transport just decided above —
@@ -1249,7 +1317,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
     // Every service below reaches the router through `ServiceRegistrar`,
-    // which either wraps it in the OIDC interceptor or refuses unless its
+    // which either wraps it in the mode's interceptor or refuses unless its
     // gRPC name is in `EXEMPT_SERVICES` (VPL-713/C3). The health service is
     // the sole exemption today and takes the same `exempt` path any other
     // unwrapped registration would have to take.
@@ -1276,17 +1344,14 @@ pub async fn run(args: RunArgs) -> Result<()> {
         None => get_socket_path().display().to_string(),
     };
 
-    // `required_issuer` is `Some` here exactly when `has_agent`,
-    // `has_registry` or `has_worker` is true (`resolve_required_issuer`'s own
-    // contract) — a `match` on it, rather than an `Option::expect()`
-    // re-derived inside each `if has_registry`/`if has_worker` block below,
-    // means neither block can compile against a missing issuer in the first
-    // place, so there is nothing left here for
-    // VPL-434-CORRECTNESS-3/VPL434-ARCH-2 to flag. Registering the agent
-    // inside this arm is what leaves no branch in which the agent reaches the
-    // router without an interceptor; `ServiceRegistrar::intercepted` is what
-    // makes that true of the registration itself rather than of this `if`.
-    if let Some(issuer) = required_issuer {
+    // `service_auth_mode` is `Some` here exactly when `has_agent`,
+    // `has_registry` or `has_worker` is true (`resolve_service_auth`'s own
+    // contract). Registering every one of them inside this arm, behind the
+    // one interceptor the mode selects, is what leaves no branch in which a
+    // service reaches the router without one; `ServiceRegistrar::authenticated`
+    // is what makes that true of the registration itself rather than of this
+    // `if`.
+    if let Some(mode) = &service_auth_mode {
         // One interceptor for every wrapped service, constructed once
         // (VPL-713/C3-f). Three separate `new_validator_interceptor` calls
         // stood up three independent `OidcValidator`s — three startup
@@ -1295,33 +1360,49 @@ pub async fn run(args: RunArgs) -> Result<()> {
         // from each other so that one client ID classified as
         // `TrustedService` on the worker and `Human` on the registry.
         // Sharing one value makes that divergence unrepresentable.
-        let validator_intercepter = new_validator_interceptor(
-            &issuer,
-            args.issuer_audience.as_deref(),
-            &args.issuer_service_client_ids,
-        )
-        .await?;
+        let service_auth = match mode {
+            ServiceAuthMode::Oidc { issuer } => ServiceAuth::Oidc(
+                new_validator_interceptor(
+                    issuer,
+                    args.issuer_audience.as_deref(),
+                    &args.issuer_service_client_ids,
+                )
+                .await?,
+            ),
+            ServiceAuthMode::LocalPeer => {
+                let interceptor = auth::LocalPeerInterceptor::new().map_err(|err| {
+                    anyhow!(
+                        "failed to resolve this process's uid for unix socket peer checks: {err}"
+                    )
+                })?;
+
+                info!(
+                    "no --issuer: agent, registry and worker services admit only peers on {} \
+                     whose kernel-reported uid is {} (this process's uid)",
+                    transport_label,
+                    interceptor.service_uid()
+                );
+
+                ServiceAuth::LocalPeer(interceptor)
+            }
+        };
 
         if has_agent {
-            registrar = registrar.intercepted(
+            registrar = registrar.authenticated(
                 AgentServiceServer::new(AgentServer::new(
                     registry_allowed.clone(),
                     workspace_root.clone(),
                 )),
-                validator_intercepter.clone(),
+                service_auth.clone(),
             );
 
             info!("agent |> service: {}", transport_label);
         }
 
         if has_registry {
-            registrar = add_registry_services(
-                registrar,
-                &args,
-                validator_intercepter.clone(),
-                &transport_label,
-            )
-            .await?;
+            registrar =
+                add_registry_services(registrar, &args, service_auth.clone(), &transport_label)
+                    .await?;
         }
 
         if has_worker {
@@ -1330,8 +1411,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
             registrar = add_worker_service(
                 registrar,
                 &args,
-                &issuer,
-                validator_intercepter.clone(),
+                mode.issuer(),
+                service_auth.clone(),
                 registry_allowed.clone(),
             );
 
@@ -1346,7 +1427,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // (or removed from `run` and left in it) refuses to start rather than
     // shipping a mechanism whose own green test describes a router that no
     // longer exists.
-    let planned = planned_registrations(startup_services);
+    let planned = planned_registrations(startup_services, service_auth_mode.as_ref());
 
     if registrar.ledger() != planned.as_slice() {
         bail!(
@@ -1440,36 +1521,59 @@ mod anonymous_start_refused_tests {
         }
     }
 
-    // AC-1/AC-2 (VPL-434): a worker or registry (archive/artifact) service
-    // with no issuer must be refused, whether reachable over UDS or TCP —
-    // the predicate takes no transport argument because the decision is
-    // about credential absence, not reach.
+    const TCP: Option<u16> = Some(23151);
+    const UNIX_SOCKET: Option<u16> = None;
+
+    // AC-1/AC-2 (VPL-434): a worker, registry (archive/artifact) or agent
+    // service with no issuer on a TCP or TLS listener must be refused: no
+    // peer identity exists there.
     #[test]
-    fn anonymous_start_refused_for_worker_with_no_issuer() {
-        assert!(anonymous_start_refused(services(true, false, false), None));
+    fn anonymous_start_refused_for_worker_with_no_issuer_on_tcp() {
+        assert!(anonymous_start_refused(
+            services(true, false, false),
+            None,
+            TCP
+        ));
     }
 
     #[test]
-    fn anonymous_start_refused_for_registry_with_no_issuer() {
-        assert!(anonymous_start_refused(services(false, true, false), None));
+    fn anonymous_start_refused_for_registry_with_no_issuer_on_tcp() {
+        assert!(anonymous_start_refused(
+            services(false, true, false),
+            None,
+            TCP
+        ));
+    }
+
+    #[test]
+    fn anonymous_start_refused_for_agent_with_no_issuer_on_tcp() {
+        assert!(anonymous_start_refused(
+            services(false, false, true),
+            None,
+            TCP
+        ));
+    }
+
+    // On the unix socket every caller carries a kernel-reported uid, so an
+    // issuer-less start is not anonymous and is not refused.
+    #[test]
+    fn anonymous_start_not_refused_with_no_issuer_on_the_unix_socket() {
+        assert!(!anonymous_start_refused(
+            services(true, true, true),
+            None,
+            UNIX_SOCKET
+        ));
     }
 
     #[test]
     fn anonymous_start_not_refused_when_an_issuer_is_configured() {
-        assert!(!anonymous_start_refused(
-            services(true, true, true),
-            Some("https://issuer.example.com")
-        ));
-    }
-
-    // An agent with no issuer used to be permitted, which registered the
-    // agent service with no interceptor at all: an anonymous peer could have
-    // it read local files and push them to the registry under this user's
-    // stored credentials. The agent now joins worker and registry in the
-    // refusal.
-    #[test]
-    fn anonymous_start_refused_for_agent_with_no_issuer() {
-        assert!(anonymous_start_refused(services(false, false, true), None));
+        for main_port in [TCP, UNIX_SOCKET] {
+            assert!(!anonymous_start_refused(
+                services(true, true, true),
+                Some("https://issuer.example.com"),
+                main_port
+            ));
+        }
     }
 
     // A process running none of the three has no surface for this predicate
@@ -1478,8 +1582,20 @@ mod anonymous_start_refused_tests {
     fn anonymous_start_not_refused_for_a_process_running_none_of_them() {
         assert!(!anonymous_start_refused(
             services(false, false, false),
-            None
+            None,
+            TCP
         ));
+    }
+
+    // `--tls` with no `--port` binds TCP 23151, so it is refused like an
+    // explicit port; the startup log's wrapper reads the same transport.
+    #[test]
+    fn issuerless_start_refused_for_tls_without_a_port() {
+        let services = vec!["worker".to_string()];
+
+        assert!(issuerless_start_refused(&services, None, true));
+        assert!(issuerless_start_refused(&services, Some(4000), false));
+        assert!(!issuerless_start_refused(&services, None, false));
     }
 }
 
@@ -1497,31 +1613,67 @@ mod resolve_required_issuer_tests {
         }
     }
 
-    #[test]
-    fn agent_only_with_an_issuer_resolves_that_issuer() {
-        let resolved = resolve_required_issuer(services(false, false, true), Some(ISSUER.into()));
-        assert_eq!(resolved.ok(), Some(Some(ISSUER.to_string())));
+    const TCP: Option<u16> = Some(23151);
+    const UNIX_SOCKET: Option<u16> = None;
+
+    fn oidc() -> ServiceAuthMode {
+        ServiceAuthMode::Oidc {
+            issuer: ISSUER.to_string(),
+        }
     }
 
     #[test]
-    fn none_of_the_services_with_an_issuer_resolves_no_issuer() {
-        let resolved = resolve_required_issuer(services(false, false, false), Some(ISSUER.into()));
+    fn agent_only_with_an_issuer_resolves_oidc_on_either_transport() {
+        for main_port in [TCP, UNIX_SOCKET] {
+            let resolved =
+                resolve_service_auth(services(false, false, true), Some(ISSUER.into()), main_port);
+            assert_eq!(resolved.ok(), Some(Some(oidc())));
+        }
+    }
+
+    #[test]
+    fn none_of_the_services_with_an_issuer_resolves_no_mode() {
+        let resolved =
+            resolve_service_auth(services(false, false, false), Some(ISSUER.into()), TCP);
         assert_eq!(resolved.ok(), Some(None));
     }
 
+    // AC (derived): the full service set with no issuer, port or TLS starts
+    // in local-peer mode.
     #[test]
-    fn agent_only_without_an_issuer_errors() {
-        assert!(resolve_required_issuer(services(false, false, true), None).is_err());
+    fn every_service_without_an_issuer_on_the_unix_socket_resolves_local_peer() {
+        let resolved = resolve_service_auth(services(true, true, true), None, UNIX_SOCKET);
+        assert_eq!(resolved.ok(), Some(Some(ServiceAuthMode::LocalPeer)));
     }
 
     #[test]
-    fn worker_only_without_an_issuer_errors() {
-        assert!(resolve_required_issuer(services(true, false, false), None).is_err());
+    fn agent_only_without_an_issuer_on_tcp_errors() {
+        assert!(resolve_service_auth(services(false, false, true), None, TCP).is_err());
     }
 
     #[test]
-    fn registry_only_without_an_issuer_errors() {
-        assert!(resolve_required_issuer(services(false, true, false), None).is_err());
+    fn worker_only_without_an_issuer_on_tcp_errors() {
+        assert!(resolve_service_auth(services(true, false, false), None, TCP).is_err());
+    }
+
+    #[test]
+    fn registry_only_without_an_issuer_on_tcp_errors() {
+        assert!(resolve_service_auth(services(false, true, false), None, TCP).is_err());
+    }
+
+    #[test]
+    fn the_tcp_refusal_names_the_issuer_flag() {
+        let resolved = resolve_service_auth(services(true, true, true), None, TCP);
+        assert!(
+            matches!(&resolved, Err(err) if err.to_string().contains("--issuer")),
+            "refusal does not name --issuer: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn local_peer_mode_supplies_no_issuer_to_the_worker() {
+        assert_eq!(ServiceAuthMode::LocalPeer.issuer(), None);
+        assert_eq!(oidc().issuer(), Some(ISSUER));
     }
 }
 
@@ -1562,13 +1714,28 @@ mod run_startup_refusal_tests {
         }
     }
 
-    // A worker service with no issuer must return `Err` from `run` without
-    // ever reaching a bind — the assertion is on `run`'s own return value,
-    // not on the predicate it delegates to, so a mutation that removes the
-    // call site (not just the predicate) fails this test.
+    // A `run` that failed to refuse would bind and serve until a signal, so
+    // the refusal tests bound their wait: a missing refusal fails the test
+    // instead of hanging the suite.
+    async fn run_until_refused(args: RunArgs) -> anyhow::Error {
+        tokio::time::timeout(std::time::Duration::from_secs(10), run(args))
+            .await
+            .unwrap()
+            .unwrap_err()
+    }
+
+    // An agent service with no issuer on a TCP port must return `Err` from
+    // `run` without ever reaching a bind — the assertion is on `run`'s own
+    // return value, not on the predicate it delegates to, so a mutation that
+    // removes the call site (not just the predicate) fails this test.
     #[tokio::test]
-    async fn run_refuses_a_worker_service_with_no_issuer() {
-        let err = run(single_service_args("worker", None)).await.unwrap_err();
+    async fn run_refuses_an_agent_service_with_no_issuer_on_a_tcp_port() {
+        let args = RunArgs {
+            port: Some(23199),
+            ..single_service_args("agent", None)
+        };
+
+        let err = run_until_refused(args).await;
 
         assert!(
             err.to_string().contains("require --issuer"),
@@ -1576,17 +1743,39 @@ mod run_startup_refusal_tests {
         );
     }
 
-    // The default `--services agent` install is the deployment this refusal
-    // is about: without it the agent registers with no interceptor to
-    // install, so driving `run` itself — not just the predicate — is what
-    // pins that a bare agent never binds a listener.
+    // `--tls` alone binds TCP 23151, so it must be refused too — and before
+    // `new_tls_config` reads any key, which is what would fail first if the
+    // refusal read `--port` instead of the listener `run` binds.
     #[tokio::test]
-    async fn run_refuses_an_agent_service_with_no_issuer() {
-        let err = run(single_service_args("agent", None)).await.unwrap_err();
+    async fn run_refuses_an_agent_service_with_no_issuer_under_tls_without_a_port() {
+        let args = RunArgs {
+            tls: true,
+            ..single_service_args("agent", None)
+        };
+
+        let err = run_until_refused(args).await;
 
         assert!(
             err.to_string().contains("require --issuer"),
             "unexpected error: {err}"
+        );
+    }
+
+    // On the unix socket an issuer-less start proceeds past the refusal to
+    // registration. The unknown registry backend stops it there, before any
+    // listener binds, which proves the auth decision admitted the start.
+    #[tokio::test]
+    async fn run_starts_registering_services_with_no_issuer_on_the_unix_socket() {
+        let args = RunArgs {
+            registry_backend: "not-a-backend".to_string(),
+            ..single_service_args("registry", None)
+        };
+
+        let err = run(args).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("unknown registry backend"),
+            "run did not reach registration: {err}"
         );
     }
 }
@@ -1817,33 +2006,46 @@ mod registration_enumeration_tests {
         planned.iter().map(|(name, _)| *name).collect()
     }
 
-    // AC-2: every subset of the three configurable services. No entry may be
-    // unwrapped unless the exemption list names it.
+    fn oidc() -> ServiceAuthMode {
+        ServiceAuthMode::Oidc {
+            issuer: "https://issuer.example.com".to_string(),
+        }
+    }
+
+    // AC-2: every subset of the three configurable services, in both
+    // authentication modes. No entry may be unwrapped unless the exemption
+    // list names it.
     #[test]
     fn every_registration_is_intercepted_or_exempt() {
-        for has_worker in [false, true] {
-            for has_registry in [false, true] {
-                for has_agent in [false, true] {
-                    let planned =
-                        planned_registrations(services(has_worker, has_registry, has_agent));
+        for mode in [oidc(), ServiceAuthMode::LocalPeer] {
+            for has_worker in [false, true] {
+                for has_registry in [false, true] {
+                    for has_agent in [false, true] {
+                        let planned = planned_registrations(
+                            services(has_worker, has_registry, has_agent),
+                            Some(&mode),
+                        );
 
-                    assert!(
-                        registrations_are_intercepted_or_exempt(&planned),
-                        "unwrapped registration outside the exemption list for \
-                         worker={has_worker} registry={has_registry} agent={has_agent}: \
-                         {planned:?}"
-                    );
+                        assert!(
+                            registrations_are_intercepted_or_exempt(&planned),
+                            "unwrapped registration outside the exemption list for \
+                             {mode:?} worker={has_worker} registry={has_registry} \
+                             agent={has_agent}: {planned:?}"
+                        );
+                    }
                 }
             }
         }
     }
 
-    // The default `--services agent,registry,worker` install: four services
-    // wrapped, health exempt. Pinning the names, not just the count, is what
-    // catches a registration silently swapped for a different service.
+    // The default `--services agent,registry,worker` install with an issuer:
+    // four services behind the OIDC interceptor, health exempt. Pinning the
+    // names, not just the count, is what catches a registration silently
+    // swapped for a different service; pinning the disposition is what
+    // catches one planned for the local-peer interceptor under an issuer.
     #[test]
     fn a_full_service_set_registers_four_intercepted_services_and_the_exempt_health_service() {
-        let planned = planned_registrations(services(true, true, true));
+        let planned = planned_registrations(services(true, true, true), Some(&oidc()));
 
         assert_eq!(
             planned,
@@ -1857,11 +2059,50 @@ mod registration_enumeration_tests {
         );
     }
 
+    // The same install with no issuer on the unix socket: every service
+    // behind the peer-uid interceptor, none behind OIDC, health exempt.
+    #[test]
+    fn a_full_service_set_in_local_peer_mode_registers_four_local_peer_services() {
+        let planned = planned_registrations(
+            services(true, true, true),
+            Some(&ServiceAuthMode::LocalPeer),
+        );
+
+        assert_eq!(
+            planned,
+            vec![
+                ("grpc.health.v1.Health", Disposition::Exempt),
+                ("vorpal.agent.AgentService", Disposition::LocalPeer),
+                ("vorpal.archive.ArchiveService", Disposition::LocalPeer),
+                ("vorpal.artifact.ArtifactService", Disposition::LocalPeer),
+                ("vorpal.worker.WorkerService", Disposition::LocalPeer),
+            ]
+        );
+    }
+
+    // The ledger side of the plan-vs-ledger comparison: the disposition the
+    // registrar records follows from the interceptor it was handed.
+    #[tokio::test]
+    async fn the_registrar_records_a_local_peer_registration_as_local_peer() {
+        let interceptor = auth::LocalPeerInterceptor::new()
+            .expect("this process's uid resolves from its own socket pair");
+
+        let registrar = ServiceRegistrar::new(Server::builder()).authenticated(
+            AgentServiceServer::new(AgentServer::new(vec![], PathBuf::from("/"))),
+            ServiceAuth::LocalPeer(interceptor),
+        );
+
+        assert_eq!(
+            registrar.ledger(),
+            [("vorpal.agent.AgentService", Disposition::LocalPeer)]
+        );
+    }
+
     // A process running none of the three still serves health, and health is
     // still the only thing it serves unwrapped.
     #[test]
     fn a_process_with_no_configured_services_registers_only_the_exempt_health_service() {
-        let planned = planned_registrations(services(false, false, false));
+        let planned = planned_registrations(services(false, false, false), None);
 
         assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
         assert!(registrations_are_intercepted_or_exempt(&planned));
@@ -1970,7 +2211,10 @@ mod registration_enumeration_tests {
             worker_jobs: 1,
         };
 
-        let planned = planned_registrations(StartupServices::from_run_args(&args));
+        let startup_services = StartupServices::from_run_args(&args);
+        let mode = resolve_service_auth(startup_services, args.issuer.clone(), args.port)
+            .expect("an issuer-configured start is never refused");
+        let planned = planned_registrations(startup_services, mode.as_ref());
 
         assert_eq!(
             names(&planned),
@@ -2009,7 +2253,10 @@ mod registration_enumeration_tests {
             worker_jobs: 1,
         };
 
-        let planned = planned_registrations(StartupServices::from_run_args(&args));
+        let startup_services = StartupServices::from_run_args(&args);
+        let mode = resolve_service_auth(startup_services, args.issuer.clone(), args.port)
+            .expect("a start with nothing to authenticate is never refused");
+        let planned = planned_registrations(startup_services, mode.as_ref());
 
         assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
     }

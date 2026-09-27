@@ -5,12 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, RwLock};
 use tonic::{
     metadata::{Ascii, MetadataValue},
+    service::Interceptor,
+    transport::server::UdsConnectInfo,
     Request, Status,
 };
 use tracing::error;
@@ -149,10 +151,19 @@ pub struct Claims {
 /// Classification of the calling principal, stashed in request extensions
 /// alongside `Claims` by the auth interceptor so downstream handlers can
 /// distinguish human-user tokens from trusted service-user tokens.
+/// `LocalPeer` is inserted instead, with no `Claims`, by
+/// [`LocalPeerInterceptor`] when the services run without an OIDC issuer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrincipalKind {
     Human,
-    TrustedService { azp: String },
+    TrustedService {
+        azp: String,
+    },
+    /// A unix-socket caller identified by the uid the kernel reports for the
+    /// connection.
+    LocalPeer {
+        uid: u32,
+    },
 }
 
 impl Claims {
@@ -490,10 +501,21 @@ fn classify_principal(azp: Option<&str>, trusted_service_client_ids: &[String]) 
     }
 }
 
-pub fn new_interceptor(
+/// Validates the bearer token on every request against the configured OIDC
+/// issuer and stashes its `Claims` and classified `PrincipalKind`. A named
+/// type rather than a closure so the registrar can accept exactly this
+/// interceptor, and no other, for its OIDC disposition.
+#[derive(Clone)]
+pub struct OidcInterceptor {
     validator: Arc<OidcValidator>,
-) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
-    move |mut req: Request<()>| {
+}
+
+pub fn new_interceptor(validator: Arc<OidcValidator>) -> OidcInterceptor {
+    OidcInterceptor { validator }
+}
+
+impl Interceptor for OidcInterceptor {
+    fn call(&mut self, mut req: Request<()>) -> Result<Request<()>, Status> {
         // Read "authorization" metadata (lowercase in gRPC/HTTP2)
         let auth = req
             .metadata()
@@ -504,24 +526,97 @@ pub fn new_interceptor(
 
         // We need async validation; Interceptor is sync. Workaround: block_in_place.
         // For high-throughput, prefer a tower layer that supports async, but this is simple & fine.
-        // Clone once into `validator_for_validate` for the async move; the outer
-        // `validator` Arc (captured by the `Fn` closure) remains usable afterward
-        // via shared borrow for `trusted_service_client_ids` access — no second
-        // clone needed.
-        let validator_for_validate = Arc::clone(&validator);
+        let validator_for_validate = Arc::clone(&self.validator);
         let claims = tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current()
                 .block_on(async move { validator_for_validate.validate(&auth).await })
         })
         .map_err(|e| Status::unauthenticated(format!("token invalid: {e}")))?;
 
-        let principal =
-            classify_principal(claims.azp.as_deref(), &validator.trusted_service_client_ids);
+        let principal = classify_principal(
+            claims.azp.as_deref(),
+            &self.validator.trusted_service_client_ids,
+        );
 
         // Stash claims + classified principal for handlers
         req.extensions_mut().insert(claims);
         req.extensions_mut().insert(principal);
         Ok(req)
+    }
+}
+
+/// The effective uid this process serves as, once resolved by
+/// [`resolve_service_uid`]. `require_namespace_or_service_trust` compares a
+/// `LocalPeer` principal against it and refuses while it is unset.
+static SERVICE_UID: OnceLock<u32> = OnceLock::new();
+
+/// Resolves and records this process's effective uid.
+///
+/// `unsafe_code` is forbidden workspace-wide and no libc binding is a
+/// dependency, so the uid is read as the kernel-reported peer credential of a
+/// socket pair whose both ends this process holds: the same `getpeereid`/
+/// `SO_PEERCRED` source the local-peer check reads for callers. Must run
+/// inside a tokio runtime.
+pub fn resolve_service_uid() -> std::io::Result<u32> {
+    if let Some(uid) = SERVICE_UID.get() {
+        return Ok(*uid);
+    }
+
+    let (local, _remote) = tokio::net::UnixStream::pair()?;
+    let uid = local.peer_cred()?.uid();
+
+    Ok(*SERVICE_UID.get_or_init(|| uid))
+}
+
+/// Identifies unix-socket callers when the services start without an OIDC
+/// issuer. Every request must arrive on a connection whose kernel-reported
+/// peer uid equals the uid this process runs as; the request then carries
+/// `PrincipalKind::LocalPeer { uid }`. A missing peer credential (including
+/// any non-unix connection) or a different uid is refused before a handler
+/// runs, so ungated handlers get the same boundary as gated ones.
+#[derive(Clone, Copy, Debug)]
+pub struct LocalPeerInterceptor {
+    service_uid: u32,
+}
+
+impl LocalPeerInterceptor {
+    pub fn new() -> std::io::Result<Self> {
+        Ok(Self {
+            service_uid: resolve_service_uid()?,
+        })
+    }
+
+    pub fn service_uid(self) -> u32 {
+        self.service_uid
+    }
+}
+
+impl Interceptor for LocalPeerInterceptor {
+    fn call(&mut self, mut req: Request<()>) -> Result<Request<()>, Status> {
+        let peer_uid = req
+            .extensions()
+            .get::<UdsConnectInfo>()
+            .and_then(|info| info.peer_cred)
+            .map(|cred| cred.uid());
+
+        let principal = local_peer_principal(peer_uid, self.service_uid)?;
+
+        req.extensions_mut().insert(principal);
+        Ok(req)
+    }
+}
+
+/// The local-peer admission rule: a peer uid equal to `service_uid` is a
+/// `LocalPeer`; anything else fails closed.
+fn local_peer_principal(peer_uid: Option<u32>, service_uid: u32) -> Result<PrincipalKind, Status> {
+    match peer_uid {
+        None => Err(Status::unauthenticated(
+            "no peer credential on this connection",
+        )),
+        Some(uid) if uid == service_uid => Ok(PrincipalKind::LocalPeer { uid }),
+        Some(uid) => Err(Status::permission_denied(format!(
+            "local uid={uid} is not the uid this service runs as"
+        ))),
     }
 }
 
@@ -729,7 +824,8 @@ pub fn require_namespace_permission<T>(
 
 /// Authorization gate that splits on principal kind: trusted service tokens
 /// bypass namespace RBAC entirely; human tokens delegate to
-/// [`require_namespace_permission`], preserving today's behavior. The
+/// [`require_namespace_permission`], preserving today's behavior; a local
+/// peer passes only when its uid is the uid this process runs as. The
 /// interceptor must have classified the principal into `PrincipalKind` in
 /// request extensions before this runs; missing classification is treated as
 /// `UNAUTHENTICATED` rather than silently falling back.
@@ -746,6 +842,15 @@ pub fn require_namespace_or_service_trust<T>(
     match principal {
         PrincipalKind::TrustedService { .. } => Ok(()),
         PrincipalKind::Human => require_namespace_permission(request, namespace, permission),
+        PrincipalKind::LocalPeer { uid } => {
+            let service_uid = SERVICE_UID.get().ok_or_else(|| {
+                Status::permission_denied(format!(
+                    "local uid={uid} refused: this service's uid was never resolved"
+                ))
+            })?;
+
+            local_peer_principal(Some(*uid), *service_uid).map(|_| ())
+        }
     }
 }
 
@@ -946,6 +1051,133 @@ mod tests {
         };
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
         Ok(())
+    }
+
+    // ===== Local peer identity (services started without an issuer) =====
+
+    fn local_peer_request(uid: u32) -> Request<()> {
+        let mut req = Request::new(());
+        req.extensions_mut()
+            .insert(PrincipalKind::LocalPeer { uid });
+        req
+    }
+
+    #[tokio::test]
+    async fn require_namespace_or_service_trust_admits_a_local_peer_with_the_service_uid() {
+        let service_uid = resolve_service_uid().unwrap();
+
+        let result =
+            require_namespace_or_service_trust(&local_peer_request(service_uid), "any", "write");
+
+        assert!(result.is_ok(), "same-uid local peer refused: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn require_namespace_or_service_trust_refuses_a_local_peer_with_another_uid() {
+        let other_uid = resolve_service_uid().unwrap().wrapping_add(1);
+
+        let err =
+            require_namespace_or_service_trust(&local_peer_request(other_uid), "any", "write")
+                .expect_err("a local peer with a different uid must be refused");
+
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+        assert!(
+            err.message().contains(&format!("local uid={other_uid}")),
+            "refusal does not name the uid: {}",
+            err.message()
+        );
+    }
+
+    // A real socket pair gives the interceptor the same `UdsConnectInfo`
+    // tonic attaches to a unix-socket request, peer credential included.
+    fn request_from_own_socket_pair(stream: &tokio::net::UnixStream) -> Request<()> {
+        use tonic::transport::server::Connected;
+
+        let mut req = Request::new(());
+        req.extensions_mut().insert(stream.connect_info());
+        req
+    }
+
+    #[tokio::test]
+    async fn local_peer_interceptor_admits_a_same_uid_peer_as_a_local_peer_principal() {
+        let (ours, _theirs) = tokio::net::UnixStream::pair().unwrap();
+        let mut interceptor = LocalPeerInterceptor::new().unwrap();
+
+        let req = interceptor
+            .call(request_from_own_socket_pair(&ours))
+            .expect("a peer running as this process's uid must be admitted");
+
+        assert_eq!(
+            req.extensions().get::<PrincipalKind>(),
+            Some(&PrincipalKind::LocalPeer {
+                uid: interceptor.service_uid()
+            })
+        );
+        assert!(
+            req.extensions().get::<Claims>().is_none(),
+            "a local peer carries no token claims"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_peer_interceptor_refuses_a_peer_with_another_uid() {
+        let (ours, _theirs) = tokio::net::UnixStream::pair().unwrap();
+        let mut interceptor = LocalPeerInterceptor {
+            service_uid: resolve_service_uid().unwrap().wrapping_add(1),
+        };
+
+        let status = interceptor
+            .call(request_from_own_socket_pair(&ours))
+            .expect_err("a peer whose uid differs from the service uid must be refused");
+
+        assert_eq!(status.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn local_peer_interceptor_refuses_a_connection_without_a_peer_credential() {
+        let mut interceptor = LocalPeerInterceptor::new().unwrap();
+        let mut req = Request::new(());
+        req.extensions_mut().insert(UdsConnectInfo {
+            peer_addr: None,
+            peer_cred: None,
+        });
+
+        let status = interceptor
+            .call(req)
+            .expect_err("a connection with no readable peer credential must be refused");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+    }
+
+    // A TCP request carries no `UdsConnectInfo` at all.
+    #[tokio::test]
+    async fn local_peer_interceptor_refuses_a_request_with_no_unix_connection_info() {
+        let mut interceptor = LocalPeerInterceptor::new().unwrap();
+
+        let status = interceptor
+            .call(Request::new(()))
+            .expect_err("a request from outside a unix socket must be refused");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+    }
+
+    // The interceptor must insert the principal whether or not the caller
+    // sent a bearer token: identity here is the peer uid, never the header.
+    #[tokio::test]
+    async fn local_peer_interceptor_ignores_an_authorization_header() {
+        let (ours, _theirs) = tokio::net::UnixStream::pair().unwrap();
+        let mut interceptor = LocalPeerInterceptor::new().unwrap();
+        let mut req = request_from_own_socket_pair(&ours);
+        req.metadata_mut()
+            .insert("authorization", "Bearer not-a-real-token".parse().unwrap());
+
+        let req = interceptor.call(req).unwrap();
+
+        assert!(req.extensions().get::<Claims>().is_none());
+        assert!(matches!(
+            req.extensions().get::<PrincipalKind>(),
+            Some(PrincipalKind::LocalPeer { .. })
+        ));
     }
 
     // ===== End-to-end gate composition: classify + gate (DKT-67 scenarios) =====
@@ -1632,8 +1864,7 @@ mod tests {
     /// Build a validator against a loopback `IdP` serving an empty JWKS: enough
     /// for the interceptor to be constructed, and enough that any presented
     /// token fails verification rather than being accepted.
-    async fn interceptor_over_empty_jwks_idp(
-    ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
+    async fn interceptor_over_empty_jwks_idp() -> OidcInterceptor {
         let idp = IdpServer::start(|path, addr| {
             let issuer = format!("http://127.0.0.1:{}", addr.port());
 
@@ -1660,9 +1891,10 @@ mod tests {
     // `InterceptedService` never calls the inner service.
     #[tokio::test(flavor = "multi_thread")]
     async fn interceptor_denies_a_request_with_no_authorization_metadata() {
-        let interceptor = interceptor_over_empty_jwks_idp().await;
+        let mut interceptor = interceptor_over_empty_jwks_idp().await;
 
-        let status = interceptor(Request::new(()))
+        let status = interceptor
+            .call(Request::new(()))
             .expect_err("a request with no authorization metadata must be refused");
 
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
@@ -1675,7 +1907,7 @@ mod tests {
     // there instead, with a different message.
     #[tokio::test(flavor = "multi_thread")]
     async fn interceptor_rejects_a_presented_token_at_validation_not_at_the_metadata_gate() {
-        let interceptor = interceptor_over_empty_jwks_idp().await;
+        let mut interceptor = interceptor_over_empty_jwks_idp().await;
 
         let mut request = Request::new(());
         request.metadata_mut().insert(
@@ -1683,8 +1915,9 @@ mod tests {
             "Bearer not-a-real-token".parse().expect("header value"),
         );
 
-        let status =
-            interceptor(request).expect_err("a token that does not verify must be refused");
+        let status = interceptor
+            .call(request)
+            .expect_err("a token that does not verify must be refused");
 
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
         assert!(

@@ -196,7 +196,7 @@ pub enum CommandSystemServices {
         /// (`script/install.sh`) can supply it without a flag. Validated at
         /// parse time by `parse_issuer` so a value on either channel that is
         /// empty or not a well-formed issuer never reaches
-        /// `resolve_required_issuer` disguised as "present".
+        /// `resolve_service_auth` disguised as "present".
         #[arg(
             env = "VORPAL_ISSUER",
             id = ISSUER_ARG_ID,
@@ -1314,7 +1314,7 @@ fn login_record(issuer: &NormalizedIssuer, registry: &str, grant: LoginGrant) ->
 /// identically whether the value arrives via `--issuer` or the
 /// `VORPAL_ISSUER` environment variable, so an empty env value — which clap
 /// treats as present, not absent — is rejected here rather than reaching
-/// `resolve_required_issuer` as a false "issuer configured". The scheme/host
+/// `resolve_service_auth` as a false "issuer configured". The scheme/host
 /// error text names this command's own trust anchor rather than
 /// `credential_egress_origin`'s "refresh token" wording, because
 /// `system services start` never sends a refresh token.
@@ -2009,13 +2009,19 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                         "OIDC trust anchor: {value} (from {})",
                         value_source_label(services_start_value_source(matches, ISSUER_ARG_ID))
                     ),
-                    // Only a start that includes a service `start::run`
-                    // refuses without an anchor is told it will refuse; a
-                    // warning about a refusal that will not happen trains an
-                    // operator to ignore the line that matters.
-                    None if start::requires_issuer(&services) => tracing::info!(
+                    // Only a start `start::run` refuses without an anchor is
+                    // told it will refuse; a warning about a refusal that
+                    // will not happen trains an operator to ignore the line
+                    // that matters.
+                    None if start::issuerless_start_refused(&services, port, tls) => {
+                        tracing::info!(
+                            "no OIDC trust anchor configured; worker, registry, and agent \
+                             services will refuse to start on a TCP or TLS listener"
+                        );
+                    }
+                    None if start::requires_authentication(&services) => tracing::info!(
                         "no OIDC trust anchor configured; worker, registry, and agent \
-                         services will refuse to start"
+                         services admit only unix socket peers running as this process's uid"
                     ),
                     None => tracing::info!("no OIDC trust anchor configured"),
                 }
@@ -3359,7 +3365,7 @@ mod login_egress_tests {
         );
 
         // AB2: clap treats a set-but-empty variable as a supplied value, so
-        // without the value parser this one reached `resolve_required_issuer`
+        // without the value parser this one reached `resolve_service_auth`
         // as a false "issuer configured".
         assert!(
             empty.is_err(),
@@ -3490,21 +3496,31 @@ mod login_egress_tests {
 
     #[test]
     fn only_an_issuer_requiring_start_is_told_a_missing_anchor_refuses() {
-        // The log arm and `start::run`'s refusal both decide through
-        // `start::requires_issuer`, over the list split as `RunArgs` splits it.
-        let requires_issuer = |services: &str| {
-            let services: Vec<String> = services
+        // The log arms and `start::run`'s decision read the same predicates,
+        // over the list split as `RunArgs` splits it.
+        let split = |services: &str| -> Vec<String> {
+            services
                 .split(',')
                 .map(std::string::ToString::to_string)
-                .collect();
-            start::requires_issuer(&services)
+                .collect()
         };
+        let requires_authentication =
+            |services: &str| start::requires_authentication(&split(services));
+        let refused_on_tcp =
+            |services: &str| start::issuerless_start_refused(&split(services), Some(23151), false);
+        let refused_on_unix_socket =
+            |services: &str| start::issuerless_start_refused(&split(services), None, false);
 
-        assert!(requires_issuer("worker"));
-        assert!(requires_issuer("agent"));
-        assert!(requires_issuer("agent,registry"));
-        assert!(!requires_issuer("other"));
-        assert!(!requires_issuer(" worker"));
+        assert!(requires_authentication("worker"));
+        assert!(requires_authentication("agent"));
+        assert!(requires_authentication("agent,registry"));
+        assert!(!requires_authentication("other"));
+        assert!(!requires_authentication(" worker"));
+
+        assert!(refused_on_tcp("worker"));
+        assert!(refused_on_tcp("agent,registry"));
+        assert!(!refused_on_tcp("other"));
+        assert!(!refused_on_unix_socket("agent,registry,worker"));
     }
 
     // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------
