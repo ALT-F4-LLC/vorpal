@@ -178,10 +178,15 @@ fn parse_source_file(source: &str) -> Result<Vec<ParsedSourceFn>, Box<dyn std::e
             // Analyze the function body to extract name and path
             let body_str = quote::quote!(#func).to_string();
 
-            // Detect if this function has version.replace(".", "")
+            // Detect if this function strips dots from the version, spelled
+            // either `version.replace(".", "")` or `version.replace('.', "")`.
+            // `body_str` is a token stream, so the spacing differs from source.
             let has_version_replace = body_str.contains(r#"replace ("." , "")"#)
                 || body_str.contains(r#"replace(".", "")"#)
-                || body_str.contains("replace (\".\", \"\")");
+                || body_str.contains("replace (\".\", \"\")")
+                || body_str.contains(r#"replace ('.' , "")"#)
+                || body_str.contains(r#"replace('.', "")"#)
+                || body_str.contains("replace ('.', \"\")");
 
             // Extract the source name
             let (source_name, source_name_is_param) = extract_source_name(&body_str, &name);
