@@ -1899,7 +1899,7 @@ async fn publish_to_registry(
 enum OutputClaim {
     /// The lock file now exists and belongs to the caller.
     Locked,
-    /// The output is already at its path; no lock was taken.
+    /// The output is already at its path; the caller holds no lock.
     AlreadyBuilt,
 }
 
@@ -1932,11 +1932,13 @@ async fn claim_output(
         match acquire_output_lock(lock_path, artifact_json).await {
             // The holder may have published and released between the output
             // check above and taking the lock; the output then already exists
-            // and the lock just taken is not needed.
+            // and the lock just taken is not needed. A failed removal is logged,
+            // not returned: the output is built, and a later claim finds the
+            // output before it looks at the lock.
             Ok(()) if output_path.exists() => {
-                remove_file(lock_path).await.map_err(|err| {
-                    Status::internal(format!("failed to remove lock file: {err}"))
-                })?;
+                if let Err(err) = remove_file(lock_path).await {
+                    error!("worker |> failed to remove lock file: {:?}", err);
+                }
 
                 return Ok(OutputClaim::AlreadyBuilt);
             }
@@ -2571,7 +2573,7 @@ impl WorkerService for WorkerServer {
         tokio::spawn(async move {
             if let Err(err) = run_admitted(
                 build_permits,
-                build_artifact(
+                Box::pin(build_artifact(
                     &service_tokens,
                     issuer.as_deref(),
                     issuer_audience.as_deref(),
@@ -2580,7 +2582,7 @@ impl WorkerService for WorkerServer {
                     &registry_allowed,
                     request.into_inner(),
                     &tx,
-                ),
+                )),
             )
             .await
             {
@@ -3688,12 +3690,38 @@ mod tests {
         assert_eq!(output_lock_wait_from(Some("0")), Duration::ZERO);
     }
 
-    /// Holds the lock for one digest, starts a second claim concurrently, then
-    /// releases the lock the way the first build would: publishing its output
-    /// first when `first_build_published`, or removing the lock alone when it
-    /// failed.
+    #[test]
+    fn output_lock_wait_warns_only_about_an_invalid_override() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let events = RecordedEvents::default();
+        let subscriber = tracing_subscriber::Registry::default().with(events.clone());
+
+        tracing::subscriber::with_default(subscriber, || {
+            output_lock_wait_from(Some(" 30 "));
+            output_lock_wait_from(Some(""));
+            output_lock_wait_from(Some("soon"));
+            output_lock_wait_from(Some("-1"));
+        });
+
+        let warnings = events.messages_at(tracing::Level::WARN);
+
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        for (warning, invalid) in warnings.iter().zip(["\"\"", "\"soon\"", "\"-1\""]) {
+            assert!(
+                warning.contains(&format!("{OUTPUT_LOCK_WAIT_ENV}={invalid}")),
+                "{warning}"
+            );
+        }
+    }
+
+    /// Holds the lock for one digest, starts a second claim waiting up to
+    /// `wait` concurrently, then releases the lock the way the first build
+    /// would: publishing its output first when `first_build_published`, or
+    /// removing the lock alone when it failed.
     async fn claim_while_another_build_holds_the_lock(
         first_build_published: bool,
+        wait: Duration,
     ) -> (TempDir, PathBuf, Result<OutputClaim, Status>) {
         let root = TempDir::new().unwrap();
         let output_path = root.path().join("output").join("abc123");
@@ -3714,7 +3742,7 @@ mod tests {
                     &output_path,
                     &lock_path,
                     "held-by-the-second-build",
-                    Duration::from_secs(30),
+                    wait,
                     &tx,
                 )
                 .await
@@ -3724,11 +3752,13 @@ mod tests {
         tokio::time::sleep(OUTPUT_LOCK_POLL_INTERVAL * 2).await;
         assert!(!second.is_finished(), "the second claim did not wait");
 
-        let announced = rx.try_recv().expect("the waiting claim told the client");
-        assert!(
-            announced.unwrap().output.contains("abc123"),
-            "the wait message names the digest"
-        );
+        let announced = rx
+            .try_recv()
+            .expect("the waiting claim told the client")
+            .unwrap()
+            .output;
+        assert!(announced.contains("abc123"), "{announced}");
+        assert!(announced.contains(&format!("{wait:?}")), "{announced}");
         assert!(
             rx.try_recv().is_err(),
             "the wait was announced more than once"
@@ -3746,7 +3776,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_waiting_claim_finds_the_output_the_lock_holder_published() {
-        let (_root, lock_path, claim) = claim_while_another_build_holds_the_lock(true).await;
+        let (_root, lock_path, claim) =
+            claim_while_another_build_holds_the_lock(true, Duration::from_secs(30)).await;
 
         assert_eq!(claim.unwrap(), OutputClaim::AlreadyBuilt);
         assert!(!lock_path.exists(), "an already-built claim took a lock");
@@ -3754,7 +3785,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_waiting_claim_takes_the_lock_a_failed_holder_released() {
-        let (_root, lock_path, claim) = claim_while_another_build_holds_the_lock(false).await;
+        let (_root, lock_path, claim) =
+            claim_while_another_build_holds_the_lock(false, Duration::from_secs(30)).await;
 
         assert_eq!(claim.unwrap(), OutputClaim::Locked);
         assert_eq!(
@@ -3763,11 +3795,81 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_claim_with_no_reachable_deadline_waits_for_the_holder() {
+        let (_root, lock_path, claim) =
+            claim_while_another_build_holds_the_lock(false, Duration::from_secs(u64::MAX)).await;
+
+        assert_eq!(claim.unwrap(), OutputClaim::Locked);
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-second-build"
+        );
+    }
+
+    // The output can appear between the claim's output check and its taking
+    // the lock. Placing the output where `acquire_output_lock` creates the
+    // lock's parent directory makes that ordering deterministic: the output is
+    // absent at the check and present once the lock is taken.
+    #[tokio::test]
+    async fn a_claim_that_finds_the_output_after_taking_the_lock_releases_it() {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output");
+        let lock_path = output_path.join("abc123.lock.json");
+        let (tx, _rx) = mpsc::channel(16);
+
+        let claim = claim_output(
+            "abc123",
+            &output_path,
+            &lock_path,
+            "second",
+            Duration::from_secs(30),
+            &tx,
+        )
+        .await;
+
+        assert_eq!(claim.unwrap(), OutputClaim::AlreadyBuilt);
+        assert!(!lock_path.exists(), "an already-built claim kept a lock");
+    }
+
+    #[tokio::test]
+    async fn a_claim_whose_client_went_away_stops_waiting() {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("output").join("abc123");
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+        let (tx, rx) = mpsc::channel(16);
+
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+        drop(rx);
+
+        let started = std::time::Instant::now();
+        let status = claim_output(
+            "abc123",
+            &output_path,
+            &lock_path,
+            "second",
+            Duration::from_secs(30),
+            &tx,
+        )
+        .await
+        .expect_err("a claim nobody is listening to must not wait");
+
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(started.elapsed() < OUTPUT_LOCK_POLL_INTERVAL);
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-first-build"
+        );
+    }
+
     #[tokio::test]
     async fn a_claim_refuses_a_lock_still_held_when_the_wait_expires() {
         let root = TempDir::new().unwrap();
         let output_path = root.path().join("output").join("abc123");
-        let lock_path = root.path().join("output").join("abc123.lock.json");
+        // Named apart from the digest, so the message's naming of the lock
+        // path cannot stand in for its naming of the digest.
+        let lock_path = root.path().join("output").join("held.lock.json");
         let wait = Duration::from_millis(300);
 
         std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
@@ -3844,6 +3946,82 @@ mod tests {
         .await;
 
         assert_eq!(claim.unwrap(), OutputClaim::Locked);
+    }
+
+    /// Sets `VORPAL_BUILD_LOCK_WAIT` for the caller's lifetime and restores
+    /// the previous value on drop.
+    struct LockWaitOverride(Option<String>);
+
+    impl LockWaitOverride {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var(OUTPUT_LOCK_WAIT_ENV).ok();
+            std::env::set_var(OUTPUT_LOCK_WAIT_ENV, value);
+
+            Self(previous)
+        }
+    }
+
+    impl Drop for LockWaitOverride {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var(OUTPUT_LOCK_WAIT_ENV, value),
+                None => std::env::remove_var(OUTPUT_LOCK_WAIT_ENV),
+            }
+        }
+    }
+
+    // Under the ten-minute default this refusal would take ten minutes; the
+    // timeout fails the test unless the operator's window reached the lock.
+    #[tokio::test]
+    async fn build_artifact_waits_only_as_long_as_the_configured_lock_window() {
+        let _root = crate::command::store::paths::test_support::ScratchRoot::new();
+        let _wait = LockWaitOverride::set("1");
+
+        let mut request = build_request("library", &valid_digest("a"), &valid_digest("b"));
+        let artifact = request.artifact.as_mut().unwrap();
+        artifact.target = get_system_default().unwrap().into();
+
+        let artifact_digest = digest(serde_json::to_string(artifact).unwrap().as_bytes());
+        let lock_path = get_artifact_output_lock_path(&artifact_digest, "library");
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+
+        let (tx, _rx) = mpsc::channel(16);
+
+        let status = tokio::time::timeout(
+            Duration::from_secs(10),
+            build_artifact(
+                &ServiceTokenCache::new(),
+                None,
+                None,
+                None,
+                None,
+                &default_registry_allowed(),
+                request,
+                &tx,
+            ),
+        )
+        .await
+        .expect("the configured one-second window bounded the wait")
+        .expect_err("a lock held past the window is refused");
+
+        assert_eq!(status.code(), tonic::Code::AlreadyExists);
+        assert!(
+            status.message().contains(&artifact_digest),
+            "{}",
+            status.message()
+        );
+        assert!(
+            status
+                .message()
+                .contains(&format!("{:?}", Duration::from_secs(1))),
+            "{}",
+            status.message()
+        );
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-first-build"
+        );
     }
 
     /// Writes a zstd-compressed tar whose entries come from raw ustar headers,
@@ -4385,12 +4563,12 @@ mod tests {
     }
 
     impl RecordedEvents {
-        fn info_messages(&self) -> Vec<String> {
+        fn messages_at(&self, wanted: tracing::Level) -> Vec<String> {
             self.0
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|(level, _)| *level == tracing::Level::INFO)
+                .filter(|(level, _)| *level == wanted)
                 .map(|(_, message)| message.clone())
                 .collect()
         }
@@ -4426,7 +4604,7 @@ mod tests {
 
         let messages = build_artifact_capturing_events(request)
             .await
-            .info_messages();
+            .messages_at(tracing::Level::INFO);
 
         assert!(
             messages.iter().any(|message| {
@@ -4459,7 +4637,7 @@ mod tests {
 
         let messages = build_artifact_capturing_events(request)
             .await
-            .info_messages();
+            .messages_at(tracing::Level::INFO);
 
         assert!(
             messages.iter().any(|message| {
