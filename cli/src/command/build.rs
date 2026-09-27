@@ -537,16 +537,15 @@ async fn publish_archive_stream(
     staged.publish().await.map(|_| ())
 }
 
-/// Pulls `artifact_digest`'s archive from the registry into `archive_path` if
-/// it is not already present locally. A registry `NotFound` is not an error:
-/// it means the archive genuinely has no output (e.g. a source-only
+/// Pulls the archive named by `request` from the registry into `archive_path`
+/// if it is not already present locally. A registry `NotFound` is not an
+/// error: it means the archive genuinely has no output (e.g. a source-only
 /// artifact), so the archive is simply left absent. `on_not_found` logs the
 /// caller's context-specific message for that case.
 async fn pull_archive(
     client_archive: &mut ArchiveServiceClient<Channel>,
     archive_path: &Path,
-    artifact_digest: &str,
-    artifact_namespace: &str,
+    request: ArchivePullRequest,
     credentials_path: &Path,
     registry: &str,
     error_label: &str,
@@ -555,11 +554,6 @@ async fn pull_archive(
     if archive_path.exists() {
         return Ok(());
     }
-
-    let request = ArchivePullRequest {
-        digest: artifact_digest.to_string(),
-        namespace: artifact_namespace.to_string(),
-    };
 
     let mut request = Request::new(request);
     let request_auth_header = client_auth_header_live(credentials_path, registry)
@@ -852,8 +846,10 @@ async fn build_at_paths(
         pull_archive(
             client_archive,
             archive_path,
-            artifact_digest,
-            artifact_namespace,
+            ArchivePullRequest {
+                digest: artifact_digest.to_string(),
+                namespace: artifact_namespace.to_string(),
+            },
             credentials_path,
             registry,
             "registry pull error",
@@ -935,8 +931,10 @@ async fn build_at_paths(
         pull_archive(
             client_archive,
             archive_path,
-            artifact_digest,
-            artifact_namespace,
+            ArchivePullRequest {
+                digest: artifact_digest.to_string(),
+                namespace: artifact_namespace.to_string(),
+            },
             credentials_path,
             registry,
             "registry pull error after build",

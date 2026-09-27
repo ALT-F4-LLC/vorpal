@@ -761,6 +761,7 @@ pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
+    clippy::panic,
     reason = "test assertions read as intent, not defensive code: an unwrap/expect/panic failure is the test failing, which is the point"
 )]
 mod tests {

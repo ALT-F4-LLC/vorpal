@@ -181,16 +181,6 @@ pub fn get_root_artifact_config_dir_path() -> PathBuf {
     get_artifact_dir_path().join("config")
 }
 
-pub fn get_artifact_config_dir_path(namespace: &str) -> PathBuf {
-    get_root_artifact_config_dir_path().join(namespace)
-}
-
-pub fn get_artifact_config_path(digest: &str, namespace: &str) -> PathBuf {
-    get_artifact_config_dir_path(namespace)
-        .join(digest)
-        .with_extension("json")
-}
-
 pub fn get_root_artifact_output_dir_path() -> PathBuf {
     get_artifact_dir_path().join("output")
 }
@@ -1403,7 +1393,6 @@ mod root_path_override_tests {
             get_root_artifact_config_dir_path(),
             get_root_artifact_output_dir_path(),
             get_artifact_archive_path(&"a".repeat(64), "library"),
-            get_artifact_config_path(&"a".repeat(64), "library"),
             get_artifact_output_path(&"a".repeat(64), "library"),
             get_artifact_alias_path("rust", "library", ArtifactSystem::Aarch64Linux, "latest")
                 .unwrap(),

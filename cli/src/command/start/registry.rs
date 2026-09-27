@@ -117,8 +117,8 @@ impl LocalBackend {
             .with_extension("tar.zst")
     }
 
-    /// Mirrors `get_artifact_config_path`, rooted at this backend's artifact
-    /// directory rather than the process-wide store.
+    /// Path of an artifact's config document, rooted at this backend's
+    /// artifact directory rather than the process-wide store.
     pub(super) fn config_path(&self, digest: &str, namespace: &str) -> PathBuf {
         self.artifact_dir
             .join("config")
