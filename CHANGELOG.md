@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Services auth**: `vorpal system services start` runs without `--issuer`
+  on the Unix domain socket. Each caller is identified by its kernel-reported
+  peer uid, and only callers running as the service process's uid are
+  admitted; a different uid or a missing peer credential is refused.
+
+### Changed
+
+- **Services auth**: `--port` or `--tls` (including `--tls` alone, which
+  binds TCP 23151) refuses to start the agent, registry, or worker without
+  `--issuer`. With `--issuer`, OIDC authentication is unchanged.
+
+- **Makefile**: `make vorpal-start VORPAL_ISSUER=` starts the services
+  without an issuer on the Unix socket and skips starting Keycloak.
+
 ## [0.4.1] - 2026-09-12
 
 ### Changed

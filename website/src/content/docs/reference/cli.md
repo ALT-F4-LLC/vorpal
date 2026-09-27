@@ -388,10 +388,10 @@ vorpal system services start [OPTIONS]
 | `--archive-cache-ttl <SECONDS>` | `300` | TTL for caching archive check results (0 to disable) |
 | `--health-check` | `false` | Enable plaintext gRPC health check endpoint |
 | `--health-check-port <PORT>` | `23152` | Port for health check listener |
-| `--issuer <URL>` | | OIDC issuer URL for JWT validation |
-| `--issuer-audience <AUDIENCE>` | | Expected JWT audience |
-| `--issuer-client-id <ID>` | | OAuth2 client ID for worker-to-registry auth |
-| `--issuer-client-secret <SECRET>` | | OAuth2 client secret for worker-to-registry auth |
+| `--issuer <URL>` | | Optional. OIDC issuer URL for JWT validation (env `VORPAL_ISSUER`). Required for a TCP or TLS listener; see [Authentication](#authentication) |
+| `--issuer-audience <AUDIENCE>` | | Optional. Expected JWT audience |
+| `--issuer-client-id <ID>` | | Optional. OAuth2 client ID for worker-to-registry auth |
+| `--issuer-client-secret <SECRET>` | | Optional. OAuth2 client secret for worker-to-registry auth |
 | `--port <PORT>` | | TCP port (omit for Unix domain socket mode) |
 | `--registry-backend <BACKEND>` | `local` | Registry storage backend (`local` or `s3`) |
 | `--registry-backend-s3-bucket <BUCKET>` | | S3 bucket name (required when backend is `s3`) |
@@ -406,15 +406,23 @@ vorpal system services start [OPTIONS]
 - **TCP**: When `--port` is specified. Listens on `[::]:<port>`.
 - **TLS over TCP**: When `--tls` is enabled. Defaults to port 23151 if `--port` is not specified.
 
+### Authentication
+
+`--issuer` is optional. The rules below apply when `--services` includes `agent`, `registry`, or `worker`, as the default does.
+
+- **Without `--issuer`**: the services start on the Unix domain socket only. Each request is identified by the kernel-reported peer credential of its connection. A caller running as the same uid as the service process is admitted. A caller with a different uid, or a connection with no readable peer credential, is refused.
+- **TCP or TLS without `--issuer`**: `--port` or `--tls` (including `--tls` without `--port`, which binds TCP 23151) refuses to start and names `--issuer` in the error.
+- **With `--issuer`**: agent, registry, and worker requests must carry a bearer token that validates against the OIDC issuer, on any transport.
+
 ```bash
-# Start all services with defaults (Unix socket)
+# Start all services with defaults (Unix socket, same-uid callers only)
 vorpal system services start
 
-# Start with TLS enabled
-vorpal system services start --tls
+# Start with TLS enabled (TCP and TLS listeners require --issuer)
+vorpal system services start --tls --issuer https://id.example.com/realms/vorpal
 
 # Start on a specific TCP port
-vorpal system services start --port 23151
+vorpal system services start --port 23151 --issuer https://id.example.com/realms/vorpal
 
 # Start with S3 registry backend
 vorpal system services start --registry-backend s3 --registry-backend-s3-bucket my-bucket
