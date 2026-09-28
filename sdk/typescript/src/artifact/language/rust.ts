@@ -192,11 +192,7 @@ function buildVendorScript(
   lines.push(``);
   lines.push(`mkdir -p $VORPAL_OUTPUT/vendor`);
   lines.push(``);
-  lines.push(
-    `cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)`,
-  );
-  lines.push(``);
-  lines.push(`echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml`);
+  lines.push(`cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor`);
 
   return lines.join("\n");
 }
@@ -237,9 +233,13 @@ function buildMainScript(opts: {
   lines.push(`mkdir -p .cargo`);
   lines.push(`mkdir -p $VORPAL_OUTPUT/bin`);
   lines.push(``);
-  lines.push(
-    `ln -s ${getEnvKey(opts.vendorDigest)}/config.toml .cargo/config.toml`,
-  );
+  lines.push(`cat > .cargo/config.toml << EOF`);
+  lines.push(`[source.crates-io]`);
+  lines.push(`replace-with = "vendored-sources"`);
+  lines.push(``);
+  lines.push(`[source.vendored-sources]`);
+  lines.push(`directory = "${getEnvKey(opts.vendorDigest)}/vendor"`);
+  lines.push(`EOF`);
 
   if (opts.packages.length > 0) {
     const quotedPackages = opts.packages.map((p) => `"${p}"`).join(",");

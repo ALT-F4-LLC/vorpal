@@ -98,9 +98,7 @@ touch src/main.rs
 {{end}}
 mkdir -p $VORPAL_OUTPUT/vendor
 
-cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
-
-echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml`
+cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor`
 
 const StepScriptTemplate = `mkdir -p $HOME
 
@@ -109,7 +107,13 @@ pushd ./source/{{.Name}}
 mkdir -p .cargo
 mkdir -p $VORPAL_OUTPUT/bin
 
-ln -s {{.Vendor}}/config.toml .cargo/config.toml
+cat > .cargo/config.toml << EOF
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "{{.Vendor}}/vendor"
+EOF
 {{if .Packages}}
 cat > Cargo.toml << "EOF"
 [workspace]

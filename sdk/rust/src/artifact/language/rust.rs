@@ -398,14 +398,12 @@ impl<'a> Rust<'a> {
             };
         }
 
-        vendor_step_script = formatdoc! {r#"
+        vendor_step_script = formatdoc! {r"
             {vendor_step_script}
 
             mkdir -p $VORPAL_OUTPUT/vendor
 
-            cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
-
-            echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml"#,
+            cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor",
         };
 
         let vendor_steps = vec![
@@ -455,7 +453,13 @@ impl<'a> Rust<'a> {
 
         // Create step
 
-        let mut step_script = formatdoc! {r"
+        // The vendor artifact ships only the crate sources. `cargo vendor`'s
+        // own config snippet would name the vendor step's `$VORPAL_OUTPUT`,
+        // which is a staging directory the publish rename deletes, and the
+        // worker refuses to publish output that embeds it. This step writes
+        // the config itself against the published vendor path, expanded from
+        // the artifact environment variable at run time.
+        let mut step_script = formatdoc! {r#"
             mkdir -p $HOME
 
             pushd ./source/{name}
@@ -463,7 +467,13 @@ impl<'a> Rust<'a> {
             mkdir -p .cargo
             mkdir -p $VORPAL_OUTPUT/bin
 
-            ln -s {vendor}/config.toml .cargo/config.toml",
+            cat > .cargo/config.toml << EOF
+            [source.crates-io]
+            replace-with = "vendored-sources"
+
+            [source.vendored-sources]
+            directory = "{vendor}/vendor"
+            EOF"#,
             name = self.name,
             vendor = vendor_env_key,
         };

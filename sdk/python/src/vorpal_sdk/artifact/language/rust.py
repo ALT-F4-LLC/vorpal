@@ -132,11 +132,7 @@ def _build_vendor_script(
     lines.append("")
     lines.append("mkdir -p $VORPAL_OUTPUT/vendor")
     lines.append("")
-    lines.append(
-        "cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)"
-    )
-    lines.append("")
-    lines.append('echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml')
+    lines.append("cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor")
 
     return "\n".join(lines)
 
@@ -174,9 +170,13 @@ def _build_main_script(
     lines.append("mkdir -p .cargo")
     lines.append("mkdir -p $VORPAL_OUTPUT/bin")
     lines.append("")
-    lines.append(
-        f"ln -s {get_env_key(vendor_digest)}/config.toml .cargo/config.toml"
-    )
+    lines.append("cat > .cargo/config.toml << EOF")
+    lines.append("[source.crates-io]")
+    lines.append('replace-with = "vendored-sources"')
+    lines.append("")
+    lines.append("[source.vendored-sources]")
+    lines.append(f'directory = "{get_env_key(vendor_digest)}/vendor"')
+    lines.append("EOF")
 
     if len(packages) > 0:
         quoted_packages = ",".join(f'"{p}"' for p in packages)
