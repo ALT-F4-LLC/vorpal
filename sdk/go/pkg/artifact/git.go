@@ -20,10 +20,12 @@ func Git(context *config.ConfigContext) (*string, error) {
 
 pushd ./source/%s/git-%s
 
-./configure --prefix=$VORPAL_OUTPUT
+./configure --prefix=/
 
-make
-make install`, name, sourceVersion)
+make_flags="RUNTIME_PREFIX=YesPlease gitexecdir=libexec/git-core template_dir=share/git-core/templates sysconfdir=etc"
+
+make $make_flags
+make $make_flags DESTDIR=$VORPAL_OUTPUT install`, name, sourceVersion)
 
 	step, err := Shell(context, []*string{}, []string{}, stepScript, nil)
 	if err != nil {

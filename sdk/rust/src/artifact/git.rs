@@ -30,15 +30,22 @@ impl Git {
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
+        // `$VORPAL_OUTPUT` is a staging directory the publish rename deletes,
+        // and the worker refuses output that embeds it, so it must never be
+        // the configured prefix. `RUNTIME_PREFIX` with relative resource
+        // directories makes git locate libexec, templates and system config
+        // from its own executable, and `DESTDIR` places the install tree.
         let step_script = formatdoc! {"
             mkdir -p \"$VORPAL_OUTPUT/bin\"
 
             pushd ./source/{name}/git-{source_version}
 
-            ./configure --prefix=$VORPAL_OUTPUT
+            ./configure --prefix=/
 
-            make
-            make install",
+            make_flags=\"RUNTIME_PREFIX=YesPlease gitexecdir=libexec/git-core template_dir=share/git-core/templates sysconfdir=etc\"
+
+            make $make_flags
+            make $make_flags DESTDIR=$VORPAL_OUTPUT install",
         };
 
         let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];

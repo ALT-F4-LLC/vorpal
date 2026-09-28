@@ -23,10 +23,12 @@ export class Git {
 
 pushd ./source/${name}/git-${sourceVersion}
 
-./configure --prefix=$VORPAL_OUTPUT
+./configure --prefix=/
 
-make
-make install`;
+make_flags="RUNTIME_PREFIX=YesPlease gitexecdir=libexec/git-core template_dir=share/git-core/templates sysconfdir=etc"
+
+make $make_flags
+make $make_flags DESTDIR=$VORPAL_OUTPUT install`;
 
     const steps = [await shell(context, [], [], stepScript, [])];
 
