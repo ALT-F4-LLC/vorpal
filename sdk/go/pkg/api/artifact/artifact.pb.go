@@ -155,7 +155,7 @@ func (x *ArtifactSource) GetPath() string {
 type ArtifactStepSecret struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Value         []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,11 +197,11 @@ func (x *ArtifactStepSecret) GetName() string {
 	return ""
 }
 
-func (x *ArtifactStepSecret) GetValue() string {
+func (x *ArtifactStepSecret) GetValue() []byte {
 	if x != nil {
 		return x.Value
 	}
-	return ""
+	return nil
 }
 
 type ArtifactStep struct {
@@ -750,7 +750,7 @@ const file_artifact_artifact_proto_rawDesc = "" +
 	"\a_digest\">\n" +
 	"\x12ArtifactStepSecret\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\x89\x02\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\x89\x02\n" +
 	"\fArtifactStep\x12#\n" +
 	"\n" +
 	"entrypoint\x18\x01 \x01(\tH\x00R\n" +
