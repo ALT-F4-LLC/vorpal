@@ -4061,6 +4061,7 @@ dependencies = [
  "async-stream",
  "async_zip",
  "aws-config",
+ "aws-lc-rs",
  "aws-sdk-s3",
  "base64",
  "bytes",

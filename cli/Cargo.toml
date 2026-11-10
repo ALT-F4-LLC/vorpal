@@ -14,6 +14,7 @@ async-compression = { version = "0.4.37", features = ["tokio", "gzip", "bzip2", 
 async-stream = { version = "0.3.6" }
 async_zip = { version = "0.0.18", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
+aws-lc-rs = { version = "1.17.1" }
 aws-sdk-s3 = { version = "1.124.0" }
 base64 = { version = "0.22.1" }
 bytes = { version = "1.11.1" }
