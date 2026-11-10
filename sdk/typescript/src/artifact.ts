@@ -21,11 +21,20 @@ export function getEnvKey(digest: string): string {
 
 /**
  * Converts a Map of secrets to a sorted array of proto objects.
+ * A string value is stored as its UTF-8 bytes; a byte value is copied as given.
  * Matches Go SDK's SecretsToProto function.
  */
-export function secretsToProto(secrets: Map<string, string>): ArtifactStepSecret[] {
+export function secretsToProto(
+  secrets: ReadonlyMap<string, string | Uint8Array>,
+): ArtifactStepSecret[] {
   const keys = Array.from(secrets.keys()).sort();
-  return keys.map((name) => ({ name, value: secrets.get(name)! }));
+  return keys.map((name) => {
+    const value = secrets.get(name)!;
+    return {
+      name,
+      value: typeof value === "string" ? Buffer.from(value, "utf-8") : Buffer.from(value),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +295,7 @@ export class Artifact {
 export class Job {
   private _artifacts: string[] = [];
   private _name: string;
-  private _secrets: Map<string, string> = new Map();
+  private _secrets: Map<string, string | Uint8Array> = new Map();
   private _script: string;
   private _systems: ArtifactSystem[];
   private _systemsError: Error | undefined = undefined;
@@ -315,11 +324,12 @@ export class Job {
   }
 
   /**
-   * Adds secrets available during the job's build step.
+   * Adds secrets available during the job's build step, skipping any name
+   * already present.
    *
-   * @param secrets - Map of secret name to value
+   * @param secrets - Map of secret name to value; a string value is stored as its UTF-8 bytes
    */
-  withSecrets(secrets: Map<string, string>): this {
+  withSecrets(secrets: ReadonlyMap<string, string | Uint8Array>): this {
     for (const [k, v] of secrets) {
       if (!this._secrets.has(k)) {
         this._secrets.set(k, v);
@@ -368,7 +378,7 @@ export class Process {
   private _artifacts: string[] = [];
   private _entrypoint: string;
   private _name: string;
-  private _secrets: Map<string, string> = new Map();
+  private _secrets: Map<string, string | Uint8Array> = new Map();
   private _systems: ArtifactSystem[];
   private _systemsError: Error | undefined = undefined;
 
@@ -415,11 +425,12 @@ export class Process {
   }
 
   /**
-   * Adds secrets available during the process build step.
+   * Adds secrets available during the process build step, skipping any name
+   * already present.
    *
-   * @param secrets - Map of secret name to value
+   * @param secrets - Map of secret name to value; a string value is stored as its UTF-8 bytes
    */
-  withSecrets(secrets: Map<string, string>): this {
+  withSecrets(secrets: ReadonlyMap<string, string | Uint8Array>): this {
     for (const [k, v] of secrets) {
       if (!this._secrets.has(k)) {
         this._secrets.set(k, v);

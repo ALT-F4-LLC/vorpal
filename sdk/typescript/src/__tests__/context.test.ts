@@ -2,7 +2,18 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clientAuthHeader } from "../context.js";
+import {
+  type Artifact as ArtifactMsg,
+  type ArtifactStepSecret,
+  ArtifactSystem,
+} from "../api/artifact/artifact.js";
+import { ArtifactStep, secretsToProto } from "../artifact.js";
+import {
+  artifactToJsonBytes,
+  clientAuthHeader,
+  computeArtifactDigest,
+  serializeArtifactStepSecret,
+} from "../context.js";
 
 const ISSUER = "https://issuer.example";
 const TOKEN_ENDPOINT = "https://issuer.example/oauth/token";
@@ -164,5 +175,99 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const after = readFileSync(credentialsPath, "utf-8");
     expect(after).toBe(before);
+  });
+});
+
+const NON_UTF8_SECRET = Uint8Array.from([0xff, 0x00, 0xfe, 0x3d, 0x0a]);
+
+// Mirrors the fixture in sdk/rust/src/serde_base64.rs so digests compare across SDKs.
+function artifactWithSecrets(secrets: ArtifactStepSecret[]): ArtifactMsg {
+  return {
+    aliases: ["example:latest"],
+    name: "example",
+    sources: [
+      {
+        digest: "abc123",
+        excludes: ["target"],
+        includes: ["src"],
+        name: "example",
+        path: ".",
+      },
+    ],
+    steps: [
+      {
+        arguments: ["-c"],
+        artifacts: ["def456"],
+        entrypoint: "bash",
+        environments: ["PATH=/bin"],
+        script: "echo hi",
+        secrets,
+      },
+    ],
+    systems: [ArtifactSystem.AARCH64_DARWIN],
+    target: ArtifactSystem.AARCH64_DARWIN,
+  };
+}
+
+describe("step secret values", () => {
+  test("serializes the value as padded standard base64", () => {
+    const secret = { name: "TOKEN", value: Buffer.from(NON_UTF8_SECRET) };
+
+    expect(JSON.stringify(serializeArtifactStepSecret(secret))).toBe(
+      '{"name":"TOKEN","value":"/wD+PQo="}',
+    );
+  });
+
+  test("artifact JSON with a secret matches the Rust SDK's text", () => {
+    const rustJson =
+      '{"target":1,"sources":[],"steps":[{"entrypoint":"bash","script":"echo hi","secrets":[{"name":"TOKEN","value":"aHVudGVyMg=="}],"arguments":[],"artifacts":[],"environments":[]}],"systems":[1],"aliases":[],"name":"example"}';
+    const artifact: ArtifactMsg = {
+      target: ArtifactSystem.AARCH64_DARWIN,
+      sources: [],
+      steps: [
+        {
+          entrypoint: "bash",
+          script: "echo hi",
+          secrets: [{ name: "TOKEN", value: Buffer.from("hunter2") }],
+          arguments: [],
+          artifacts: [],
+          environments: [],
+        },
+      ],
+      systems: [ArtifactSystem.AARCH64_DARWIN],
+      aliases: [],
+      name: "example",
+    };
+
+    expect(artifactToJsonBytes(artifact).toString("utf-8")).toBe(rustJson);
+  });
+
+  test("artifact without secrets keeps its digest", () => {
+    expect(computeArtifactDigest(artifactWithSecrets([]))).toBe(
+      "71bd330295891ae4a37684e7eb10f12bfbfb6fa0058db0f357c00b747fd752fc",
+    );
+  });
+
+  test("secretsToProto stores text as its UTF-8 bytes and bytes as given, sorted by name", () => {
+    const secrets = new Map<string, string | Uint8Array>([
+      ["TOKEN", "hunter2"],
+      ["BINARY", NON_UTF8_SECRET],
+    ]);
+
+    const proto = secretsToProto(secrets);
+
+    expect(proto.map((s) => s.name)).toEqual(["BINARY", "TOKEN"]);
+    expect([...proto[0]!.value]).toEqual([...NON_UTF8_SECRET]);
+    expect([...proto[1]!.value]).toEqual([0x68, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x32]);
+  });
+
+  test("ArtifactStep builds a step message holding the bytes passed in", () => {
+    const step = new ArtifactStep("bash")
+      .withSecrets(secretsToProto(new Map([["BINARY", NON_UTF8_SECRET]])))
+      .build();
+
+    expect(step.secrets).toHaveLength(1);
+    expect(step.secrets[0]!.name).toBe("BINARY");
+    expect([...step.secrets[0]!.value]).toEqual([...NON_UTF8_SECRET]);
   });
 });
