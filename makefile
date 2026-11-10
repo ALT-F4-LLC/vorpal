@@ -80,14 +80,17 @@ doc-validate:
 	bash script/qa/doc-validate.sh
 
 # The light tracks bind on a label alone; these refuse a change that outgrew
-# its label. There is no docs-only target because no workflow gates on one.
+# its label. The `diff-scope-docs` trust entry maps to the script's docs-only track.
+diff-scope-docs:
+	bash script/qa/diff-scope.sh docs-only
+
 diff-scope-trivial:
 	bash script/qa/diff-scope.sh trivial
 
 diff-scope-small:
 	bash script/qa/diff-scope.sh small
 
-.PHONY: qa-test doc-validate diff-scope-trivial diff-scope-small
+.PHONY: qa-test doc-validate diff-scope-docs diff-scope-trivial diff-scope-small
 
 sdet-abuse:
 	bash script/qa/stub.sh $@
