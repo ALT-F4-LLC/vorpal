@@ -530,6 +530,10 @@ jobs:
             echo "::error::watcher stopped early or scanned fewer than 3 times"
             failed=1
           fi
+          if ! grep -qF "vorpal-secret-job |> secret retrieved: SYNTHETIC_SECRET matches expected digest" "$watch_dir/build.log"; then
+            echo "::error::step did not confirm it read the secret"
+            failed=1
+          fi
           if ! grep -qF "artifact has no output files (not found in registry)" "$watch_dir/build.log"; then
             echo "::error::vorpal-secret-job may have been pushed to the registry"
             failed=1
