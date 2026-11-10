@@ -111,12 +111,11 @@ mod tests {
     #[test]
     fn script_confirms_retrieval_only_after_the_digest_check() {
         let script = script();
-        let check = script.find(VALUE_SHA256).expect("digest check");
-        let confirm = script
-            .find(&format!("echo \"{RETRIEVED_MESSAGE}\""))
-            .expect("retrieval confirmation");
+        let check = script.find(VALUE_SHA256);
+        let confirm = script.find(&format!("echo \"{RETRIEVED_MESSAGE}\""));
 
-        assert!(confirm > check);
+        // `None` orders below `Some`, so this also requires both to be present.
+        assert!(check.is_some() && confirm > check);
         assert!(RETRIEVED_MESSAGE.contains(SECRET_NAME));
         assert!(!RETRIEVED_MESSAGE.contains(MARKER));
     }
