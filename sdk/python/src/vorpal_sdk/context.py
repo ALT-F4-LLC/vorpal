@@ -22,6 +22,7 @@ Security (mirrors the TS reference exactly):
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -60,9 +61,11 @@ from vorpal_sdk.system import get_system
 def serialize_artifact_step_secret(
     secret: artifact_pb2.ArtifactStepSecret,
 ) -> dict[str, Any]:
+    # ``bytes`` serialize as standard-alphabet, padded base64, as Rust's
+    # ``serde_base64`` writes them.
     return {
         "name": secret.name,
-        "value": secret.value,
+        "value": base64.b64encode(secret.value).decode("ascii"),
     }
 
 

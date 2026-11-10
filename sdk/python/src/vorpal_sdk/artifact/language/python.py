@@ -7,7 +7,7 @@ Rust/Go/TS SDKs character-for-character for the same inputs.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from vorpal_sdk.api.artifact import artifact_pb2
@@ -95,7 +95,7 @@ class Python:
         self._environments: list[str] = []
         self._includes: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._source_scripts: list[str] = []
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
@@ -122,7 +122,7 @@ class Python:
         self._includes = includes
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> Python:
+    def with_secrets(self, secrets: Mapping[str, str | bytes]) -> Python:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value
@@ -211,7 +211,7 @@ class PythonDevelopmentEnvironment:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
         )
@@ -229,7 +229,7 @@ class PythonDevelopmentEnvironment:
         return self
 
     def with_secrets(
-        self, secrets: dict[str, str]
+        self, secrets: Mapping[str, str | bytes]
     ) -> PythonDevelopmentEnvironment:
         for key, value in secrets.items():
             if key not in self._secrets:

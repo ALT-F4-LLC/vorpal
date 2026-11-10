@@ -153,5 +153,26 @@
       "aliases": [],
       "name": "meta\"chars"
     }
+  },
+  {
+    "name": "secret-non-utf8",
+    "comment": "A secret value that is not valid UTF-8 (value_hex holds its raw bytes); it serializes as padded standard base64, as the Rust SDK writes it.",
+    "artifact": {
+      "target": 1,
+      "sources": [],
+      "steps": [
+        {
+          "entrypoint": "bash",
+          "script": "echo hi",
+          "secrets": [{ "name": "TOKEN", "value_hex": "ff00fe3d0a" }],
+          "arguments": [],
+          "artifacts": [],
+          "environments": []
+        }
+      ],
+      "systems": [1],
+      "aliases": [],
+      "name": "secret-non-utf8"
+    }
   }
 ]

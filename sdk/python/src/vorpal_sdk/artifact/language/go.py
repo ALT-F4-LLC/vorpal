@@ -6,7 +6,7 @@ character-for-character identical to the Rust and Go SDKs for the same inputs.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from vorpal_sdk.api.artifact import artifact_pb2
@@ -68,7 +68,7 @@ class Go:
         self._environments: list[str] = []
         self._includes: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._source: artifact_pb2.ArtifactSource | None = None
         self._source_scripts: list[str] = []
         self._systems, self._systems_error = _normalize_systems_for_build(
@@ -103,7 +103,7 @@ class Go:
         self._includes = includes
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> Go:
+    def with_secrets(self, secrets: Mapping[str, str | bytes]) -> Go:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value
@@ -189,7 +189,7 @@ class GoDevelopmentEnvironment:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
         )
@@ -214,7 +214,7 @@ class GoDevelopmentEnvironment:
         return self
 
     def with_secrets(
-        self, secrets: dict[str, str]
+        self, secrets: Mapping[str, str | bytes]
     ) -> GoDevelopmentEnvironment:
         for key, value in secrets.items():
             if key not in self._secrets:

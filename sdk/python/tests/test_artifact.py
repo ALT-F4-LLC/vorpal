@@ -78,7 +78,16 @@ def test_get_env_key_format() -> None:
 def test_secrets_to_proto_sorts_by_name() -> None:
     out = secrets_to_proto({"zebra": "1", "alpha": "2", "mid": "3"})
     assert [s.name for s in out] == ["alpha", "mid", "zebra"]
-    assert [s.value for s in out] == ["2", "3", "1"]
+    assert [s.value for s in out] == [b"2", b"3", b"1"]
+
+
+def test_secrets_to_proto_stores_text_as_utf8_and_bytes_as_given() -> None:
+    binary = bytes([0xFF, 0x00, 0xFE, 0x3D, 0x0A])
+    out = secrets_to_proto({"TEXT": "café", "BINARY": binary})
+    assert [(s.name, s.value) for s in out] == [
+        ("BINARY", binary),
+        ("TEXT", "café".encode("utf-8")),
+    ]
 
 
 def test_normalize_systems_accepts_strings_enums_and_preserves_order() -> None:
@@ -156,13 +165,13 @@ def test_artifact_step_absent_script_is_unset() -> None:
 
 def test_artifact_step_dedupes_secrets_by_name() -> None:
     dup = [
-        artifact_pb2.ArtifactStepSecret(name="A", value="1"),
-        artifact_pb2.ArtifactStepSecret(name="A", value="2"),
-        artifact_pb2.ArtifactStepSecret(name="B", value="3"),
+        artifact_pb2.ArtifactStepSecret(name="A", value=b"1"),
+        artifact_pb2.ArtifactStepSecret(name="A", value=b"2"),
+        artifact_pb2.ArtifactStepSecret(name="B", value=b"3"),
     ]
     step = ArtifactStep("bash").with_secrets(dup).with_script("x").build()
     assert [s.name for s in step.secrets] == ["A", "B"]
-    assert step.secrets[0].value == "1"  # first wins
+    assert step.secrets[0].value == b"1"  # first wins
     assert step.script == "x"
 
 
@@ -260,7 +269,7 @@ def test_shell_linux_target_uses_linux_vorpal_rootfs() -> None:
             return f"{artifact.name}-digest"
 
     ctx = LinuxCtx()
-    secret = artifact_pb2.ArtifactStepSecret(name="TOKEN", value="secret")
+    secret = artifact_pb2.ArtifactStepSecret(name="TOKEN", value=b"secret")
 
     step = shell(
         ctx,
@@ -379,6 +388,22 @@ def test_job_produces_single_bash_step_with_sorted_secrets() -> None:
     assert step.entrypoint == "bash"
     assert step.script == "#!/bin/bash\nset -euo pipefail\n\necho hi\n"
     assert [s.name for s in step.secrets] == ["A", "B"]
+
+
+def test_secret_builders_carry_the_given_bytes_into_the_step() -> None:
+    binary = bytes([0xFF, 0x00, 0xFE, 0x3D, 0x0A])
+    secrets: dict[str, str | bytes] = {"TOKEN": "hunter2", "BINARY": binary}
+    expected = [("BINARY", binary), ("TOKEN", b"hunter2")]
+
+    for builder in (
+        Job("j", "echo hi", [_DARWIN]),
+        Process("p", "/bin/server", [_DARWIN]),
+        DevelopmentEnvironment("d", [_DARWIN]),
+    ):
+        ctx = _StubContext()
+        builder.with_secrets(secrets).build(ctx)
+        step = _only_step(ctx)
+        assert [(s.name, s.value) for s in step.secrets] == expected, builder
 
 
 def test_process_script_contains_helper_commands() -> None:
