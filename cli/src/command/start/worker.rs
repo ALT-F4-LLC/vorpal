@@ -11,6 +11,7 @@ use crate::command::{
     },
 };
 use anyhow::Result;
+use base64::{engine::general_purpose, Engine as _};
 use sha256::digest;
 use std::{
     collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
@@ -453,7 +454,9 @@ async fn build_step_environments(
     }
 
     for secret in step_secrets {
-        let value = notary::decrypt(&private_key_path, secret.value)
+        let encrypted = general_purpose::STANDARD.encode(&secret.value);
+
+        let value = notary::decrypt(&private_key_path, encrypted)
             .await
             .map_err(|err| Status::internal(format!("failed to decrypt secret: {err}")))?;
 

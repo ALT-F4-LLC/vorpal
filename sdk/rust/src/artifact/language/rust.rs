@@ -188,7 +188,7 @@ impl<'a> Rust<'a> {
             if !self.secrets.iter().any(|s| s.name == name) {
                 self.secrets.push(ArtifactStepSecret {
                     name: name.to_string(),
-                    value: value.to_string(),
+                    value: value.as_bytes().to_vec(),
                 });
             }
         }

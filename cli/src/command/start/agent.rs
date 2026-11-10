@@ -14,6 +14,7 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
+use base64::{engine::general_purpose, Engine as _};
 use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
@@ -881,9 +882,20 @@ async fn prepare_artifact(
         let mut secrets = vec![];
 
         for secret in step.secrets {
-            let value = notary::encrypt(&public_key_path, secret.value)
+            // The error names the secret only: its value must not reach the status.
+            let plaintext = String::from_utf8(secret.value).map_err(|_| {
+                Status::invalid_argument(format!("secret '{}' is not valid UTF-8", secret.name))
+            })?;
+
+            let encrypted = notary::encrypt(&public_key_path, plaintext)
                 .await
                 .map_err(|err| Status::internal(format!("failed to encrypt secret: {err}")))?;
+
+            // Store the raw ciphertext so its JSON form matches records the
+            // previous release wrote as base64 text.
+            let value = general_purpose::STANDARD
+                .decode(encrypted)
+                .map_err(|err| Status::internal(format!("failed to decode secret: {err}")))?;
 
             secrets.push(ArtifactStepSecret {
                 name: secret.name,

@@ -4118,6 +4118,7 @@ name = "vorpal-sdk"
 version = "0.4.1"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "http 1.4.2",
  "hyper-util",
