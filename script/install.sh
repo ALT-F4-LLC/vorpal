@@ -4,19 +4,20 @@ set -euo pipefail
 # =============================================================================
 # Vorpal Installer
 # =============================================================================
-# Usage: curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
 #
 # Environment variables:
 #   VORPAL_NONINTERACTIVE=1    Enable non-interactive mode
 #   CI=true                    Enable non-interactive mode
 #   VORPAL_VERSION=<ver>       Version to install (default: 0.4.1)
 #   VORPAL_NO_SERVICE=1        Skip service installation
-#   VORPAL_SERVICES=<list>     Comma-separated services to install (default: agent,registry,worker)
+#   VORPAL_SERVICES=<list>     Services (default: agent,registry,worker)
 #   VORPAL_NO_PATH=1           Skip PATH configuration
 #   VORPAL_DRY_RUN=1           Show what would be done without making changes
 #   VORPAL_ISSUER=<url>        OIDC issuer URL for authenticated services
 #   VORPAL_ISSUER_AUDIENCE=<v> OIDC issuer audience
-#   VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
+#   VORPAL_ISSUER_CLIENT_ID=<v>     OIDC issuer client ID
 #   VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
 #   NO_COLOR=1                 Disable color output
 # =============================================================================
@@ -214,7 +215,7 @@ spin() {
     # Select character set based on Unicode support
     local frames
     if has_unicode; then
-        # Braille pattern cycle: U+2801 U+2802 U+2804 U+2840 U+2820 U+2810 U+2808 U+2800
+        # Braille cycle: U+2801 U+2802 U+2804 U+2840 U+2820 U+2810 U+2808 U+2800
         frames=(
             $'\xe2\xa0\x81'
             $'\xe2\xa0\x82'
@@ -232,10 +233,8 @@ spin() {
 
     local frame_count=${#frames[@]}
 
-    # Run spinner as a background subshell writing to stderr. Elapsed time is
-    # derived from the loop's own iteration count (~0.08s/tick) rather than
-    # shelling out to `date` on every frame, so no extra process/IPC is
-    # needed to carry live status into the subshell.
+    # Run the spinner as a background subshell writing to stderr. Elapsed time
+    # comes from the loop's iteration count (~0.08s/tick), not `date` per frame.
     (
         local i=0
         local elapsed=0
@@ -266,8 +265,8 @@ spin_stop() {
         printf '\r\033[2K' >&2
     fi
 
-    # In non-TTY / NO_COLOR mode, spin() printed a static step line but no
-    # result indicator — print the final status so CI logs show the outcome.
+    # In non-TTY / NO_COLOR mode spin() prints a static step line with no
+    # result; print the final status so CI logs show the outcome.
     if [[ ! -t 1 ]] || [[ -n "${NO_COLOR:-}" ]]; then
         if [[ -n "$message" ]]; then
             if [[ "$status" = "success" ]]; then
@@ -708,8 +707,8 @@ install_linux_prerequisites_apt() {
     fi
 
     if [[ "$need_docker_group" = 1 ]]; then
-        # docker-group membership grants root-equivalent access via the docker socket;
-        # this is the accepted tradeoff for running docker without sudo.
+        # docker-group membership is root-equivalent via the docker socket; this
+        # is the accepted tradeoff for running docker without sudo.
         print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
         spin "Adding ${invoking_user} to the docker group..."
         if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
@@ -727,10 +726,9 @@ install_linux_prerequisites_apt() {
     fi
 }
 
-# dnf config-manager syntax differs between dnf4 (--add-repo <url>) and dnf5
-# (addrepo --from-repofile=<url>). dnf5 additionally chokes on blank lines in
-# Docker's published .repo file (rpm-software-management/dnf5#1603), so fetch
-# it and strip blank lines first, matching Docker's own installer workaround.
+# dnf4 uses `config-manager --add-repo <url>`; dnf5 uses `addrepo
+# --from-repofile=<url>` and chokes on blank lines in Docker's .repo file, so
+# fetch it and strip them first, as Docker's own installer does.
 add_docker_ce_dnf_repo() {
     local repo_url="https://download.docker.com/linux/fedora/docker-ce.repo"
 
@@ -892,8 +890,8 @@ install_linux_prerequisites_dnf() {
     fi
 
     if [[ "$need_docker_group" = 1 ]]; then
-        # docker-group membership grants root-equivalent access via the docker socket;
-        # this is the accepted tradeoff for running docker without sudo.
+        # docker-group membership is root-equivalent via the docker socket; this
+        # is the accepted tradeoff for running docker without sudo.
         print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
         spin "Adding ${invoking_user} to the docker group..."
         if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
@@ -970,8 +968,8 @@ APPARMOR_EOF
 # -- Phase 2: Download & version resolution -----------------------------------
 
 resolve_version() {
-    # Note: Version resolution runs during --dry-run to validate the plan is realistic.
-    # This makes read-only HTTP requests (API query, HEAD validation).
+    # Version resolution also runs under --dry-run, to check the plan is
+    # realistic. It makes only read-only HTTP requests (API query, HEAD).
     local version="$VORPAL_VERSION"
     local artifact="vorpal-${ARCH}-${OS}.tar.gz"
 
@@ -1346,7 +1344,7 @@ install_service_macos() {
 </plist>
 PLIST
 
-    # Bootout existing service (ignore errors — may not be loaded on fresh install)
+    # Boot out the existing service; errors are fine on a fresh install.
     launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
 
     spin "Starting LaunchAgent..."
@@ -1753,8 +1751,8 @@ run_uninstall() {
     local rc_file
     for rc_file in "${rc_files[@]}"; do
         if [[ -f "$rc_file" ]] && grep -qF "$marker" "$rc_file" 2>/dev/null; then
-            # Remove the marker line and the line following it (the PATH/fish_add_path line)
-            # Use a temp file to avoid sed -i portability issues between macOS and Linux
+            # Remove the marker line and the PATH / fish_add_path line after it.
+            # A temp file avoids `sed -i` differences between macOS and Linux.
             local tmp_file
             tmp_file="$(mktemp)"
             local skip_next=0
