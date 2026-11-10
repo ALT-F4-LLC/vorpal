@@ -1,5 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    start::secrets,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -866,6 +867,31 @@ async fn resolve_and_upsert_source(
     Ok(())
 }
 
+/// Rejects a step whose secret names break the shared name rule or that references a
+/// secret in its arguments or environment, so the request fails here instead of at the
+/// worker after earlier steps have built. The worker still applies the same check.
+fn check_step_secrets(step: &ArtifactStep) -> Result<(), Status> {
+    secrets::validate_names(step.secrets.iter().map(|secret| secret.name.as_str()))
+        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+    for secret in &step.secrets {
+        let referenced = step
+            .arguments
+            .iter()
+            .chain(&step.environments)
+            .any(|text| !secrets::references(text, &secret.name).is_empty());
+
+        if referenced {
+            return Err(Status::invalid_argument(format!(
+                "step references secret {:?} in its arguments or environment; read it from its file under $VORPAL_SECRET_DIR instead",
+                secret.name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Seals `secret` for the worker, bound to `namespace` and the secret's name. Every
 /// error names the secret only: its value must not reach the status.
 fn seal_step_secret(
@@ -926,6 +952,8 @@ async fn prepare_artifact(
     let mut sealed_secrets_len = 0;
 
     for step in artifact.steps {
+        check_step_secrets(&step)?;
+
         let mut secrets = vec![];
 
         for secret in step.secrets {
@@ -1226,8 +1254,17 @@ mod tests {
             .map(|(index, value)| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
             .collect();
 
-        let prepared =
-            prepare_step_secrets(&public_key_path, "team", secrets_step(secrets)).await??;
+        // Reading a secret from its file, or a longer variable name, is not a reference.
+        let step = ArtifactStep {
+            arguments: vec![
+                "$VORPAL_SECRET_DIR/SECRET_0".to_string(),
+                "$SECRET_0_FILE".to_string(),
+            ],
+            environments: vec!["SECRET_1=${SECRET_1X}".to_string()],
+            ..secrets_step(secrets)
+        };
+
+        let prepared = prepare_step_secrets(&public_key_path, "team", step).await??;
 
         assert_eq!(prepared.len(), values.len());
         for (secret, value) in prepared.iter().zip(&values) {
@@ -1244,7 +1281,7 @@ mod tests {
     mod abuse {
         use super::{prepare_step_secrets, secrets_step, step_secret};
         use crate::command::store::notary::test_fixtures::write_service_keys;
-        use tonic::Code;
+        use tonic::{Code, Status};
         use vorpal_sdk::api::artifact::ArtifactStep;
 
         const MARKER: &str = "MARKER-5ec7e7-";
@@ -1311,6 +1348,80 @@ mod tests {
             assert!(message.contains("65537 bytes"), "{message}");
             assert!(message.contains("limit of 65536 bytes"), "{message}");
             assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        /// Prepares `step` with freshly generated keys and returns the rejection status,
+        /// failing when prepare accepts the step.
+        async fn prepare_rejection(step: ArtifactStep) -> anyhow::Result<Status> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+
+            match prepare_step_secrets(&public_key_path, "team", step).await? {
+                Ok(_) => anyhow::bail!("prepare accepted the step"),
+                Err(status) => Ok(status),
+            }
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_referenced_in_arguments_naming_it() -> anyhow::Result<()> {
+            let step = ArtifactStep {
+                arguments: vec!["-c".to_string(), "curl -H ${TOKEN} x".to_string()],
+                ..secrets_step(vec![step_secret("TOKEN", MARKER.as_bytes())])
+            };
+
+            let status = prepare_rejection(step).await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            assert!(status.message().contains("\"TOKEN\""), "{status:?}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_referenced_in_environment_naming_it() -> anyhow::Result<()>
+        {
+            let step = ArtifactStep {
+                environments: vec!["URL=https://h/$TOKEN".to_string()],
+                ..secrets_step(vec![step_secret("TOKEN", MARKER.as_bytes())])
+            };
+
+            let status = prepare_rejection(step).await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            assert!(status.message().contains("\"TOKEN\""), "{status:?}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_invalid_secret_name_naming_it_escaped() -> anyhow::Result<()> {
+            let status = prepare_rejection(secrets_step(vec![step_secret(
+                "a\nINFO forged",
+                MARKER.as_bytes(),
+            )]))
+            .await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("\"a\\nINFO forged\""), "{message:?}");
+            assert!(!message.chars().any(char::is_control), "{message:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_repeated_secret_name_naming_it() -> anyhow::Result<()> {
+            // The oversize secret comes first: the name rule applies to the whole step
+            // before any of its secrets is sealed.
+            let status = prepare_rejection(secrets_step(vec![
+                step_secret("TOKEN", marker_value(65537).as_bytes()),
+                step_secret("TOKEN", MARKER.as_bytes()),
+            ]))
+            .await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("\"TOKEN\" is repeated"), "{message}");
             Ok(())
         }
     }
