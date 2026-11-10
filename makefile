@@ -58,11 +58,7 @@ generate:
 
 # Docket gates
 #
-# Each target backs the `docket trust` entry of the same name. The `vuln-scan`
-# and `sdet-abuse` trust entries still carry `stub(no-real-check: ...)`, so
-# docket marks their passes hollow until the operator re-adds them. `vuln-scan`
-# needs `--network api.osv.dev` on the re-add; `sdet-abuse` needs `--tree` and a
-# `--timeout`.
+# Each target backs the `docket trust` entry of the same name.
 
 # Runs `build` and `test` and reports each result, as a pre-gate on `verify`.
 ac-commands:
