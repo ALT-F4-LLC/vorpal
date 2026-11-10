@@ -41,18 +41,40 @@ function install {
     popd
 }
 
+function vorpal_build {
+    cd "$HOME/vorpal"
+
+    target/debug/vorpal build "$@"
+}
+
+function vorpal_start {
+    exec "$HOME/vorpal/target/debug/vorpal" system services start "$@"
+}
+
 COMMAND="${1:-}"
 
 if [[ -z "$COMMAND" ]]; then
     echo "Usage: $0 <command>"
-    echo "Available commands: deps, install, sync"
+    echo "Available commands: deps, install, sync, vorpal-build, vorpal-start"
     exit 1
 fi
 
-if [[ "$COMMAND" != "deps" && "$COMMAND" != "install" && "$COMMAND" != "sync" ]]; then
+if [[ "$COMMAND" != "deps" && "$COMMAND" != "install" && "$COMMAND" != "sync" && "$COMMAND" != "vorpal-build" && "$COMMAND" != "vorpal-start" ]]; then
     echo "Invalid command: $COMMAND"
-    echo "Available commands: deps, install, sync"
+    echo "Available commands: deps, install, sync, vorpal-build, vorpal-start"
     exit 1
+fi
+
+if [[ "$COMMAND" == "vorpal-build" ]]; then
+    shift
+    vorpal_build "$@"
+    exit 0
+fi
+
+if [[ "$COMMAND" == "vorpal-start" ]]; then
+    shift
+    vorpal_start "$@"
+    exit 0
 fi
 
 if [[ "$COMMAND" == "deps" ]]; then
