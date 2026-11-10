@@ -27,6 +27,7 @@ set -euo pipefail
 VORPAL_VERSION="${VORPAL_VERSION:-0.4.1}"
 VORPAL_INSTALL_DIR="$HOME/.vorpal"
 VORPAL_SYSTEM_DIR="/var/lib/vorpal"
+ISSUER_CLIENT_SECRET_FILE="${VORPAL_SYSTEM_DIR}/key/issuer-client-secret"
 VORPAL_REPO="ALT-F4-LLC/vorpal"
 VORPAL_GITHUB_URL="https://github.com/$VORPAL_REPO"
 
@@ -398,6 +399,13 @@ Environment variables:
   VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
   VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
   NO_COLOR=1                 Disable color output
+
+Issuer client secret:
+  When the installed binary supports --issuer-client-secret-file, the
+  installer writes the secret to ${ISSUER_CLIENT_SECRET_FILE}
+  (mode 0600, owned by the installing user) and the service reads it from
+  that file, so the service definition holds only the path. Older binaries
+  receive the secret value on the service command line.
 EOF
 }
 
@@ -1302,16 +1310,43 @@ generate_keys() {
     spin_stop "success" "Generated security keys"
 }
 
-install_service_macos() {
-    local plist_dir="${HOME}/Library/LaunchAgents"
-    local plist_path="${plist_dir}/com.altf4llc.vorpal.plist"
+binary_supports_secret_file() {
+    local help
+    help="$("${VORPAL_INSTALL_DIR}/bin/vorpal" system services start --help 2>/dev/null)" || true
+    [[ "$help" == *--issuer-client-secret-file* ]]
+}
+
+# Creates the file through mktemp (mode 0600 from creation) and renames it
+# into place, so an existing file's wider mode or a symlink never carries over.
+write_issuer_client_secret_file() {
+    local temp_file
+
+    if ! temp_file="$(mktemp "${VORPAL_SYSTEM_DIR}/key/.issuer-client-secret.XXXXXX")"; then
+        print_error \
+            "Could not create the issuer client secret file" \
+            "mktemp failed in ${VORPAL_SYSTEM_DIR}/key." \
+            "Check ${VORPAL_SYSTEM_DIR} ownership and re-run the installer."
+        exit 1
+    fi
+
+    if ! printf '%s' "$ISSUER_CLIENT_SECRET" > "$temp_file" \
+        || ! mv -f "$temp_file" "$ISSUER_CLIENT_SECRET_FILE"; then
+        rm -f "$temp_file"
+        print_error \
+            "Could not write the issuer client secret file" \
+            "Writing ${ISSUER_CLIENT_SECRET_FILE} failed." \
+            "Check ${VORPAL_SYSTEM_DIR} ownership and re-run the installer."
+        exit 1
+    fi
+}
+
+# Arguments: the secret flag and its argument, both empty when no secret is set.
+render_launchd_plist() {
+    local secret_flag="$1"
+    local secret_arg="$2"
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
-    local gui_target="gui/$(id -u)"
 
-    mkdir -p "$plist_dir"
-
-    # Write the plist
-    cat > "$plist_path" <<PLIST
+    cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1329,7 +1364,7 @@ install_service_macos() {
 [[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n        <string>--issuer-client-secret</string>\n        <string>%s</string>' "$ISSUER_CLIENT_SECRET"
+[[ -n "$secret_flag" ]] && printf '\n        <string>%s</string>\n        <string>%s</string>' "$secret_flag" "$secret_arg"
 )
     </array>
     <key>RunAtLoad</key>
@@ -1343,6 +1378,15 @@ install_service_macos() {
 </dict>
 </plist>
 PLIST
+}
+
+install_service_macos() {
+    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist_path="${plist_dir}/com.altf4llc.vorpal.plist"
+    local gui_target="gui/$(id -u)"
+
+    mkdir -p "$plist_dir"
+    render_launchd_plist "$1" "$2" > "$plist_path"
 
     # Boot out the existing service; errors are fine on a fresh install.
     launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
@@ -1370,15 +1414,13 @@ PLIST
     spin_stop "success" "Installed LaunchAgent"
 }
 
-install_service_linux() {
-    local unit_dir="${HOME}/.config/systemd/user"
-    local unit_path="${unit_dir}/vorpal.service"
+# Arguments: the secret flag and its argument, both empty when no secret is set.
+render_systemd_unit() {
+    local secret_flag="$1"
+    local secret_arg="$2"
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
 
-    mkdir -p "$unit_dir"
-
-    # Write the systemd user unit
-    cat > "$unit_path" <<UNIT
+    cat <<UNIT
 [Unit]
 Description=Vorpal Build System Services
 After=network.target
@@ -1389,7 +1431,7 @@ ExecStart=${vorpal_bin} system services start --services ${SERVICES}$(
 [[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf ' --issuer-client-secret "%s"' "$ISSUER_CLIENT_SECRET"
+[[ -n "$secret_flag" ]] && printf ' %s "%s"' "$secret_flag" "$secret_arg"
 )
 Restart=on-failure
 RestartSec=5
@@ -1397,6 +1439,14 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
+}
+
+install_service_linux() {
+    local unit_dir="${HOME}/.config/systemd/user"
+    local unit_path="${unit_dir}/vorpal.service"
+
+    mkdir -p "$unit_dir"
+    render_systemd_unit "$1" "$2" > "$unit_path"
 
     # Stop existing service if running (graceful restart on upgrade)
     systemctl --user stop vorpal.service 2>/dev/null || true
@@ -1452,6 +1502,18 @@ UNIT
 install_service() {
     print_header "Starting services"
 
+    local secret_flag=""
+    local secret_arg=""
+    if [[ -n "$ISSUER_CLIENT_SECRET" ]]; then
+        if binary_supports_secret_file; then
+            secret_flag="--issuer-client-secret-file"
+            secret_arg="$ISSUER_CLIENT_SECRET_FILE"
+        else
+            secret_flag="--issuer-client-secret"
+            secret_arg="$ISSUER_CLIENT_SECRET"
+        fi
+    fi
+
     if [[ "$FLAG_DRY_RUN" = 1 ]]; then
         case "$OS" in
             darwin)
@@ -1465,17 +1527,36 @@ install_service() {
         [[ -n "$ISSUER" ]] && print_step "Would pass --issuer ${ISSUER}"
         [[ -n "$ISSUER_AUDIENCE" ]] && print_step "Would pass --issuer-audience ${ISSUER_AUDIENCE}"
         [[ -n "$ISSUER_CLIENT_ID" ]] && print_step "Would pass --issuer-client-id ${ISSUER_CLIENT_ID}"
-        [[ -n "$ISSUER_CLIENT_SECRET" ]] && print_step "Would pass --issuer-client-secret (set)"
+        if [[ "$secret_flag" = "--issuer-client-secret-file" ]]; then
+            print_step "Would write ${ISSUER_CLIENT_SECRET_FILE} (mode 0600)"
+            print_step "Would pass --issuer-client-secret-file ${ISSUER_CLIENT_SECRET_FILE}"
+        elif [[ -n "$secret_flag" ]]; then
+            print_step "Would pass --issuer-client-secret (set)"
+            secret_arg="REDACTED"
+        fi
+        print_step "Would write this service definition (for the binary now at ${VORPAL_INSTALL_DIR}/bin/vorpal):"
+        case "$OS" in
+            darwin)
+                render_launchd_plist "$secret_flag" "$secret_arg" | sed 's/^/      /'
+                ;;
+            linux)
+                render_systemd_unit "$secret_flag" "$secret_arg" | sed 's/^/      /'
+                ;;
+        esac
         print_success "Services (dry run)"
         return 0
     fi
 
+    if [[ "$secret_flag" = "--issuer-client-secret-file" ]]; then
+        write_issuer_client_secret_file
+    fi
+
     case "$OS" in
         darwin)
-            install_service_macos
+            install_service_macos "$secret_flag" "$secret_arg"
             ;;
         linux)
-            install_service_linux
+            install_service_linux "$secret_flag" "$secret_arg"
             ;;
     esac
 }
