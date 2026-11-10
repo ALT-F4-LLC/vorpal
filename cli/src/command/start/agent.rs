@@ -14,6 +14,8 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
+use prost::Message;
+use rsa::RsaPublicKey;
 use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,6 +46,10 @@ use vorpal_sdk::{
     },
     context::{build_channel, client_auth_header},
 };
+
+/// Largest encoded prepared artifact, in bytes: 4 MiB, the default gRPC decode
+/// limit its receivers apply, less 256 KiB for the rest of each message.
+const PREPARED_ARTIFACT_LIMIT: usize = 4 * 1024 * 1024 - 256 * 1024;
 
 #[derive(Debug, PartialEq)]
 enum ArtifactSourceType {
@@ -860,6 +866,41 @@ async fn resolve_and_upsert_source(
     Ok(())
 }
 
+/// Seals `secret` for the worker, bound to `namespace` and the secret's name. Every
+/// error names the secret only: its value must not reach the status.
+fn seal_step_secret(
+    public_key: &RsaPublicKey,
+    namespace: &str,
+    secret: ArtifactStepSecret,
+) -> Result<ArtifactStepSecret, Status> {
+    if secret.value.len() > notary::SEALED_SECRET_LIMIT {
+        return Err(Status::invalid_argument(format!(
+            "secret '{}' is {} bytes, above the limit of {} bytes",
+            secret.name,
+            secret.value.len(),
+            notary::SEALED_SECRET_LIMIT
+        )));
+    }
+
+    if std::str::from_utf8(&secret.value).is_err() {
+        return Err(Status::invalid_argument(format!(
+            "secret '{}' is not valid UTF-8",
+            secret.name
+        )));
+    }
+
+    let associated_data = notary::secret_associated_data(namespace, &secret.name);
+
+    let value = notary::seal(public_key, &secret.value, &associated_data).map_err(|err| {
+        Status::internal(format!("failed to seal secret '{}': {err}", secret.name))
+    })?;
+
+    Ok(ArtifactStepSecret {
+        name: secret.name,
+        value,
+    })
+}
+
 async fn prepare_artifact(
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
@@ -880,39 +921,26 @@ async fn prepare_artifact(
 
     let mut artifact_steps = vec![];
 
+    // A lower bound on the prepared artifact's encoded size, so a request of many
+    // secrets stops sealing once the limit is certain to be exceeded.
+    let mut sealed_secrets_len = 0;
+
     for step in artifact.steps {
         let mut secrets = vec![];
 
-        // Every error below names the secret only: its value must not reach the status.
         for secret in step.secrets {
-            if secret.value.len() > notary::SEALED_SECRET_LIMIT {
+            let sealed = seal_step_secret(&public_key, &request.artifact_namespace, secret)?;
+
+            sealed_secrets_len += sealed.value.len();
+
+            if sealed_secrets_len > PREPARED_ARTIFACT_LIMIT {
                 return Err(Status::invalid_argument(format!(
-                    "secret '{}' is {} bytes, above the limit of {} bytes",
-                    secret.name,
-                    secret.value.len(),
-                    notary::SEALED_SECRET_LIMIT
+                    "artifact '{}' is at least {sealed_secrets_len} bytes encoded, above the limit of {PREPARED_ARTIFACT_LIMIT} bytes",
+                    artifact.name
                 )));
             }
 
-            if std::str::from_utf8(&secret.value).is_err() {
-                return Err(Status::invalid_argument(format!(
-                    "secret '{}' is not valid UTF-8",
-                    secret.name
-                )));
-            }
-
-            let associated_data =
-                notary::secret_associated_data(&request.artifact_namespace, &secret.name);
-
-            let value =
-                notary::seal(&public_key, &secret.value, &associated_data).map_err(|err| {
-                    Status::internal(format!("failed to seal secret '{}': {err}", secret.name))
-                })?;
-
-            secrets.push(ArtifactStepSecret {
-                name: secret.name,
-                value,
-            });
+            secrets.push(sealed);
         }
 
         artifact_steps.push(ArtifactStep {
@@ -962,6 +990,15 @@ async fn prepare_artifact(
         systems: artifact.systems,
         target: artifact.target,
     };
+
+    let artifact_len = artifact.encoded_len();
+
+    if artifact_len > PREPARED_ARTIFACT_LIMIT {
+        return Err(Status::invalid_argument(format!(
+            "artifact '{}' is {artifact_len} bytes encoded, above the limit of {PREPARED_ARTIFACT_LIMIT} bytes",
+            artifact.name
+        )));
+    }
 
     let artifact_json =
         serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{err}")))?;
@@ -1127,22 +1164,26 @@ mod tests {
         }
     }
 
-    /// Prepares an artifact in `namespace` with one step carrying `secrets` and no
-    /// sources, sealing with the public key at `public_key_path`, and returns the
-    /// step's prepared secrets.
+    fn secrets_step(secrets: Vec<ArtifactStepSecret>) -> ArtifactStep {
+        ArtifactStep {
+            secrets,
+            ..Default::default()
+        }
+    }
+
+    /// Prepares an artifact named `secret-test` in `namespace` with `step` as its only
+    /// step and no sources, sealing with the public key at `public_key_path`, and
+    /// returns the step's prepared secrets.
     async fn prepare_step_secrets(
         public_key_path: &Path,
         namespace: &str,
-        secrets: Vec<ArtifactStepSecret>,
+        step: ArtifactStep,
     ) -> anyhow::Result<Result<Vec<ArtifactStepSecret>, Status>> {
         let context = tempfile::tempdir()?;
         let request = Request::new(PrepareArtifactRequest {
             artifact: Some(Artifact {
                 name: "secret-test".to_string(),
-                steps: vec![ArtifactStep {
-                    secrets,
-                    ..Default::default()
-                }],
+                steps: vec![step],
                 ..Default::default()
             }),
             artifact_context: context.path().display().to_string(),
@@ -1185,7 +1226,8 @@ mod tests {
             .map(|(index, value)| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
             .collect();
 
-        let prepared = prepare_step_secrets(&public_key_path, "team", secrets).await??;
+        let prepared =
+            prepare_step_secrets(&public_key_path, "team", secrets_step(secrets)).await??;
 
         assert_eq!(prepared.len(), values.len());
         for (secret, value) in prepared.iter().zip(&values) {
@@ -1200,23 +1242,63 @@ mod tests {
     }
 
     mod abuse {
-        use super::{prepare_step_secrets, step_secret};
+        use super::{prepare_step_secrets, secrets_step, step_secret};
         use crate::command::store::notary::test_fixtures::write_service_keys;
         use tonic::Code;
+        use vorpal_sdk::api::artifact::ArtifactStep;
 
         const MARKER: &str = "MARKER-5ec7e7-";
+
+        fn marker_value(len: usize) -> String {
+            MARKER.repeat(len / MARKER.len() + 1)[..len].to_string()
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_artifact_above_encoded_size_limit_naming_it_without_secrets(
+        ) -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+            let value = marker_value(65536);
+            // The sealed secrets alone stay under the limit; the script carries the
+            // artifact over it.
+            let secrets = (0..59)
+                .map(|index| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
+                .collect();
+            let step = ArtifactStep {
+                script: Some("#".repeat(100_000)),
+                ..secrets_step(secrets)
+            };
+
+            let Err(status) = prepare_step_secrets(&public_key_path, "team", step).await? else {
+                anyhow::bail!("prepare accepted an artifact above the encoded size limit");
+            };
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("'secret-test'"), "{message}");
+            assert!(message.contains("limit of 3932160 bytes"), "{message}");
+            assert!(
+                message
+                    .split(|c: char| !c.is_ascii_digit())
+                    .filter_map(|number| number.parse::<usize>().ok())
+                    .any(|size| size > 3_932_160),
+                "{message}"
+            );
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
 
         #[tokio::test]
         async fn prepare_rejects_secret_above_size_limit_naming_it_without_its_value(
         ) -> anyhow::Result<()> {
             let keys = tempfile::tempdir()?;
             let (public_key_path, _) = write_service_keys(keys.path())?;
-            let value = MARKER.repeat(65537 / MARKER.len() + 1)[..65537].to_string();
+            let value = marker_value(65537);
 
             let Err(status) = prepare_step_secrets(
                 &public_key_path,
                 "team",
-                vec![step_secret("OVERSIZE", value.as_bytes())],
+                secrets_step(vec![step_secret("OVERSIZE", value.as_bytes())]),
             )
             .await?
             else {
