@@ -58,10 +58,11 @@ generate:
 
 # Docket gates
 #
-# Each target backs the `docket trust` entry of the same name. `sdet-abuse` and
-# `vuln-scan` are stubs: they exit 0 without checking, and their trust entries
-# carry `stub(no-real-check: ...)` so docket marks their passes hollow. Making
-# one real also needs `docket trust add` re-run to clear that annotation.
+# Each target backs the `docket trust` entry of the same name. The `vuln-scan`
+# and `sdet-abuse` trust entries still carry `stub(no-real-check: ...)`, so
+# docket marks their passes hollow until the operator re-adds them. `vuln-scan`
+# needs `--network api.osv.dev` on the re-add; `sdet-abuse` needs `--tree` and a
+# `--timeout`.
 
 # Runs `build` and `test` and reports each result, as a pre-gate on `verify`.
 ac-commands:
@@ -92,15 +93,17 @@ diff-scope-small:
 
 .PHONY: qa-test doc-validate diff-scope-docs diff-scope-trivial diff-scope-small
 
+# Abuse-case tests: Rust tests whose path contains `abuse` must exist and pass.
 sdet-abuse:
-	bash script/qa/stub.sh $@
+	CARGO_FLAGS="$(CARGO_FLAGS)" bash script/qa/sdet-abuse.sh
 
 # Refuses a change that adds a credential.
 secret-scan:
 	bash script/qa/secret-scan.sh
 
+# Queries every tracked lockfile against OSV; scoped by DOCKET_GATE_BASE when set.
 vuln-scan:
-	bash script/qa/stub.sh $@
+	bash script/qa/vuln-scan.sh
 
 # Development (with Vorpal)
 
