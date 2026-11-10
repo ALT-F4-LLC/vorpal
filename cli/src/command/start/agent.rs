@@ -867,26 +867,24 @@ async fn resolve_and_upsert_source(
     Ok(())
 }
 
-/// Rejects a step whose secret names break the shared name rule or that references a
-/// secret in its arguments or environment, so the request fails here instead of at the
-/// worker after earlier steps have built. The worker still applies the same check.
-fn check_step_secrets(step: &ArtifactStep) -> Result<(), Status> {
-    secrets::validate_names(step.secrets.iter().map(|secret| secret.name.as_str()))
-        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+/// Rejects a secret named `name` that `arguments` or `environments` reference, where the
+/// worker would expose its value in the process arguments. This fails the request here
+/// instead of at the worker after earlier steps have built; the worker still applies the
+/// same check.
+fn check_secret_unreferenced(
+    arguments: &[String],
+    environments: &[String],
+    name: &str,
+) -> Result<(), Status> {
+    let referenced = arguments
+        .iter()
+        .chain(environments)
+        .any(|text| !secrets::references(text, name).is_empty());
 
-    for secret in &step.secrets {
-        let referenced = step
-            .arguments
-            .iter()
-            .chain(&step.environments)
-            .any(|text| !secrets::references(text, &secret.name).is_empty());
-
-        if referenced {
-            return Err(Status::invalid_argument(format!(
-                "step references secret {:?} in its arguments or environment; read it from its file under $VORPAL_SECRET_DIR instead",
-                secret.name
-            )));
-        }
+    if referenced {
+        return Err(Status::invalid_argument(format!(
+            "step references secret {name:?} in its arguments or environment; read it from its file under $VORPAL_SECRET_DIR instead"
+        )));
     }
 
     Ok(())
@@ -952,11 +950,18 @@ async fn prepare_artifact(
     let mut sealed_secrets_len = 0;
 
     for step in artifact.steps {
-        check_step_secrets(&step)?;
+        // Every name is checked before any secret is sealed, so the sealing errors,
+        // which print the name unescaped, only ever see valid names.
+        secrets::validate_names(step.secrets.iter().map(|secret| secret.name.as_str()))
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
         let mut secrets = vec![];
 
         for secret in step.secrets {
+            // Checked secret by secret, so the encoded size limit below also bounds how
+            // many secrets are scanned for references.
+            check_secret_unreferenced(&step.arguments, &step.environments, &secret.name)?;
+
             let sealed = seal_step_secret(&public_key, &request.artifact_namespace, secret)?;
 
             sealed_secrets_len += sealed.value.len();
