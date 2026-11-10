@@ -391,7 +391,7 @@ vorpal system services start [OPTIONS]
 | `--issuer <URL>` | | OIDC issuer URL for JWT validation |
 | `--issuer-audience <AUDIENCE>` | | Expected JWT audience |
 | `--issuer-client-id <ID>` | | OAuth2 client ID for worker-to-registry auth |
-| `--issuer-client-secret <SECRET>` | | OAuth2 client secret for worker-to-registry auth |
+| `--issuer-client-secret-file <PATH>` | | File holding the OAuth2 client secret for worker-to-registry auth. The file must not be accessible by group or others (mode `0600` or stricter). One trailing newline is ignored. Env: `VORPAL_ISSUER_CLIENT_SECRET_FILE` |
 | `--port <PORT>` | | TCP port (omit for Unix domain socket mode) |
 | `--registry-backend <BACKEND>` | `local` | Registry storage backend (`local` or `s3`) |
 | `--registry-backend-s3-bucket <BUCKET>` | | S3 bucket name (required when backend is `s3`) |
@@ -429,7 +429,7 @@ vorpal system services start \
   --issuer https://id.example.com/realms/vorpal \
   --issuer-audience vorpal \
   --issuer-client-id worker \
-  --issuer-client-secret <secret>
+  --issuer-client-secret-file /etc/vorpal/client-secret
 ```
 
 ## Environment Variables
@@ -437,6 +437,7 @@ vorpal system services start \
 | Variable | Description |
 |----------|-------------|
 | `VORPAL_SOCKET_PATH` | Override the default Unix domain socket path (`/var/lib/vorpal/vorpal.sock`) |
+| `VORPAL_ISSUER_CLIENT_SECRET_FILE` | Path to the issuer client secret file for `vorpal system services start` (same as `--issuer-client-secret-file`) |
 
 ## Exit Codes
 

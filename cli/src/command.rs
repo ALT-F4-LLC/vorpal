@@ -78,8 +78,10 @@ pub enum CommandSystemServices {
         #[arg(long)]
         issuer_client_id: Option<String>,
 
-        #[arg(long)]
-        issuer_client_secret: Option<String>,
+        /// File holding the issuer client secret the worker uses for registry
+        /// tokens. The file must not be accessible by group or others (0600).
+        #[arg(env = "VORPAL_ISSUER_CLIENT_SECRET_FILE", long, value_name = "PATH")]
+        issuer_client_secret_file: Option<PathBuf>,
 
         /// Comma-separated OAuth client IDs whose tokens are classified as
         /// trusted service principals. Tokens whose `azp` claim matches a
@@ -709,6 +711,74 @@ mod unlock_parse_tests {
     }
 
     #[test]
+    fn services_start_accepts_issuer_client_secret_file() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let cli = parse(&[
+            "system",
+            "services",
+            "start",
+            "--issuer-client-secret-file",
+            "/etc/vorpal/client-secret",
+        ])?;
+        let Command::System(CommandSystem::Services(CommandSystemServices::Start {
+            issuer_client_secret_file,
+            ..
+        })) = cli.command
+        else {
+            return Err("expected system services start command".into());
+        };
+        assert_eq!(
+            issuer_client_secret_file,
+            Some(PathBuf::from("/etc/vorpal/client-secret"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn services_start_reads_secret_file_path_from_env() -> Result<(), Box<dyn std::error::Error>> {
+        let command = Cli::command();
+        let start = command
+            .find_subcommand("system")
+            .and_then(|c| c.find_subcommand("services"))
+            .and_then(|c| c.find_subcommand("start"))
+            .ok_or("expected system services start subcommand")?;
+        let arg = start
+            .get_arguments()
+            .find(|a| a.get_id() == "issuer_client_secret_file")
+            .ok_or("expected issuer_client_secret_file argument")?;
+        assert_eq!(
+            arg.get_env().and_then(|e| e.to_str()),
+            Some("VORPAL_ISSUER_CLIENT_SECRET_FILE")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn services_start_rejects_removed_issuer_client_secret_flag(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let marker = "MARKER-7f3a9c";
+        let joined = format!("--issuer-client-secret={marker}");
+        for args in [
+            vec![
+                "system",
+                "services",
+                "start",
+                "--issuer-client-secret",
+                marker,
+            ],
+            vec!["system", "services", "start", joined.as_str()],
+        ] {
+            let Err(err) = parse(&args) else {
+                return Err(format!("removed flag was accepted: {args:?}").into());
+            };
+            let text = err.render().to_string();
+            assert!(text.contains("--issuer-client-secret-file"), "{text}");
+            assert!(!text.contains(marker), "{text}");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn build_unlock_omitted_defaults_false() -> Result<(), Box<dyn std::error::Error>> {
         let cli = parse(&["build", "foo"])?;
         let Command::Build { unlock, .. } = cli.command else {
@@ -1228,7 +1298,7 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 issuer,
                 issuer_audience,
                 issuer_client_id,
-                issuer_client_secret,
+                issuer_client_secret_file,
                 issuer_service_client_ids,
                 port,
                 registry_backend,
@@ -1237,6 +1307,11 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 services,
                 tls,
             } => {
+                let issuer_client_secret = issuer_client_secret_file
+                    .as_deref()
+                    .map(start::read_issuer_client_secret_file)
+                    .transpose()?;
+
                 // Parse the comma-separated list. Trim whitespace per entry and
                 // silently drop empty segments, so inputs like "worker-id,"
                 // or " a , , b " never produce `""` entries in the allow-list.
