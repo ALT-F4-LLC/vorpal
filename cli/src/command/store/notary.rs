@@ -6,11 +6,10 @@ use aws_lc_rs::{
         PublicEncryptingKey, OAEP_SHA256_MGF1SHA256,
     },
 };
-use base64::{engine::general_purpose, Engine};
 use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey},
     rand_core::{self, RngCore},
-    Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
+    RsaPrivateKey, RsaPublicKey,
 };
 use std::path::Path;
 use tokio::fs::read;
@@ -20,7 +19,10 @@ use tokio::fs::read;
 const SEALED_MARKER: &[u8; 8] = b"\0vorpal1";
 
 /// Largest secret `seal` accepts, in bytes.
-const SEALED_SECRET_LIMIT: usize = 65_536;
+pub const SEALED_SECRET_LIMIT: usize = 65_536;
+
+/// Version of the sealed step-secret format, bound into every value's associated data.
+const SECRET_FORMAT_VERSION: &[u8] = b"1";
 
 /// Loads and parses an RSA private key in PKCS#8 PEM format from `private_key_path`.
 pub async fn get_private_key(private_key_path: &Path) -> Result<RsaPrivateKey> {
@@ -44,36 +46,19 @@ pub async fn get_public_key(public_key_path: &Path) -> Result<RsaPublicKey> {
     RsaPublicKey::from_public_key_pem(key).context("failed to parse public key")
 }
 
-/// Encrypts `data` with the RSA public key at `public_key_path` and returns the
-/// ciphertext, base64-encoded.
-pub async fn encrypt(public_key_path: &Path, data: String) -> Result<String> {
-    let public_key = get_public_key(public_key_path).await?;
+/// Builds the associated data that binds a sealed step secret to the namespace and
+/// secret name it was prepared for. Each field, the format version first, is
+/// prefixed with its length as a big-endian `u64`, so two different splits of the
+/// same characters into namespace and name never produce the same bytes.
+pub fn secret_associated_data(namespace: &str, name: &str) -> Vec<u8> {
+    let mut associated_data = vec![];
 
-    let mut rng = rand_core::OsRng;
+    for field in [SECRET_FORMAT_VERSION, namespace.as_bytes(), name.as_bytes()] {
+        associated_data.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        associated_data.extend_from_slice(field);
+    }
 
-    let data_encrypted = public_key
-        .encrypt(&mut rng, Pkcs1v15Encrypt, data.as_bytes())
-        .context("failed to encrypt")?;
-
-    let data_encoded = general_purpose::STANDARD.encode(&data_encrypted);
-
-    Ok(data_encoded)
-}
-
-/// Decrypts base64-encoded ciphertext `data_encoded` with the RSA private key at
-/// `private_key_path` and returns the plaintext.
-pub async fn decrypt(private_key_path: &Path, data_encoded: String) -> Result<String> {
-    let private_key = get_private_key(private_key_path).await?;
-
-    let data_encrypted = general_purpose::STANDARD
-        .decode(data_encoded)
-        .context("failed to decode base64 data")?;
-
-    let decrypted = private_key
-        .decrypt(Pkcs1v15Encrypt, &data_encrypted)
-        .context("failed to decrypt")?;
-
-    Ok(String::from_utf8(decrypted)?)
+    associated_data
 }
 
 /// Seals `secret` for the holder of the private half of `public_key`.
@@ -82,13 +67,6 @@ pub async fn decrypt(private_key_path: &Path, data_encoded: String) -> Result<St
 /// The sealed value is `marker || wrapped key || nonce || ciphertext || tag`, and
 /// the tag authenticates every byte before it together with `associated_data`,
 /// which `open` must receive unchanged.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the agent switches from `encrypt` to `seal` in the wiring change"
-    )
-)]
 pub fn seal(public_key: &RsaPublicKey, secret: &[u8], associated_data: &[u8]) -> Result<Vec<u8>> {
     if secret.len() > SEALED_SECRET_LIMIT {
         bail!(
@@ -151,13 +129,6 @@ pub fn seal(public_key: &RsaPublicKey, secret: &[u8], associated_data: &[u8]) ->
 /// error telling the caller to prepare the secret again. Every other failure,
 /// whether truncation, a wrong key, tampering, or different associated data,
 /// returns the same error so its text reveals nothing about which check failed.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the worker switches from `decrypt` to `open` in the wiring change"
-    )
-)]
 pub fn open(private_key: &RsaPrivateKey, sealed: &[u8], associated_data: &[u8]) -> Result<Vec<u8>> {
     let Some(after_marker) = sealed.strip_prefix(SEALED_MARKER.as_slice()) else {
         bail!("secret was encrypted with an older format and must be prepared again");
@@ -201,9 +172,59 @@ pub fn open(private_key: &RsaPrivateKey, sealed: &[u8], associated_data: &[u8]) 
     Ok(secret)
 }
 
+/// Synthetic key pairs and secrets generated at test run time, so no private key is
+/// ever committed.
+#[cfg(test)]
+pub(crate) mod test_fixtures {
+    use anyhow::Result;
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair, PKCS_RSA_SHA256};
+    use std::path::{Path, PathBuf};
+
+    /// Writes a fresh service key pair, generated the way `system keys generate` does,
+    /// into `dir` and returns its public and private key paths.
+    pub fn write_service_keys(dir: &Path) -> Result<(PathBuf, PathBuf)> {
+        let key_pair = KeyPair::generate_for(&PKCS_RSA_SHA256)?;
+        let public_key_path = dir.join("service.public.pem");
+        let private_key_path = dir.join("service.private.pem");
+        std::fs::write(&public_key_path, key_pair.public_key_pem())?;
+        std::fs::write(&private_key_path, key_pair.serialize_pem())?;
+        Ok((public_key_path, private_key_path))
+    }
+
+    /// Returns a PEM leaf and CA certificate chain followed by the leaf's private key,
+    /// and a service-account JSON document that carries the same key.
+    pub fn certificate_chain_and_service_account() -> Result<[String; 2]> {
+        let ca_key = KeyPair::generate()?;
+        let mut ca_params = CertificateParams::new(Vec::<String>::new())?;
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_cert = ca_params.self_signed(&ca_key)?;
+        let ca_issuer = Issuer::new(ca_params, ca_key);
+        let leaf_key = KeyPair::generate()?;
+        let leaf_cert = CertificateParams::new(vec!["localhost".to_string()])?
+            .signed_by(&leaf_key, &ca_issuer)?;
+        let chain_with_key = format!(
+            "{}{}{}",
+            leaf_cert.pem(),
+            ca_cert.pem(),
+            leaf_key.serialize_pem()
+        );
+
+        let service_account = serde_json::json!({
+            "type": "service_account",
+            "project_id": "synthetic-project",
+            "private_key_id": "0123456789abcdef",
+            "private_key": leaf_key.serialize_pem(),
+            "client_email": "synthetic@synthetic-project.example.com",
+        })
+        .to_string();
+
+        Ok([chain_with_key, service_account])
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{open, seal};
+    use super::{open, seal, secret_associated_data};
     use anyhow::Result;
     use rcgen::{KeyPair, PKCS_RSA_SHA256};
     use rsa::{
@@ -231,12 +252,54 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn associated_data_length_prefixes_version_namespace_and_name() {
+        let expected = [
+            &[0, 0, 0, 0, 0, 0, 0, 1][..],
+            b"1",
+            &[0, 0, 0, 0, 0, 0, 0, 4],
+            b"team",
+            &[0, 0, 0, 0, 0, 0, 0, 4],
+            b"xKEY",
+        ]
+        .concat();
+
+        assert_eq!(secret_associated_data("team", "xKEY"), expected);
+    }
+
+    #[test]
+    fn open_rejects_value_bound_to_a_different_namespace_and_name_split() -> Result<()> {
+        let (public_key, private_key) = service_keys()?;
+        let sealed = seal(
+            &public_key,
+            b"bound secret",
+            &secret_associated_data("team", "xKEY"),
+        )?;
+
+        assert!(open(
+            &private_key,
+            &sealed,
+            &secret_associated_data("teamx", "KEY")
+        )
+        .is_err());
+        assert_eq!(
+            open(
+                &private_key,
+                &sealed,
+                &secret_associated_data("team", "xKEY")
+            )?,
+            b"bound secret"
+        );
+        Ok(())
+    }
+
     mod abuse {
         use super::service_keys;
-        use crate::command::store::notary::{open, seal};
+        use crate::command::store::notary::{
+            open, seal, test_fixtures::certificate_chain_and_service_account,
+        };
         use anyhow::{bail, Result};
         use base64::{engine::general_purpose, Engine};
-        use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
         use rsa::{rand_core::OsRng, Pkcs1v15Encrypt, RsaPrivateKey};
         use std::collections::BTreeSet;
 
@@ -275,31 +338,7 @@ mod tests {
         fn round_trips_generated_certificate_chain_and_service_account() -> Result<()> {
             let (public_key, private_key) = service_keys()?;
 
-            let ca_key = KeyPair::generate()?;
-            let mut ca_params = CertificateParams::new(Vec::<String>::new())?;
-            ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-            let ca_cert = ca_params.self_signed(&ca_key)?;
-            let ca_issuer = Issuer::new(ca_params, ca_key);
-            let leaf_key = KeyPair::generate()?;
-            let leaf_cert = CertificateParams::new(vec!["localhost".to_string()])?
-                .signed_by(&leaf_key, &ca_issuer)?;
-            let chain_with_key = format!(
-                "{}{}{}",
-                leaf_cert.pem(),
-                ca_cert.pem(),
-                leaf_key.serialize_pem()
-            );
-
-            let service_account = serde_json::json!({
-                "type": "service_account",
-                "project_id": "synthetic-project",
-                "private_key_id": "0123456789abcdef",
-                "private_key": leaf_key.serialize_pem(),
-                "client_email": "synthetic@synthetic-project.example.com",
-            })
-            .to_string();
-
-            for secret in [chain_with_key, service_account] {
+            for secret in certificate_chain_and_service_account()? {
                 assert!(secret.len() > 245);
                 let sealed = seal(&public_key, secret.as_bytes(), b"context")?;
                 assert_eq!(open(&private_key, &sealed, b"context")?, secret.as_bytes());

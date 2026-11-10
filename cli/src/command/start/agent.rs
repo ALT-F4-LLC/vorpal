@@ -14,7 +14,6 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
-use base64::{engine::general_purpose, Engine as _};
 use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
@@ -865,6 +864,7 @@ async fn prepare_artifact(
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: SourceCache,
+    public_key_path: &Path,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -874,28 +874,40 @@ async fn prepare_artifact(
 
     // TODO: Check if artifact already exists in the registry
 
-    let public_key_path = get_key_service_public_path();
+    let public_key = notary::get_public_key(public_key_path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to load public key: {err:#}")))?;
 
     let mut artifact_steps = vec![];
 
     for step in artifact.steps {
         let mut secrets = vec![];
 
+        // Every error below names the secret only: its value must not reach the status.
         for secret in step.secrets {
-            // The error names the secret only: its value must not reach the status.
-            let plaintext = String::from_utf8(secret.value).map_err(|_| {
-                Status::invalid_argument(format!("secret '{}' is not valid UTF-8", secret.name))
-            })?;
+            if secret.value.len() > notary::SEALED_SECRET_LIMIT {
+                return Err(Status::invalid_argument(format!(
+                    "secret '{}' is {} bytes, above the limit of {} bytes",
+                    secret.name,
+                    secret.value.len(),
+                    notary::SEALED_SECRET_LIMIT
+                )));
+            }
 
-            let encrypted = notary::encrypt(&public_key_path, plaintext)
-                .await
-                .map_err(|err| Status::internal(format!("failed to encrypt secret: {err}")))?;
+            if std::str::from_utf8(&secret.value).is_err() {
+                return Err(Status::invalid_argument(format!(
+                    "secret '{}' is not valid UTF-8",
+                    secret.name
+                )));
+            }
 
-            // Store the raw ciphertext so its JSON form matches records the
-            // previous release wrote as base64 text.
-            let value = general_purpose::STANDARD
-                .decode(encrypted)
-                .map_err(|err| Status::internal(format!("failed to decode secret: {err}")))?;
+            let associated_data =
+                notary::secret_associated_data(&request.artifact_namespace, &secret.name);
+
+            let value =
+                notary::seal(&public_key, &secret.value, &associated_data).map_err(|err| {
+                    Status::internal(format!("failed to seal secret '{}': {err}", secret.name))
+                })?;
 
             secrets.push(ArtifactStepSecret {
                 name: secret.name,
@@ -1001,7 +1013,9 @@ impl AgentService for AgentServer {
         let source_cache = Arc::clone(&self.source_cache);
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(request, &tx, source_cache).await {
+            let public_key_path = get_key_service_public_path();
+
+            if let Err(err) = prepare_artifact(request, &tx, source_cache, &public_key_path).await {
                 let _ = tx.send(Err(err)).await;
             }
         });
@@ -1013,6 +1027,9 @@ impl AgentService for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::store::notary::test_fixtures::{
+        certificate_chain_and_service_account, write_service_keys,
+    };
 
     #[test]
     fn classify_local_when_path_exists() {
@@ -1101,5 +1118,118 @@ mod tests {
             false,
             false
         ));
+    }
+
+    fn step_secret(name: &str, value: &[u8]) -> ArtifactStepSecret {
+        ArtifactStepSecret {
+            name: name.to_string(),
+            value: value.to_vec(),
+        }
+    }
+
+    /// Prepares an artifact in `namespace` with one step carrying `secrets` and no
+    /// sources, sealing with the public key at `public_key_path`, and returns the
+    /// step's prepared secrets.
+    async fn prepare_step_secrets(
+        public_key_path: &Path,
+        namespace: &str,
+        secrets: Vec<ArtifactStepSecret>,
+    ) -> anyhow::Result<Result<Vec<ArtifactStepSecret>, Status>> {
+        let context = tempfile::tempdir()?;
+        let request = Request::new(PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                name: "secret-test".to_string(),
+                steps: vec![ArtifactStep {
+                    secrets,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            artifact_context: context.path().display().to_string(),
+            artifact_namespace: namespace.to_string(),
+            ..Default::default()
+        });
+        let (tx, mut rx) = channel(1);
+        let source_cache = Arc::new(Mutex::new(SourceCacheState::default()));
+
+        if let Err(status) = prepare_artifact(request, &tx, source_cache, public_key_path).await {
+            return Ok(Err(status));
+        }
+
+        let Some(Ok(PrepareArtifactResponse {
+            artifact: Some(artifact),
+            ..
+        })) = rx.recv().await
+        else {
+            anyhow::bail!("prepare sent no artifact");
+        };
+
+        Ok(Ok(artifact
+            .steps
+            .into_iter()
+            .flat_map(|step| step.secrets)
+            .collect()))
+    }
+
+    #[tokio::test]
+    async fn prepares_secrets_that_open_under_their_namespace_and_name() -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let private_key = notary::get_private_key(&private_key_path).await?;
+        let [certificate_chain, service_account] = certificate_chain_and_service_account()?;
+        let values = ["key=value/".repeat(103), certificate_chain, service_account];
+        assert!(values[0].len() >= 1024);
+        let secrets = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
+            .collect();
+
+        let prepared = prepare_step_secrets(&public_key_path, "team", secrets).await??;
+
+        assert_eq!(prepared.len(), values.len());
+        for (secret, value) in prepared.iter().zip(&values) {
+            assert_ne!(secret.value, value.as_bytes());
+            let associated_data = notary::secret_associated_data("team", &secret.name);
+            assert_eq!(
+                notary::open(&private_key, &secret.value, &associated_data)?,
+                value.as_bytes()
+            );
+        }
+        Ok(())
+    }
+
+    mod abuse {
+        use super::{prepare_step_secrets, step_secret};
+        use crate::command::store::notary::test_fixtures::write_service_keys;
+        use tonic::Code;
+
+        const MARKER: &str = "MARKER-5ec7e7-";
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_above_size_limit_naming_it_without_its_value(
+        ) -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+            let value = MARKER.repeat(65537 / MARKER.len() + 1)[..65537].to_string();
+
+            let Err(status) = prepare_step_secrets(
+                &public_key_path,
+                "team",
+                vec![step_secret("OVERSIZE", value.as_bytes())],
+            )
+            .await?
+            else {
+                anyhow::bail!("prepare accepted a 65537-byte secret");
+            };
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("'OVERSIZE'"), "{message}");
+            assert!(message.contains("65537 bytes"), "{message}");
+            assert!(message.contains("limit of 65536 bytes"), "{message}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
     }
 }

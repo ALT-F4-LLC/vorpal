@@ -11,7 +11,6 @@ use crate::command::{
     },
 };
 use anyhow::Result;
-use base64::{engine::general_purpose, Engine as _};
 use sha256::digest;
 use std::{
     collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
@@ -374,9 +373,7 @@ async fn pull_artifact(
 
 fn expand_env(text: &str, envs: &[&String]) -> String {
     envs.iter().fold(text.to_string(), |acc, e| {
-        let parts = e.split('=').collect::<Vec<&str>>();
-        let key = parts[0];
-        let value = parts[1];
+        let (key, value) = e.split_once('=').unwrap_or((e, ""));
 
         let mut output = String::with_capacity(acc.len());
         let mut copied = 0;
@@ -395,11 +392,17 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
 /// Builds the sorted list of `KEY=value` environment variable strings for one step:
 /// per-artifact `VORPAL_ARTIFACT_*` paths, `VORPAL_ARTIFACTS`, the step's own
 /// `VORPAL_ARTIFACT_*`/`VORPAL_OUTPUT`/`VORPAL_WORKSPACE`, its custom environment
-/// variables, and its secrets (decrypted with the service private key).
+/// variables, and its secrets, opened with the private key at `private_key_path` and
+/// bound to `artifact_namespace` and each secret's name.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is an independent input to the step environment; grouping them would need a bespoke struct used by this one caller"
+)]
 async fn build_step_environments(
     artifact_digest: &str,
     artifact_namespace: &str,
     artifact_path: &Path,
+    private_key_path: &Path,
     step_artifacts: &[String],
     step_environments: Vec<String>,
     step_secrets: Vec<ArtifactStepSecret>,
@@ -447,20 +450,30 @@ async fn build_step_environments(
 
     // Add all secrets as environment variables
 
-    let private_key_path = get_key_service_key_path();
-
     if !private_key_path.exists() {
         return Err(Status::internal("private key not found"));
     }
 
-    for secret in step_secrets {
-        let encrypted = general_purpose::STANDARD.encode(&secret.value);
-
-        let value = notary::decrypt(&private_key_path, encrypted)
+    if !step_secrets.is_empty() {
+        let private_key = notary::get_private_key(private_key_path)
             .await
-            .map_err(|err| Status::internal(format!("failed to decrypt secret: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to load private key: {err:#}")))?;
 
-        environments.push(format!("{}={}", secret.name, value));
+        // Every error below names the secret only: its value must not reach the status.
+        for secret in step_secrets {
+            let associated_data = notary::secret_associated_data(artifact_namespace, &secret.name);
+
+            let value =
+                notary::open(&private_key, &secret.value, &associated_data).map_err(|err| {
+                    Status::internal(format!("failed to open secret '{}': {err}", secret.name))
+                })?;
+
+            let value = String::from_utf8(value).map_err(|_| {
+                Status::invalid_argument(format!("secret '{}' is not valid UTF-8", secret.name))
+            })?;
+
+            environments.push(format!("{}={}", secret.name, value));
+        }
     }
 
     // Sort environment variables by key length
@@ -474,6 +487,7 @@ async fn run_step(
     artifact_digest: &str,
     artifact_namespace: &str,
     artifact_path: &Path,
+    private_key_path: &Path,
     step: ArtifactStep,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
     workspace_path: &Path,
@@ -482,6 +496,7 @@ async fn run_step(
         artifact_digest,
         artifact_namespace,
         artifact_path,
+        private_key_path,
         &step.artifacts,
         step.environments,
         step.secrets,
@@ -532,10 +547,10 @@ async fn run_step(
     // Setup environment variables
 
     for env in &environments_sorted {
-        let env = env.split('=').collect::<Vec<&str>>();
-        let env_value = expand_env(env[1], &vorpal_envs);
+        let (env_key, env_value) = env.split_once('=').unwrap_or((env, ""));
+        let env_value = expand_env(env_value, &vorpal_envs);
 
-        command.env(env[0], env_value);
+        command.env(env_key, env_value);
     }
 
     // Setup arguments
@@ -1014,6 +1029,8 @@ async fn build_artifact(
         )));
     }
 
+    let private_key_path = get_key_service_key_path();
+
     // artifact is iterated by reference here and moved whole into
     // pack_push_and_store_artifact below; run_step needs an owned ArtifactStep.
     for step in &artifact.steps {
@@ -1021,6 +1038,7 @@ async fn build_artifact(
             artifact_digest,
             artifact_namespace,
             &artifact_output_path,
+            &private_key_path,
             step.clone(),
             tx,
             &workspace_path,
@@ -1152,7 +1170,169 @@ impl WorkerService for WorkerServer {
 
 #[cfg(test)]
 mod tests {
-    use super::expand_env;
+    use super::{expand_env, run_step};
+    use crate::command::store::notary::{
+        self,
+        test_fixtures::{certificate_chain_and_service_account, write_service_keys},
+    };
+    use std::path::Path;
+    use tokio::sync::mpsc::channel;
+    use tonic::{Code, Status};
+    use vorpal_sdk::api::artifact::{ArtifactStep, ArtifactStepSecret};
+
+    const MARKER: &str = "MARKER-5ec7e7-";
+
+    /// Seals `value` with the public key at `public_key_path` for `namespace` and
+    /// `name`, the way the agent prepares it.
+    async fn sealed_secret(
+        public_key_path: &Path,
+        namespace: &str,
+        name: &str,
+        value: &[u8],
+    ) -> anyhow::Result<Vec<u8>> {
+        let public_key = notary::get_public_key(public_key_path).await?;
+        let associated_data = notary::secret_associated_data(namespace, name);
+        notary::seal(&public_key, value, &associated_data)
+    }
+
+    /// Runs one step in `namespace` whose script writes its `SECRET` environment value
+    /// to a file, with `value` presented as the step's `SECRET`. Returns the bytes the
+    /// step wrote, or the step's error after checking the step never ran.
+    async fn run_secret_step(
+        private_key_path: &Path,
+        namespace: &str,
+        value: Vec<u8>,
+    ) -> anyhow::Result<Result<Vec<u8>, Status>> {
+        let sandbox = tempfile::tempdir()?;
+        let workspace_path = sandbox.path().join("workspace");
+        let output_path = sandbox.path().join("output");
+        std::fs::create_dir(&workspace_path)?;
+        std::fs::create_dir(&output_path)?;
+        let step = ArtifactStep {
+            script: Some("#!/bin/sh\nprintf '%s' \"$SECRET\" > \"$VORPAL_OUTPUT/secret\"\n".into()),
+            secrets: vec![ArtifactStepSecret {
+                name: "SECRET".to_string(),
+                value,
+            }],
+            ..Default::default()
+        };
+        let (tx, _rx) = channel(16);
+
+        let result = run_step(
+            "secret-test",
+            namespace,
+            &output_path,
+            private_key_path,
+            step,
+            &tx,
+            &workspace_path,
+        )
+        .await;
+
+        let written = output_path.join("secret");
+        match result {
+            Ok(()) => Ok(Ok(std::fs::read(written)?)),
+            Err(status) => {
+                assert!(!written.exists(), "the step ran despite: {status:?}");
+                Ok(Err(status))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn step_receives_sealed_secrets_unchanged() -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let [certificate_chain, service_account] = certificate_chain_and_service_account()?;
+        let one_kib = "key=value/".repeat(103);
+        assert!(one_kib.len() >= 1024);
+
+        for value in [one_kib, certificate_chain, service_account] {
+            let sealed =
+                sealed_secret(&public_key_path, "team", "SECRET", value.as_bytes()).await?;
+
+            let delivered = run_secret_step(&private_key_path, "team", sealed).await??;
+
+            assert_eq!(delivered, value.as_bytes());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn step_fails_on_secret_that_is_not_utf8_naming_it_without_its_value(
+    ) -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let value = [MARKER.as_bytes(), &[0xff]].concat();
+        let sealed = sealed_secret(&public_key_path, "team", "SECRET", &value).await?;
+
+        let Err(status) = run_secret_step(&private_key_path, "team", sealed).await? else {
+            anyhow::bail!("the step ran with a secret that is not UTF-8");
+        };
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains("'SECRET'"), "{status:?}");
+        assert!(status.message().contains("UTF-8"), "{status:?}");
+        assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+        Ok(())
+    }
+
+    mod abuse {
+        use super::{run_secret_step, sealed_secret, MARKER};
+        use crate::command::store::notary::{self, test_fixtures::write_service_keys};
+        use rsa::{rand_core::OsRng, Pkcs1v15Encrypt};
+
+        #[tokio::test]
+        async fn step_fails_on_secret_in_older_format_naming_it_without_its_value(
+        ) -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+            let public_key = notary::get_public_key(&public_key_path).await?;
+            let older_format =
+                public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, MARKER.as_bytes())?;
+
+            let Err(status) = run_secret_step(&private_key_path, "team", older_format).await?
+            else {
+                anyhow::bail!("the step ran with a secret in the older format");
+            };
+
+            let message = status.message();
+            assert!(message.contains("'SECRET'"), "{message}");
+            assert!(message.contains("older format"), "{message}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn step_fails_on_secret_sealed_for_a_different_name() -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+            let sealed = sealed_secret(&public_key_path, "team", "OTHER", b"bound secret").await?;
+
+            let Err(status) = run_secret_step(&private_key_path, "team", sealed).await? else {
+                anyhow::bail!("the step ran with a secret sealed for another name");
+            };
+
+            assert!(status.message().contains("'SECRET'"), "{status:?}");
+            assert!(status.message().contains("failed to open"), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn step_fails_on_secret_sealed_for_a_different_namespace() -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+            let sealed = sealed_secret(&public_key_path, "team", "SECRET", b"bound secret").await?;
+
+            let Err(status) = run_secret_step(&private_key_path, "other", sealed).await? else {
+                anyhow::bail!("the step ran with a secret sealed for another namespace");
+            };
+
+            assert!(status.message().contains("'SECRET'"), "{status:?}");
+            assert!(status.message().contains("failed to open"), "{status:?}");
+            Ok(())
+        }
+    }
 
     fn expand_with_token(text: &str) -> String {
         let token = String::from("TOKEN=s3cr3t");
@@ -1179,5 +1359,11 @@ mod tests {
         assert_eq!(expand_with_token("$TOKEN{"), "$TOKEN{");
         assert_eq!(expand_with_token("$TOKENé"), "$TOKENé");
         assert_eq!(expand_with_token("${TOKENX}"), "${TOKENX}");
+    }
+
+    #[test]
+    fn expands_to_the_whole_value_after_the_first_equals_sign() {
+        let token = String::from("TOKEN=a=b==");
+        assert_eq!(expand_env("x $TOKEN y", &[&token]), "x a=b== y");
     }
 }
