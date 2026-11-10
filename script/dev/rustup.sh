@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ ! -d "$HOME/.rustup" ]]; then
+if [[ ! -x "$HOME/.cargo/bin/cargo" ]]; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- --default-toolchain 'none' --no-modify-path --profile 'minimal' -y
 fi
