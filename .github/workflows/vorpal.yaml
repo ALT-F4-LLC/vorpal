@@ -407,6 +407,135 @@ jobs:
             exit 1
           fi
 
+  test-secret-argv:
+    needs:
+      - build
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: ./script/dev/debian.sh
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
+
+      - run: |
+          mkdir -p ./dist
+          tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
+          rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
+
+      - uses: ALT-F4-LLC/setup-vorpal-action@main
+        with:
+          registry-backend: s3
+          registry-backend-s3-bucket: altf4llc-vorpal-registry
+          use-local-build: true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # The marker and the visibility token reach the watcher only through this
+      # environment and files written by shell builtins, never through a process
+      # argument, so the watcher cannot match itself. Hits are decided by grep's
+      # output, not its exit status: a process exiting mid-scan makes grep exit 2
+      # even when it printed a match.
+      - name: Build vorpal-secret-job while watching host process arguments
+        env:
+          MARKER: vorpal-synthetic-secret-c4d9e2f1
+          VISIBLE: vorpal-secret-job-visible
+        run: |
+          watch_dir="$RUNNER_TEMP/argv-watch"
+          mkdir -p "$watch_dir"
+          printf '%s\n' "$MARKER" > "$watch_dir/marker"
+          printf '%s\n' "$VISIBLE" > "$watch_dir/visible"
+          : > "$watch_dir/hits"
+          : > "$watch_dir/visible-hits"
+          printf '0\n' > "$watch_dir/scans"
+
+          scan() {
+            grep -alF -f "$1" /proc/[0-9]*/cmdline 2>/dev/null || true
+          }
+
+          if ! grep -qF -f "$watch_dir/marker" config/src/artifact/vorpal_secret_job.rs; then
+            echo "::error::MARKER does not occur in config/src/artifact/vorpal_secret_job.rs"
+            exit 1
+          fi
+
+          bash -c 'sleep 30; :' "canary-$MARKER" &
+          canary_pid=$!
+          canary_seen=false
+          for _ in $(seq 50); do
+            if [ -n "$(scan "$watch_dir/marker")" ]; then
+              canary_seen=true
+              break
+            fi
+            sleep 0.1
+          done
+          kill "$canary_pid"
+          wait "$canary_pid" || true
+
+          if [ "$canary_seen" != true ]; then
+            echo "::error::watcher did not see the canary process carrying the marker"
+            exit 1
+          fi
+
+          if [ -n "$(scan "$watch_dir/marker")" ]; then
+            echo "::error::marker still visible after the canary exited"
+            exit 1
+          fi
+
+          (
+            scans=0
+            while [ ! -e "$watch_dir/stop" ]; do
+              scan "$watch_dir/marker" >> "$watch_dir/hits"
+              scan "$watch_dir/visible" >> "$watch_dir/visible-hits"
+              scans=$((scans + 1))
+              printf '%s\n' "$scans" > "$watch_dir/scans"
+              sleep 0.2
+            done
+          ) &
+          watcher_pid=$!
+
+          build_status=0
+          vorpal build "vorpal-secret-job" > "$watch_dir/build.log" 2>&1 || build_status=$?
+          cat "$watch_dir/build.log"
+
+          watcher_alive=true
+          kill -0 "$watcher_pid" 2>/dev/null || watcher_alive=false
+          touch "$watch_dir/stop"
+          wait "$watcher_pid" || true
+
+          failed=0
+          if [ "$build_status" -ne 0 ]; then
+            echo "::error::vorpal build exited $build_status"
+            failed=1
+          fi
+          if [ -s "$watch_dir/hits" ]; then
+            echo "::error::marker found in process arguments during the build:"
+            sort -u "$watch_dir/hits"
+            failed=1
+          fi
+          if [ ! -s "$watch_dir/visible-hits" ]; then
+            echo "::error::watcher never saw the build step's process, so it could not observe the sandbox"
+            failed=1
+          fi
+          if [ "$watcher_alive" != true ] || [ "$(cat "$watch_dir/scans")" -lt 3 ]; then
+            echo "::error::watcher stopped early or scanned fewer than 3 times"
+            failed=1
+          fi
+          if ! grep -qF "artifact has no output files (not found in registry)" "$watch_dir/build.log"; then
+            echo "::error::vorpal-secret-job may have been pushed to the registry"
+            failed=1
+          fi
+          exit "$failed"
+
   test-website:
     if: ${{ github.event_name == 'pull_request' }}
     needs:
