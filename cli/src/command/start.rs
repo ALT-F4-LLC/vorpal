@@ -33,6 +33,7 @@ use vorpal_sdk::api::{
 mod agent;
 pub mod auth;
 mod registry;
+mod secrets;
 mod worker;
 
 pub struct RunArgs {

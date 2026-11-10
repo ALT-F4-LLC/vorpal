@@ -1,5 +1,5 @@
 use crate::command::{
-    start::auth,
+    start::{auth, secrets},
     store::{
         archives::{compress_zstd, unpack_zstd},
         notary,
@@ -377,51 +377,16 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
         let key = parts[0];
         let value = parts[1];
 
-        // First, replace ${VAR} syntax (braced)
-        let result = acc.replace(&format!("${{{key}}}"), value);
+        let mut output = String::with_capacity(acc.len());
+        let mut copied = 0;
 
-        // Then, replace $VAR syntax (unbraced) while preserving ${{VAR}} and $VARNAME patterns
-        let search = format!("${key}");
-        let mut output = String::new();
-        let mut i = 0;
-
-        while i < result.len() {
-            if result[i..].starts_with(&search) {
-                let after_idx = i + search.len();
-
-                // Check what comes after $KEY
-                match result[after_idx..].chars().next() {
-                    // End of string - replace it
-                    None => {
-                        output.push_str(value);
-                        i = after_idx;
-                    }
-                    Some('{') => {
-                        // This is $VAR{ or part of ${{VAR}} - don't replace
-                        output.push_str(&search);
-                        i += search.len();
-                    }
-                    Some(next_char) if next_char.is_alphanumeric() || next_char == '_' => {
-                        // Part of longer variable name like $API_SECRETA - don't replace
-                        output.push_str(&search);
-                        i += search.len();
-                    }
-                    Some(_) => {
-                        // Followed by delimiter (space, quote, slash, etc.) - replace it
-                        output.push_str(value);
-                        i = after_idx;
-                    }
-                }
-            } else {
-                // `i < result.len()` (the loop guard), so a char always starts at `i`.
-                let Some(current_char) = result[i..].chars().next() else {
-                    break;
-                };
-                output.push(current_char);
-                i += current_char.len_utf8();
-            }
+        for span in secrets::references(&acc, key) {
+            output.push_str(&acc[copied..span.start]);
+            output.push_str(value);
+            copied = span.end;
         }
 
+        output.push_str(&acc[copied..]);
         output
     })
 }
@@ -1179,5 +1144,37 @@ impl WorkerService for WorkerServer {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_env;
+
+    fn expand_with_token(text: &str) -> String {
+        let token = String::from("TOKEN=s3cr3t");
+        expand_env(text, &[&token])
+    }
+
+    #[test]
+    fn expands_braced_and_delimited_references() {
+        assert_eq!(expand_with_token("$TOKEN"), "s3cr3t");
+        assert_eq!(expand_with_token("${TOKEN}"), "s3cr3t");
+        assert_eq!(expand_with_token("${TOKEN}x"), "s3cr3tx");
+        assert_eq!(expand_with_token("x$TOKEN.y"), "xs3cr3t.y");
+        assert_eq!(expand_with_token("$TOKEN-a"), "s3cr3t-a");
+        assert_eq!(
+            expand_with_token("a $TOKEN b ${TOKEN}"),
+            "a s3cr3t b s3cr3t"
+        );
+    }
+
+    #[test]
+    fn leaves_longer_names_and_brace_suffixes_unexpanded() {
+        assert_eq!(expand_with_token("$TOKENX"), "$TOKENX");
+        assert_eq!(expand_with_token("$TOKEN_1"), "$TOKEN_1");
+        assert_eq!(expand_with_token("$TOKEN{"), "$TOKEN{");
+        assert_eq!(expand_with_token("$TOKENé"), "$TOKENé");
+        assert_eq!(expand_with_token("${TOKENX}"), "${TOKENX}");
     }
 }
