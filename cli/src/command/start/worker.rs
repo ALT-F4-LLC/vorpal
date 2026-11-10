@@ -5,15 +5,21 @@ use crate::command::{
         notary,
         paths::{
             get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-            get_file_paths, get_key_service_key_path, set_timestamps,
+            get_file_paths, get_key_service_key_path, get_root_secret_dir_path, set_timestamps,
         },
-        temps::{create_sandbox_dir, create_sandbox_file},
+        temps::{create_private_dir, create_private_file, create_sandbox_dir, create_sandbox_file},
     },
 };
 use anyhow::Result;
+use fs4::fs_std::FileExt;
 use sha256::digest;
 use std::{
-    collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
+    collections::HashSet,
+    fs::Permissions,
+    io::{self, Write},
+    os::unix::fs::PermissionsExt,
+    path::{Component, Path, PathBuf},
+    process::Stdio,
 };
 use tokio::{
     fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
@@ -31,6 +37,7 @@ use tonic::{
     Request, Response, Status,
 };
 use tracing::{error, info};
+use uuid::Uuid;
 use vorpal_sdk::{
     api::{
         archive::{
@@ -50,6 +57,35 @@ use vorpal_sdk::{
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
+/// The variable naming a step's secret directory, which holds one file per secret.
+const SECRET_DIR_ENV: &str = "VORPAL_SECRET_DIR";
+
+/// The bwrap options that mount or create something at a sandbox path, each with its
+/// argument count. The destination is the last argument.
+const BWRAP_DESTINATION_OPTIONS: [(&str, usize); 21] = [
+    ("--bind", 2),
+    ("--bind-try", 2),
+    ("--dev-bind", 2),
+    ("--dev-bind-try", 2),
+    ("--ro-bind", 2),
+    ("--ro-bind-try", 2),
+    ("--bind-fd", 2),
+    ("--ro-bind-fd", 2),
+    ("--file", 2),
+    ("--bind-data", 2),
+    ("--ro-bind-data", 2),
+    ("--symlink", 2),
+    ("--overlay", 3),
+    ("--remount-ro", 1),
+    ("--tmp-overlay", 1),
+    ("--ro-overlay", 1),
+    ("--proc", 1),
+    ("--dev", 1),
+    ("--tmpfs", 1),
+    ("--mqueue", 1),
+    ("--dir", 1),
+];
+
 #[derive(Debug)]
 pub struct WorkerServer {
     pub issuer_audience: Option<String>,
@@ -65,6 +101,10 @@ impl WorkerServer {
         issuer_client_id: Option<String>,
         issuer_client_secret: Option<String>,
     ) -> Self {
+        if let Err(err) = remove_orphaned_secret_dirs(&get_root_secret_dir_path()) {
+            error!("worker |> failed to remove orphaned secret directories: {err}");
+        }
+
         Self {
             issuer_audience,
             issuer_client_id,
@@ -72,6 +112,96 @@ impl WorkerServer {
             issuer,
         }
     }
+}
+
+/// A step's secret directory, holding one owner-only file per secret. It stays locked
+/// while held, so start-up cleanup in another worker instance leaves it alone, and it is
+/// removed when dropped, on every path out of the step.
+#[derive(Debug)]
+struct SecretDir {
+    path: PathBuf,
+    _lock: std::fs::File,
+}
+
+impl SecretDir {
+    /// Creates `path` and locks it, creating its parent owner-only when missing.
+    fn create(path: PathBuf) -> io::Result<Self> {
+        if let Some(parent) = path.parent() {
+            match create_private_dir(parent) {
+                Err(err) if err.kind() != io::ErrorKind::AlreadyExists => return Err(err),
+                _ => {}
+            }
+        }
+
+        create_private_dir(&path)?;
+
+        let lock = std::fs::File::open(&path).and_then(|lock| {
+            if lock.try_lock_exclusive()? {
+                Ok(lock)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "secret directory is locked by another worker",
+                ))
+            }
+        });
+
+        match lock {
+            Ok(lock) => Ok(Self { path, _lock: lock }),
+            Err(err) => {
+                if let Err(remove_err) = std::fs::remove_dir(&path) {
+                    error!(
+                        "worker |> failed to remove secret directory {}: {remove_err}",
+                        path.display()
+                    );
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// Writes `value` to the file `name`, which must be a validated secret name.
+    fn write(&self, name: &str, value: &[u8]) -> io::Result<()> {
+        create_private_file(&self.path.join(name))?.write_all(value)
+    }
+}
+
+impl Drop for SecretDir {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_dir_all(&self.path) {
+            error!(
+                "worker |> failed to remove secret directory {}: {err}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+/// Removes every secret directory under `secret_parent_path` that no running worker
+/// holds: those a worker left behind when it stopped without dropping them.
+fn remove_orphaned_secret_dirs(secret_parent_path: &Path) -> io::Result<()> {
+    let entries = match std::fs::read_dir(secret_parent_path) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
+        let lock = std::fs::File::open(&path)?;
+
+        if lock.try_lock_exclusive()? {
+            std::fs::remove_dir_all(&path)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Obtains `OAuth2` service credentials for service-to-service authentication
@@ -391,21 +521,16 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
 
 /// Builds the sorted list of `KEY=value` environment variable strings for one step:
 /// per-artifact `VORPAL_ARTIFACT_*` paths, `VORPAL_ARTIFACTS`, the step's own
-/// `VORPAL_ARTIFACT_*`/`VORPAL_OUTPUT`/`VORPAL_WORKSPACE`, its custom environment
-/// variables, and its secrets, opened with the private key at `private_key_path` and
-/// bound to `artifact_namespace` and each secret's name.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each argument is an independent input to the step environment; grouping them would need a bespoke struct used by this one caller"
-)]
-async fn build_step_environments(
+/// `VORPAL_ARTIFACT_*`/`VORPAL_OUTPUT`/`VORPAL_WORKSPACE`, `VORPAL_SECRET_DIR` when the
+/// step has secrets, and its custom environment variables. Secret values are never
+/// part of it.
+fn build_step_environments(
     artifact_digest: &str,
     artifact_namespace: &str,
     artifact_path: &Path,
-    private_key_path: &Path,
+    secret_dir_path: Option<&Path>,
     step_artifacts: &[String],
     step_environments: Vec<String>,
-    step_secrets: Vec<ArtifactStepSecret>,
     workspace_path: &Path,
 ) -> Result<Vec<String>, Status> {
     let mut environments = vec![];
@@ -444,37 +569,13 @@ async fn build_step_environments(
         format!("VORPAL_WORKSPACE={}", workspace_path.display()),
     ]);
 
+    if let Some(secret_dir_path) = secret_dir_path {
+        environments.push(format!("{SECRET_DIR_ENV}={}", secret_dir_path.display()));
+    }
+
     // Add all custom environment variables
 
     environments.extend(step_environments);
-
-    // Add all secrets as environment variables
-
-    if !private_key_path.exists() {
-        return Err(Status::internal("private key not found"));
-    }
-
-    if !step_secrets.is_empty() {
-        let private_key = notary::get_private_key(private_key_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to load private key: {err:#}")))?;
-
-        // Every error below names the secret only: its value must not reach the status.
-        for secret in step_secrets {
-            let associated_data = notary::secret_associated_data(artifact_namespace, &secret.name);
-
-            let value =
-                notary::open(&private_key, &secret.value, &associated_data).map_err(|err| {
-                    Status::internal(format!("failed to open secret '{}': {err}", secret.name))
-                })?;
-
-            let value = String::from_utf8(value).map_err(|_| {
-                Status::invalid_argument(format!("secret '{}' is not valid UTF-8", secret.name))
-            })?;
-
-            environments.push(format!("{}={}", secret.name, value));
-        }
-    }
 
     // Sort environment variables by key length
 
@@ -483,26 +584,157 @@ async fn build_step_environments(
     Ok(environments)
 }
 
-async fn run_step(
+/// Rejects a step whose secret names break the shared name rule, that sets
+/// `VORPAL_SECRET_DIR` itself, or that references a secret in its arguments or
+/// environment, where the expanded value would be visible to every host user in the
+/// process arguments.
+fn check_step_secrets(step: &ArtifactStep) -> Result<(), Status> {
+    secrets::validate_names(step.secrets.iter().map(|secret| secret.name.as_str()))
+        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+    if step
+        .environments
+        .iter()
+        .any(|env| env.split_once('=').map_or(env.as_str(), |(key, _)| key) == SECRET_DIR_ENV)
+    {
+        return Err(Status::invalid_argument(format!(
+            "step environment must not set {SECRET_DIR_ENV}"
+        )));
+    }
+
+    for secret in &step.secrets {
+        let referenced = step
+            .arguments
+            .iter()
+            .chain(&step.environments)
+            .any(|text| !secrets::references(text, &secret.name).is_empty());
+
+        if referenced {
+            return Err(Status::invalid_argument(format!(
+                "step references secret {:?} in its arguments or environment; read it from ${SECRET_DIR_ENV}/{} instead",
+                secret.name, secret.name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolves `.`, `..` and repeated separators in a bwrap destination without touching
+/// the filesystem. bwrap resolves a relative destination against the sandbox root.
+fn normalize_sandbox_path(path: &str) -> PathBuf {
+    let mut normalized = PathBuf::from("/");
+
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(name) => normalized.push(name),
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => {}
+        }
+    }
+
+    normalized
+}
+
+/// Rejects bwrap `arguments` that mount or create something at `secret_dir_path` or one
+/// of its ancestors, which would hide the secret directory from the step.
+fn reject_mounts_over_secret_dir(
+    arguments: &[String],
+    secret_dir_path: &Path,
+) -> Result<(), Status> {
+    for (index, argument) in arguments.iter().enumerate() {
+        let Some((_, count)) = BWRAP_DESTINATION_OPTIONS
+            .iter()
+            .find(|(option, _)| option == argument)
+        else {
+            continue;
+        };
+
+        let Some(destination) = arguments.get(index + count) else {
+            continue;
+        };
+
+        if secret_dir_path.starts_with(normalize_sandbox_path(destination)) {
+            return Err(Status::invalid_argument(format!(
+                "step argument {argument} {destination:?} mounts over ${SECRET_DIR_ENV}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Opens each sealed secret with the private key at `private_key_path`, bound to
+/// `artifact_namespace` and the secret's name, and writes it to its own file in a new
+/// secret directory at `secret_dir_path`.
+async fn write_step_secrets(
+    artifact_namespace: &str,
+    private_key_path: &Path,
+    secret_dir_path: PathBuf,
+    step_secrets: Vec<ArtifactStepSecret>,
+) -> Result<SecretDir, Status> {
+    let private_key = notary::get_private_key(private_key_path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to load private key: {err:#}")))?;
+
+    let secret_dir = SecretDir::create(secret_dir_path)
+        .map_err(|err| Status::internal(format!("failed to create secret directory: {err}")))?;
+
+    // Every error below names the secret only: its value must not reach the status.
+    for secret in step_secrets {
+        let associated_data = notary::secret_associated_data(artifact_namespace, &secret.name);
+
+        let value = notary::open(&private_key, &secret.value, &associated_data).map_err(|err| {
+            Status::internal(format!("failed to open secret '{}': {err}", secret.name))
+        })?;
+
+        if std::str::from_utf8(&value).is_err() {
+            return Err(Status::invalid_argument(format!(
+                "secret '{}' is not valid UTF-8",
+                secret.name
+            )));
+        }
+
+        secret_dir.write(&secret.name, &value).map_err(|err| {
+            Status::internal(format!("failed to write secret '{}': {err}", secret.name))
+        })?;
+    }
+
+    Ok(secret_dir)
+}
+
+/// Builds the command for one step, with its secrets written to a fresh secret
+/// directory under `secret_parent_path`. The returned directory must outlive the
+/// command's process. A rejected step creates no secret directory.
+async fn prepare_step(
     artifact_digest: &str,
     artifact_namespace: &str,
     artifact_path: &Path,
     private_key_path: &Path,
+    secret_parent_path: &Path,
     step: ArtifactStep,
-    tx: &Sender<Result<BuildArtifactResponse, Status>>,
     workspace_path: &Path,
-) -> Result<(), Status> {
+) -> Result<(Command, Option<SecretDir>), Status> {
+    check_step_secrets(&step)?;
+
+    if !private_key_path.exists() {
+        return Err(Status::internal("private key not found"));
+    }
+
+    let secret_dir_path =
+        (!step.secrets.is_empty()).then(|| secret_parent_path.join(Uuid::now_v7().to_string()));
+
     let environments_sorted = build_step_environments(
         artifact_digest,
         artifact_namespace,
         artifact_path,
-        private_key_path,
+        secret_dir_path.as_deref(),
         &step.artifacts,
         step.environments,
-        step.secrets,
         workspace_path,
-    )
-    .await?;
+    )?;
 
     let vorpal_envs: Vec<_> = environments_sorted
         .iter()
@@ -556,21 +788,81 @@ async fn run_step(
     // Setup arguments
 
     if !entrypoint.is_empty() {
-        // Create references to all environments for expansion (includes VORPAL_ vars, custom envs, and secrets)
+        // Expand with all environment variables (VORPAL_ vars and custom envs)
+        // Supports both ${VAR} and $VAR syntax
         let all_envs: Vec<_> = environments_sorted.iter().collect();
 
-        for arg in &step.arguments {
-            // Expand with all environment variables (VORPAL_ vars, custom envs, and secrets)
-            // Supports both ${VAR} and $VAR syntax
-            let arg = expand_env(arg, &all_envs);
+        let mut arguments: Vec<String> = step
+            .arguments
+            .iter()
+            .map(|arg| expand_env(arg, &all_envs))
+            .collect();
 
-            command.arg(arg);
+        // bwrap applies its options in order and stops at the script path, so the
+        // secret bind goes after every other option, where no later mount can hide it.
+        if let (Some(secret_dir_path), "bwrap") = (&secret_dir_path, entrypoint.as_str()) {
+            if script_path.is_none() {
+                return Err(Status::invalid_argument(
+                    "a bwrap step with secrets needs a script to bind the secret directory before",
+                ));
+            }
+
+            reject_mounts_over_secret_dir(&arguments, secret_dir_path)?;
+
+            let secret_dir = secret_dir_path.display().to_string();
+
+            arguments.extend([
+                "--ro-bind".to_string(),
+                secret_dir.clone(),
+                secret_dir.clone(),
+                "--setenv".to_string(),
+                SECRET_DIR_ENV.to_string(),
+                secret_dir,
+            ]);
         }
+
+        command.args(arguments);
 
         if let Some(script_path) = script_path {
             command.arg(script_path);
         }
     }
+
+    let secret_dir = match secret_dir_path {
+        Some(path) => Some(
+            write_step_secrets(artifact_namespace, private_key_path, path, step.secrets).await?,
+        ),
+        None => None,
+    };
+
+    Ok((command, secret_dir))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is an independent input to the step; grouping them would need a bespoke struct used by this one caller"
+)]
+async fn run_step(
+    artifact_digest: &str,
+    artifact_namespace: &str,
+    artifact_path: &Path,
+    private_key_path: &Path,
+    secret_parent_path: &Path,
+    step: ArtifactStep,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+    workspace_path: &Path,
+) -> Result<(), Status> {
+    // Held until this function returns, on every path, so the secrets outlive the process.
+    let (mut command, _secret_dir) = prepare_step(
+        artifact_digest,
+        artifact_namespace,
+        artifact_path,
+        private_key_path,
+        secret_parent_path,
+        step,
+        workspace_path,
+    )
+    .await?;
 
     // Run command
 
@@ -1030,6 +1322,7 @@ async fn build_artifact(
     }
 
     let private_key_path = get_key_service_key_path();
+    let secret_parent_path = get_root_secret_dir_path();
 
     // artifact is iterated by reference here and moved whole into
     // pack_push_and_store_artifact below; run_step needs an owned ArtifactStep.
@@ -1039,6 +1332,7 @@ async fn build_artifact(
             artifact_namespace,
             &artifact_output_path,
             &private_key_path,
+            &secret_parent_path,
             step.clone(),
             tx,
             &workspace_path,
@@ -1170,13 +1464,18 @@ impl WorkerService for WorkerServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{expand_env, run_step};
+    use super::{expand_env, prepare_step, run_step, SecretDir, SECRET_DIR_ENV};
     use crate::command::store::notary::{
         self,
         test_fixtures::{certificate_chain_and_service_account, write_service_keys},
     };
-    use std::path::Path;
-    use tokio::sync::mpsc::channel;
+    use std::{
+        ffi::OsStr,
+        io::ErrorKind,
+        path::{Path, PathBuf},
+    };
+    use tempfile::TempDir;
+    use tokio::{process::Command, sync::mpsc::channel};
     use tonic::{Code, Status};
     use vorpal_sdk::api::artifact::{ArtifactStep, ArtifactStepSecret};
 
@@ -1195,41 +1494,147 @@ mod tests {
         notary::seal(&public_key, value, &associated_data)
     }
 
-    /// Runs one step in `namespace` whose script writes its `SECRET` environment value
-    /// to a file, with `value` presented as the step's `SECRET`. Returns the bytes the
-    /// step wrote, or the step's error after checking the step never ran.
+    /// A service key pair generated at test run time.
+    struct Keys {
+        _dir: TempDir,
+        public: PathBuf,
+        private: PathBuf,
+    }
+
+    impl Keys {
+        fn new() -> anyhow::Result<Self> {
+            let dir = tempfile::tempdir()?;
+            let (public, private) = write_service_keys(dir.path())?;
+            Ok(Self {
+                _dir: dir,
+                public,
+                private,
+            })
+        }
+
+        /// The secret `name` sealed for namespace `team`.
+        async fn secret(&self, name: &str, value: &[u8]) -> anyhow::Result<ArtifactStepSecret> {
+            Ok(ArtifactStepSecret {
+                name: name.to_string(),
+                value: sealed_secret(&self.public, "team", name, value).await?,
+            })
+        }
+    }
+
+    /// One step's workspace, output and dedicated secret parent, under a temporary root.
+    /// The secret parent is not created, so a test can see whether a step created it.
+    struct StepDirs {
+        root: TempDir,
+        workspace: PathBuf,
+        output: PathBuf,
+        secret_parent: PathBuf,
+    }
+
+    impl StepDirs {
+        fn new() -> anyhow::Result<Self> {
+            let root = tempfile::tempdir()?;
+            let workspace = root.path().join("workspace");
+            let output = root.path().join("output");
+            std::fs::create_dir(&workspace)?;
+            std::fs::create_dir(&output)?;
+            let secret_parent = root.path().join("secret");
+            Ok(Self {
+                root,
+                workspace,
+                output,
+                secret_parent,
+            })
+        }
+
+        /// The number of secret directories left under the secret parent.
+        fn secret_dir_count(&self) -> anyhow::Result<usize> {
+            match std::fs::read_dir(&self.secret_parent) {
+                Ok(entries) => Ok(entries.count()),
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(0),
+                Err(err) => Err(err.into()),
+            }
+        }
+
+        async fn prepare(
+            &self,
+            private_key_path: &Path,
+            step: ArtifactStep,
+        ) -> Result<(Command, Option<SecretDir>), Status> {
+            prepare_step(
+                "secret-test",
+                "team",
+                &self.output,
+                private_key_path,
+                &self.secret_parent,
+                step,
+                &self.workspace,
+            )
+            .await
+        }
+
+        async fn run(
+            &self,
+            namespace: &str,
+            private_key_path: &Path,
+            step: ArtifactStep,
+        ) -> Result<(), Status> {
+            let (tx, _rx) = channel(16);
+            run_step(
+                "secret-test",
+                namespace,
+                &self.output,
+                private_key_path,
+                &self.secret_parent,
+                step,
+                &tx,
+                &self.workspace,
+            )
+            .await
+        }
+    }
+
+    fn command_args(command: &Command) -> Vec<String> {
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn command_env(command: &Command, key: &str) -> Option<String> {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new(key))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    /// Runs one step in `namespace` whose script copies `$VORPAL_SECRET_DIR/SECRET` to
+    /// a file, with `value` sealed as the step's `SECRET`. Returns the bytes the step
+    /// wrote, or the step's error after checking the step never ran. Either way the
+    /// secret directory is gone afterwards.
     async fn run_secret_step(
         private_key_path: &Path,
         namespace: &str,
         value: Vec<u8>,
     ) -> anyhow::Result<Result<Vec<u8>, Status>> {
-        let sandbox = tempfile::tempdir()?;
-        let workspace_path = sandbox.path().join("workspace");
-        let output_path = sandbox.path().join("output");
-        std::fs::create_dir(&workspace_path)?;
-        std::fs::create_dir(&output_path)?;
+        let dirs = StepDirs::new()?;
         let step = ArtifactStep {
-            script: Some("#!/bin/sh\nprintf '%s' \"$SECRET\" > \"$VORPAL_OUTPUT/secret\"\n".into()),
+            script: Some(
+                "#!/bin/sh\ncat \"$VORPAL_SECRET_DIR/SECRET\" > \"$VORPAL_OUTPUT/secret\"\n".into(),
+            ),
             secrets: vec![ArtifactStepSecret {
                 name: "SECRET".to_string(),
                 value,
             }],
             ..Default::default()
         };
-        let (tx, _rx) = channel(16);
 
-        let result = run_step(
-            "secret-test",
-            namespace,
-            &output_path,
-            private_key_path,
-            step,
-            &tx,
-            &workspace_path,
-        )
-        .await;
+        let result = dirs.run(namespace, private_key_path, step).await;
 
-        let written = output_path.join("secret");
+        assert_eq!(dirs.secret_dir_count()?, 0, "a secret directory remains");
+        let written = dirs.output.join("secret");
         match result {
             Ok(()) => Ok(Ok(std::fs::read(written)?)),
             Err(status) => {
@@ -1240,7 +1645,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn step_receives_sealed_secrets_unchanged() -> anyhow::Result<()> {
+    async fn step_reads_sealed_secrets_unchanged_from_the_secret_directory() -> anyhow::Result<()> {
         let keys = tempfile::tempdir()?;
         let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
         let [certificate_chain, service_account] = certificate_chain_and_service_account()?;
@@ -1277,10 +1682,375 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn bwrap_step_binds_the_secret_directory_after_its_options_before_the_script(
+    ) -> anyhow::Result<()> {
+        let keys = Keys::new()?;
+        let dirs = StepDirs::new()?;
+        let step = ArtifactStep {
+            entrypoint: Some("bwrap".to_string()),
+            arguments: vec!["--clearenv".into(), "--tmpfs".into(), "/scratch".into()],
+            script: Some("#!/bin/sh\n".into()),
+            secrets: vec![keys.secret("TOKEN", b"value").await?],
+            ..Default::default()
+        };
+
+        let (command, secret_dir) = dirs.prepare(&keys.private, step).await?;
+
+        assert!(secret_dir.is_some());
+        let secret_dir = command_env(&command, SECRET_DIR_ENV).unwrap_or_default();
+        let script = dirs.workspace.join("script.sh").display().to_string();
+        assert_eq!(
+            command_args(&command),
+            [
+                "--clearenv",
+                "--tmpfs",
+                "/scratch",
+                "--ro-bind",
+                &secret_dir,
+                &secret_dir,
+                "--setenv",
+                SECRET_DIR_ENV,
+                &secret_dir,
+                &script,
+            ]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn step_without_secrets_creates_no_secret_directory() -> anyhow::Result<()> {
+        let keys = Keys::new()?;
+        let dirs = StepDirs::new()?;
+        let step = ArtifactStep {
+            entrypoint: Some("bwrap".to_string()),
+            script: Some("#!/bin/sh\n".into()),
+            ..Default::default()
+        };
+
+        let (command, secret_dir) = dirs.prepare(&keys.private, step).await?;
+
+        assert!(secret_dir.is_none());
+        assert!(!dirs.secret_parent.exists());
+        assert_eq!(command_env(&command, SECRET_DIR_ENV), None);
+        assert!(!command_args(&command).contains(&SECRET_DIR_ENV.to_string()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn environment_values_keep_equals_signs_and_entries_without_one_are_empty(
+    ) -> anyhow::Result<()> {
+        let keys = Keys::new()?;
+        let dirs = StepDirs::new()?;
+        let step = ArtifactStep {
+            entrypoint: Some("/bin/sh".to_string()),
+            arguments: vec!["$FOO|$FLAG".into()],
+            environments: vec!["FOO=a=b==".into(), "FLAG".into()],
+            ..Default::default()
+        };
+
+        let (command, _) = dirs.prepare(&keys.private, step).await?;
+
+        assert_eq!(command_env(&command, "FOO").as_deref(), Some("a=b=="));
+        assert_eq!(command_env(&command, "FLAG").as_deref(), Some(""));
+        assert_eq!(command_args(&command), ["a=b==|"]);
+        Ok(())
+    }
+
     mod abuse {
-        use super::{run_secret_step, sealed_secret, MARKER};
-        use crate::command::store::notary::{self, test_fixtures::write_service_keys};
+        use super::{
+            command_args, command_env, run_secret_step, sealed_secret, Keys, StepDirs, MARKER,
+        };
+        use crate::command::{
+            start::worker::{remove_orphaned_secret_dirs, SecretDir, SECRET_DIR_ENV},
+            store::notary::{self, test_fixtures::write_service_keys},
+        };
         use rsa::{rand_core::OsRng, Pkcs1v15Encrypt};
+        use std::os::unix::fs::PermissionsExt;
+        use tonic::Code;
+        use vorpal_sdk::api::artifact::{ArtifactStep, ArtifactStepSecret};
+
+        fn bwrap_step(arguments: &[&str], secrets: Vec<ArtifactStepSecret>) -> ArtifactStep {
+            ArtifactStep {
+                entrypoint: Some("bwrap".to_string()),
+                arguments: arguments.iter().map(ToString::to_string).collect(),
+                script: Some("#!/bin/sh\n".into()),
+                secrets,
+                ..Default::default()
+            }
+        }
+
+        #[tokio::test]
+        async fn step_passing_a_secret_through_arguments_or_environment_fails_before_spawn(
+        ) -> anyhow::Result<()> {
+            let keys = Keys::new()?;
+
+            for (arguments, environments) in [
+                (vec!["--setenv", "NAME", "$NAME"], vec![]),
+                (vec!["--setenv", "FOO", "x${NAME}x"], vec![]),
+                (vec![], vec!["FOO=$NAME"]),
+            ] {
+                let dirs = StepDirs::new()?;
+                let mut step = bwrap_step(
+                    &arguments,
+                    vec![keys.secret("NAME", MARKER.as_bytes()).await?],
+                );
+                step.environments = environments.iter().map(ToString::to_string).collect();
+
+                let Err(status) = dirs.prepare(&keys.private, step).await else {
+                    anyhow::bail!("{arguments:?} {environments:?} passed a secret to bwrap");
+                };
+
+                assert_eq!(status.code(), Code::InvalidArgument);
+                assert!(status.message().contains("\"NAME\""), "{status:?}");
+                assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+                assert_eq!(dirs.secret_dir_count()?, 0);
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn unreferenced_secret_is_in_no_argument_or_environment_entry() -> anyhow::Result<()>
+        {
+            let keys = Keys::new()?;
+
+            for entrypoint in ["bwrap", "/bin/sh"] {
+                let dirs = StepDirs::new()?;
+                let step = ArtifactStep {
+                    entrypoint: Some(entrypoint.to_string()),
+                    arguments: vec!["--setenv".into(), "HOME".into(), "$VORPAL_WORKSPACE".into()],
+                    environments: vec!["PATH=/usr/bin:/bin".into()],
+                    script: Some("#!/bin/sh\n".into()),
+                    secrets: vec![keys.secret("NAME", MARKER.as_bytes()).await?],
+                    ..Default::default()
+                };
+
+                let (command, secret_dir) = dirs.prepare(&keys.private, step).await?;
+
+                let Some(secret_dir) = secret_dir else {
+                    anyhow::bail!("{entrypoint}: no secret directory for a step with a secret");
+                };
+                let secret_dir = &secret_dir.path;
+                assert_eq!(std::fs::read(secret_dir.join("NAME"))?, MARKER.as_bytes());
+                for arg in command_args(&command) {
+                    assert!(!arg.contains(MARKER), "{entrypoint}: argument {arg:?}");
+                }
+                for (key, value) in command.as_std().get_envs() {
+                    let value = value.map(|v| v.to_string_lossy()).unwrap_or_default();
+                    assert!(!value.contains(MARKER), "{entrypoint}: {key:?}={value:?}");
+                }
+                assert_eq!(
+                    command_env(&command, SECRET_DIR_ENV),
+                    Some(secret_dir.display().to_string())
+                );
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn secret_directory_and_files_are_private_and_outside_workspace_and_output(
+        ) -> anyhow::Result<()> {
+            let keys = Keys::new()?;
+            let dirs = StepDirs::new()?;
+            let step = bwrap_step(&[], vec![keys.secret("NAME", MARKER.as_bytes()).await?]);
+
+            let (_, secret_dir) = dirs.prepare(&keys.private, step).await?;
+
+            let Some(secret_dir) = secret_dir else {
+                anyhow::bail!("no secret directory for a step with a secret");
+            };
+            let mode = |path: &std::path::Path| -> anyhow::Result<u32> {
+                Ok(std::fs::symlink_metadata(path)?.permissions().mode() & 0o7777)
+            };
+            assert_eq!(mode(&dirs.secret_parent)?, 0o700);
+            assert_eq!(mode(&secret_dir.path)?, 0o700);
+            assert_eq!(mode(&secret_dir.path.join("NAME"))?, 0o600);
+            assert!(secret_dir.path.starts_with(&dirs.secret_parent));
+            assert!(!secret_dir.path.starts_with(&dirs.workspace));
+            assert!(!secret_dir.path.starts_with(&dirs.output));
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn secret_directory_is_removed_after_a_step_that_exits_non_zero() -> anyhow::Result<()>
+        {
+            let keys = Keys::new()?;
+            let dirs = StepDirs::new()?;
+            let step = ArtifactStep {
+                script: Some(
+                    "#!/bin/sh\ntest -f \"$VORPAL_SECRET_DIR/NAME\" && exit 7\nexit 0\n".into(),
+                ),
+                secrets: vec![keys.secret("NAME", b"value").await?],
+                ..Default::default()
+            };
+
+            let result = dirs.run("team", &keys.private, step).await;
+
+            assert!(result.is_err(), "the step did not fail: {result:?}");
+            assert!(dirs.secret_parent.exists());
+            assert_eq!(dirs.secret_dir_count()?, 0);
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn secret_directory_is_removed_after_a_step_whose_spawn_fails() -> anyhow::Result<()>
+        {
+            let keys = Keys::new()?;
+            let dirs = StepDirs::new()?;
+            let step = ArtifactStep {
+                entrypoint: Some(dirs.root.path().join("missing").display().to_string()),
+                secrets: vec![keys.secret("NAME", b"value").await?],
+                ..Default::default()
+            };
+
+            let Err(status) = dirs.run("team", &keys.private, step).await else {
+                anyhow::bail!("a missing entrypoint spawned");
+            };
+
+            assert!(status.message().contains("spawn"), "{status:?}");
+            assert!(dirs.secret_parent.exists());
+            assert_eq!(dirs.secret_dir_count()?, 0);
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn bwrap_step_mounting_over_the_secret_directory_or_an_ancestor_is_rejected(
+        ) -> anyhow::Result<()> {
+            let keys = Keys::new()?;
+            let dirs = StepDirs::new()?;
+            let parent = dirs.secret_parent.display().to_string();
+
+            for arguments in [
+                vec!["--tmpfs", "$VORPAL_SECRET_DIR"],
+                vec!["--tmpfs", "$VORPAL_SECRET_DIR/.."],
+                vec!["--bind", "/tmp", "$VORPAL_SECRET_DIR/./"],
+                vec!["--ro-bind", "/tmp", &format!("{parent}/")],
+                vec!["--dir", &format!("{parent}//x/..")],
+                vec!["--setenv", "A", "B", "--overlay", "/a", "/b", "/"],
+                vec!["--bind-data", "3", "/"],
+                vec!["--remount-ro", "/"],
+            ] {
+                let step = bwrap_step(&arguments, vec![keys.secret("NAME", b"value").await?]);
+
+                let Err(status) = dirs.prepare(&keys.private, step).await else {
+                    anyhow::bail!("{arguments:?} mounted over the secret directory");
+                };
+
+                assert_eq!(status.code(), Code::InvalidArgument, "{arguments:?}");
+                assert!(status.message().contains(SECRET_DIR_ENV), "{status:?}");
+                assert_eq!(dirs.secret_dir_count()?, 0);
+            }
+
+            for arguments in [
+                vec!["--tmpfs", "/scratch"],
+                vec!["--ro-bind", &parent, "/elsewhere"],
+                vec!["--tmpfs", "$VORPAL_SECRET_DIR/sub"],
+            ] {
+                let step = bwrap_step(&arguments, vec![keys.secret("NAME", b"value").await?]);
+                let prepared = dirs.prepare(&keys.private, step).await;
+                assert!(prepared.is_ok(), "{arguments:?}: {:?}", prepared.err());
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn invalid_secret_name_fails_before_decryption_and_creates_nothing(
+        ) -> anyhow::Result<()> {
+            let dirs = StepDirs::new()?;
+            let missing_key = dirs.root.path().join("missing.pem");
+
+            for name in ["../x", "a/b", "", "VORPAL_X", "a\nb"] {
+                let step = bwrap_step(
+                    &[],
+                    vec![ArtifactStepSecret {
+                        name: name.to_string(),
+                        value: MARKER.as_bytes().to_vec(),
+                    }],
+                );
+
+                let Err(status) = dirs.prepare(&missing_key, step).await else {
+                    anyhow::bail!("secret name {name:?} was accepted");
+                };
+
+                assert_eq!(status.code(), Code::InvalidArgument, "{status:?}");
+                assert!(
+                    status.message().contains(&format!("{name:?}")),
+                    "{status:?}"
+                );
+                assert!(!dirs.secret_parent.exists(), "{name:?}");
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn repeated_secret_name_fails_before_spawn() -> anyhow::Result<()> {
+            let keys = Keys::new()?;
+            let dirs = StepDirs::new()?;
+            let step = ArtifactStep {
+                script: Some("#!/bin/sh\ntouch \"$VORPAL_OUTPUT/ran\"\n".into()),
+                secrets: vec![
+                    keys.secret("A", b"first").await?,
+                    keys.secret("A", b"second").await?,
+                ],
+                ..Default::default()
+            };
+
+            let Err(status) = dirs.run("team", &keys.private, step).await else {
+                anyhow::bail!("a repeated secret name was accepted");
+            };
+
+            assert!(status.message().contains("\"A\""), "{status:?}");
+            assert!(!dirs.output.join("ran").exists());
+            assert!(!dirs.secret_parent.exists());
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn environment_entry_setting_the_secret_directory_is_rejected() -> anyhow::Result<()>
+        {
+            let keys = Keys::new()?;
+
+            for secrets in [vec![], vec![keys.secret("NAME", b"value").await?]] {
+                let dirs = StepDirs::new()?;
+                let mut step = bwrap_step(&[], secrets);
+                step.environments = vec![format!("{SECRET_DIR_ENV}=/tmp/x")];
+
+                let Err(status) = dirs.prepare(&keys.private, step).await else {
+                    anyhow::bail!("the step set {SECRET_DIR_ENV} itself");
+                };
+
+                assert_eq!(status.code(), Code::InvalidArgument);
+                assert!(status.message().contains(SECRET_DIR_ENV), "{status:?}");
+                assert!(!dirs.secret_parent.exists());
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn startup_cleanup_removes_unheld_secret_directories_and_keeps_held_ones(
+        ) -> anyhow::Result<()> {
+            let dirs = StepDirs::new()?;
+            let held = SecretDir::create(dirs.secret_parent.join("held"))?;
+            held.write("NAME", b"live")?;
+            let orphan = dirs.secret_parent.join("orphan");
+            std::fs::create_dir(&orphan)?;
+            std::fs::write(orphan.join("NAME"), b"left behind")?;
+
+            remove_orphaned_secret_dirs(&dirs.secret_parent)?;
+
+            assert!(held.path.join("NAME").exists());
+            assert!(!orphan.exists());
+            drop(held);
+            assert_eq!(dirs.secret_dir_count()?, 0);
+            Ok(())
+        }
+
+        #[test]
+        fn startup_cleanup_tolerates_a_missing_secret_parent() -> anyhow::Result<()> {
+            let dirs = StepDirs::new()?;
+            remove_orphaned_secret_dirs(&dirs.secret_parent)?;
+            Ok(())
+        }
 
         #[tokio::test]
         async fn step_fails_on_secret_in_older_format_naming_it_without_its_value(

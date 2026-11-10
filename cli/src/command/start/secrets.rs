@@ -38,13 +38,6 @@ impl std::error::Error for SecretNameError {}
 
 /// Accepts the names only when each matches `[A-Za-z_][A-Za-z0-9_]*`, none starts with
 /// `VORPAL_`, and none repeats. The first offending name is returned.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the agent and worker call this once they reject invalid secret names"
-    )
-)]
 pub(super) fn validate_names<'a>(
     names: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), SecretNameError> {

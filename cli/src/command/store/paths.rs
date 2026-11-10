@@ -38,6 +38,11 @@ pub fn get_root_sandbox_dir_path() -> PathBuf {
     get_root_dir_path().join("sandbox")
 }
 
+/// The parent of every step's secret directory, kept apart from workspaces and outputs.
+pub fn get_root_secret_dir_path() -> PathBuf {
+    get_root_dir_path().join("secret")
+}
+
 pub fn get_root_store_dir_path() -> PathBuf {
     get_root_dir_path().join("store")
 }
