@@ -23,11 +23,13 @@ func SortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// SecretsToProto converts a map[string]string of secrets to a sorted slice of proto objects.
+// SecretsToProto converts a map of secrets to a sorted slice of proto objects.
+// Each value's bytes are copied into the proto unchanged; a Go string may hold
+// any bytes, including non-UTF-8 ones added through WithSecretBytes.
 func SecretsToProto(secrets map[string]string) []*api.ArtifactStepSecret {
 	result := make([]*api.ArtifactStepSecret, 0, len(secrets))
 	for _, name := range SortedKeys(secrets) {
-		result = append(result, &api.ArtifactStepSecret{Name: name, Value: secrets[name]})
+		result = append(result, &api.ArtifactStepSecret{Name: name, Value: []byte(secrets[name])})
 	}
 	return result
 }
@@ -307,6 +309,17 @@ func (a *Process) WithSecrets(secrets map[string]string) *Process {
 	return a
 }
 
+// WithSecretBytes adds secrets with raw byte values, skipping any name
+// already set.
+func (a *Process) WithSecretBytes(secrets map[string][]byte) *Process {
+	for k, v := range secrets {
+		if _, exists := a.Secrets[k]; !exists {
+			a.Secrets[k] = string(v)
+		}
+	}
+	return a
+}
+
 func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
 	if a.err != nil {
 		return nil, a.err
@@ -478,6 +491,17 @@ func (a *Job) WithSecrets(secrets map[string]string) *Job {
 	for k, v := range secrets {
 		if _, exists := a.Secrets[k]; !exists {
 			a.Secrets[k] = v
+		}
+	}
+	return a
+}
+
+// WithSecretBytes adds secrets with raw byte values, skipping any name
+// already set.
+func (a *Job) WithSecretBytes(secrets map[string][]byte) *Job {
+	for k, v := range secrets {
+		if _, exists := a.Secrets[k]; !exists {
+			a.Secrets[k] = string(v)
 		}
 	}
 	return a

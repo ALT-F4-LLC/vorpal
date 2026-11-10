@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -375,7 +377,7 @@ func TestSerializeArtifactJSON_FullArtifact(t *testing.T) {
 				Entrypoint: strPtr("/bin/sh"),
 				Script:     strPtr("make install"),
 				Secrets: []*artifact.ArtifactStepSecret{
-					{Name: "API_KEY", Value: "secret123"},
+					{Name: "API_KEY", Value: []byte("secret123")},
 				},
 				Arguments:    []string{"--verbose"},
 				Artifacts:    []string{"dep1", "dep2"},
@@ -472,6 +474,79 @@ func TestSerializeArtifactJSON_ZeroValueTarget(t *testing.T) {
 	systems := raw["systems"].([]interface{})
 	if len(systems) != 1 || systems[0].(float64) != 0 {
 		t.Errorf("systems = %v, expected [0]", systems)
+	}
+}
+
+// artifactWithSecrets mirrors the Rust SDK's serde_base64 test fixture so the
+// expected JSON and digests below are shared across SDKs.
+func artifactWithSecrets(secrets []*artifact.ArtifactStepSecret) *artifact.Artifact {
+	return &artifact.Artifact{
+		Aliases: []string{"example:latest"},
+		Name:    "example",
+		Sources: []*artifact.ArtifactSource{
+			{
+				Digest:   strPtr("abc123"),
+				Excludes: []string{"target"},
+				Includes: []string{"src"},
+				Name:     "example",
+				Path:     ".",
+			},
+		},
+		Steps: []*artifact.ArtifactStep{
+			{
+				Arguments:    []string{"-c"},
+				Artifacts:    []string{"def456"},
+				Entrypoint:   strPtr("bash"),
+				Environments: []string{"PATH=/bin"},
+				Script:       strPtr("echo hi"),
+				Secrets:      secrets,
+			},
+		},
+		Systems: []artifact.ArtifactSystem{artifact.ArtifactSystem_AARCH64_DARWIN},
+		Target:  artifact.ArtifactSystem_AARCH64_DARWIN,
+	}
+}
+
+func TestSerializeArtifactJSON_SecretValueAsPaddedStandardBase64(t *testing.T) {
+	a := artifactWithSecrets([]*artifact.ArtifactStepSecret{
+		{Name: "TOKEN", Value: []byte{0xff, 0x00, 0xfe, 0x3d, 0x0a}},
+	})
+
+	b, err := SerializeArtifactJSON(a)
+	if err != nil {
+		t.Fatalf("SerializeArtifactJSON failed: %v", err)
+	}
+
+	want := `{"target":1,"sources":[{"digest":"abc123","excludes":["target"],"includes":["src"],"name":"example","path":"."}],"steps":[{"entrypoint":"bash","script":"echo hi","secrets":[{"name":"TOKEN","value":"/wD+PQo="}],"arguments":["-c"],"artifacts":["def456"],"environments":["PATH=/bin"]}],"systems":[1],"aliases":["example:latest"],"name":"example"}`
+	if string(b) != want {
+		t.Errorf("SerializeArtifactJSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+func TestSerializeArtifactJSON_EmptySecretValueAsEmptyString(t *testing.T) {
+	a := artifactWithSecrets([]*artifact.ArtifactStepSecret{{Name: "TOKEN"}})
+
+	b, err := SerializeArtifactJSON(a)
+	if err != nil {
+		t.Fatalf("SerializeArtifactJSON failed: %v", err)
+	}
+
+	if !bytes.Contains(b, []byte(`"secrets":[{"name":"TOKEN","value":""}]`)) {
+		t.Errorf("empty secret value not serialized as \"\": %s", b)
+	}
+}
+
+func TestSerializeArtifactJSON_DigestWithoutSecretsUnchanged(t *testing.T) {
+	b, err := SerializeArtifactJSON(artifactWithSecrets(nil))
+	if err != nil {
+		t.Fatalf("SerializeArtifactJSON failed: %v", err)
+	}
+
+	// Digest the Rust SDK pins for this artifact from before the secret
+	// value became bytes.
+	want := "71bd330295891ae4a37684e7eb10f12bfbfb6fa0058db0f357c00b747fd752fc"
+	if got := fmt.Sprintf("%x", sha256.Sum256(b)); got != want {
+		t.Errorf("digest = %s, want %s (JSON: %s)", got, want, b)
 	}
 }
 

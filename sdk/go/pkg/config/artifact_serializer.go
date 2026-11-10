@@ -14,16 +14,20 @@ package config
 //   - Optional None serializes as null
 //   - Empty repeated fields serialize as []
 //   - Empty strings serialize as ""
+//   - Bytes fields serialize as standard, padded base64 strings ("" when empty)
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 )
 
 // serializableArtifactStepSecret mirrors ArtifactStepSecret with fields in
-// proto field number order and no omitempty tags.
+// proto field number order and no omitempty tags. Value holds the base64
+// text rather than []byte because encoding/json writes a nil []byte as null,
+// where Rust writes "".
 type serializableArtifactStepSecret struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -78,7 +82,7 @@ func ensureStringSlice(s []string) []string {
 func serializeArtifactStepSecret(secret *artifact.ArtifactStepSecret) serializableArtifactStepSecret {
 	return serializableArtifactStepSecret{
 		Name:  secret.GetName(),
-		Value: secret.GetValue(),
+		Value: base64.StdEncoding.EncodeToString(secret.GetValue()),
 	}
 }
 
