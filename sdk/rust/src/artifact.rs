@@ -148,7 +148,8 @@ pub struct Process<'a> {
     pub entrypoint: &'a str,
     /// Name of the resulting artifact.
     pub name: &'a str,
-    /// Secrets made available to the process.
+    /// Secrets for the step that builds the lifecycle scripts; not available
+    /// when the process runs.
     pub secrets: Vec<api::artifact::ArtifactStepSecret>,
     systems: Vec<api::artifact::ArtifactSystem>,
     system_error: Option<anyhow::Error>,
@@ -720,8 +721,13 @@ impl<'a> Process<'a> {
         self
     }
 
-    /// Adds `(name, value)` secrets made available to the process, skipping
-    /// any name already present.
+    /// Adds `(name, value)` secrets for the step that builds the lifecycle
+    /// scripts, skipping any name already present.
+    ///
+    /// Each secret is a file under `$VORPAL_SECRET_DIR` only while the
+    /// lifecycle scripts are built; the directory is removed afterward, so
+    /// the running process cannot read it. Runtime secrets will be supported
+    /// for processes in a future release.
     #[must_use]
     pub fn with_secrets(self, secrets: Vec<(&str, &str)>) -> Self {
         self.with_secret_bytes(
@@ -732,8 +738,13 @@ impl<'a> Process<'a> {
         )
     }
 
-    /// Adds `(name, value)` secrets with raw byte values made available to
-    /// the process, skipping any name already present.
+    /// Adds `(name, value)` secrets with raw byte values for the step that
+    /// builds the lifecycle scripts, skipping any name already present.
+    ///
+    /// Each secret is a file under `$VORPAL_SECRET_DIR` only while the
+    /// lifecycle scripts are built; the directory is removed afterward, so
+    /// the running process cannot read it. Runtime secrets will be supported
+    /// for processes in a future release.
     #[must_use]
     pub fn with_secret_bytes(mut self, secrets: Vec<(&str, &[u8])>) -> Self {
         for (name, value) in secrets {

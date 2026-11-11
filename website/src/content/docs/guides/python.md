@@ -283,7 +283,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `with_arguments(arguments)` | Command-line arguments for the process |
 | `with_artifacts(artifacts)` | Artifact dependencies available during execution |
-| `with_secrets(secrets)` | Secrets available during execution |
+| `with_secrets(secrets)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 

@@ -111,9 +111,15 @@ await context.run();
 | `new(name, entrypoint, systems)` | Create a Process with a name, binary path, and target platforms |
 | `with_arguments(args)` | Add command-line arguments passed to the entrypoint |
 | `with_artifacts(artifacts)` | Add dependency artifacts whose outputs are available at runtime |
-| `with_secrets(secrets)` | Add encrypted secrets, each read from the file `$VORPAL_SECRET_DIR/<NAME>` and not from an environment variable |
+| `with_secrets(secrets)` | Add encrypted secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>` and not as an environment variable; not available when the process runs (see [Secrets](#secrets)). |
 
 ### Secrets
+
+A Process receives secret files while its lifecycle scripts are built, not when those scripts launch the process. Process::build attaches secrets to the build step; the step's directory is removed afterward. The documented file path cannot supply runtime credentials.
+
+:::note
+Runtime secrets will be supported for processes in a future release.
+:::
 
 Each secret is delivered to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
 

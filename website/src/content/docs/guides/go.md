@@ -116,6 +116,8 @@ Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<
 - A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
 - Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
 
+A `Process` receives these files only while its lifecycle scripts are built, not when the process runs, so they cannot supply runtime credentials. Runtime secrets will be supported for processes in a future release. See [Processes](/concepts/processes/#secrets).
+
 `Job` and `Process` accept a value as bytes through `WithSecretBytes`:
 
 ```go
@@ -332,7 +334,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `WithArguments(args)` | Command-line arguments for the process |
 | `WithArtifacts(artifacts)` | Artifact dependencies available during execution |
-| `WithSecrets(map)` | Secrets available during execution |
+| `WithSecrets(map)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 
