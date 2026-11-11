@@ -142,13 +142,15 @@ If a page needs tabbed examples, use the `.mdx` extension for that page. The cur
 
 ### Links
 
-Use relative paths for links between documentation pages:
+Link to another documentation page by its served URL, starting with `/` and ending with `/`. A page at `src/content/docs/<path>.md` or `<path>.mdx` is served at `/<path>/`, and `index.mdx` is served at `/`:
 
 ```markdown
-See the [Quickstart](../getting-started/quickstart) for a walkthrough.
+See the [Quickstart](/getting-started/quickstart/) for a walkthrough.
 ```
 
-Do not use absolute paths (like `/getting-started/quickstart`) -- relative paths ensure links work regardless of the deployment domain.
+`astro build` prefixes these root-absolute links with the configured `base`, so they work whether the site is served from the domain root or a subpath. The rewrite happens only in `astro build`, not in `astro dev`.
+
+A relative link also works, but it resolves against the page's served URL, which ends in `/`. From `concepts/architecture.md`, served at `/concepts/architecture/`, a sibling page is `../caching/`, not `./caching`.
 
 ## PR preview deployments
 

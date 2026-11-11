@@ -1,6 +1,54 @@
 // @ts-check
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+
+/**
+ * Prefix root-absolute internal links with the configured `base` at build
+ * time. Authored links (markdown, MDX anchors, Starlight hero `link:`) are
+ * written root-absolute, such as `/concepts/processes/#secrets`. Astro does
+ * not rewrite these, so under a `base` they would point outside the site.
+ * This hook rewrites `href` and `src` attributes inside HTML tags of the
+ * built pages. Without a `base` it does nothing.
+ *
+ * Limits: it runs in `astro build` only, not in `astro dev`; it skips a value
+ * that already starts with the base, so a base equal to a top-level section
+ * name (such as `/reference`) would leave `/reference/...` links unprefixed;
+ * it rewrites only double-quoted `href` and `src`, not `srcset` or others.
+ *
+ * @returns {import('astro').AstroIntegration}
+ */
+function prefixBaseLinks() {
+	let base = '';
+	return {
+		name: 'prefix-base-links',
+		hooks: {
+			'astro:config:done': ({ config }) => {
+				base = config.base.replace(/\/+$/, '');
+			},
+			'astro:build:done': async ({ dir }) => {
+				if (!base) return;
+				const isPrefixed = (/** @type {string} */ v) =>
+					v === base || ['/', '#', '?'].some((c) => v.startsWith(base + c));
+				const rewriteTag = (/** @type {string} */ tag) =>
+					tag.replace(/(\s(?:href|src)=")(\/(?!\/)[^"]*)"/g, (m, attr, value) =>
+						isPrefixed(value) ? m : `${attr}${base}${value}"`,
+					);
+				const root = fileURLToPath(dir);
+				const entries = await readdir(root, { recursive: true });
+				for (const entry of entries) {
+					if (!entry.endsWith('.html')) continue;
+					const file = join(root, entry);
+					const html = await readFile(file, 'utf8');
+					const out = html.replace(/<[a-zA-Z][^<>]*>/g, rewriteTag);
+					if (out !== html) await writeFile(file, out);
+				}
+			},
+		},
+	};
+}
 
 // https://astro.build/config
 export default defineConfig({
@@ -13,6 +61,7 @@ export default defineConfig({
 		gfm: true,
 	},
 	integrations: [
+		prefixBaseLinks(),
 		starlight({
 			title: 'Vorpal',
 			head: [
