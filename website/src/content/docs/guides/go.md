@@ -224,7 +224,7 @@ The development environment builder supports additional configuration:
 | `WithArtifacts(artifacts)` | Artifact dependencies available in the shell |
 | `WithEnvironments(vars)` | Environment variables set in the shell |
 | `WithoutProtoc()` | Exclude the default Protoc artifact |
-| `WithSecrets(map)` | Secrets available in the shell |
+| `WithSecrets(map)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
 
 See [Environments](/concepts/environments/) to learn more.
 
