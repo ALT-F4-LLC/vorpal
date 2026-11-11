@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-10
+
+### Added
+
+- **Prepared artifact size limit**: the agent rejects a prepared artifact
+  whose encoded size exceeds 3932160 bytes (4 MiB, the default gRPC decode
+  limit, less 256 KiB) with an `invalid_argument` error that names the
+  artifact, instead of failing later when a receiver decodes it.
+
 ### Changed
 
 - **Breaking — step secrets**: step secrets now use a sealed secret envelope
@@ -28,6 +37,18 @@ All notable changes to this project will be documented in this file.
   `--issuer-client-secret-file` or `VORPAL_ISSUER_CLIENT_SECRET_FILE`.
   Existing service units that pass `--issuer-client-secret` break until the
   installer is run again.
+
+- **Release metadata**: bump SDK packages, CLI/config crates, templates,
+  install script, website, and documentation to `0.5.0`.
+
+### Fixed
+
+- **CLI builds**: report a missing registry archive when the registry returns
+  `NotFound` inside the pull stream, so a build without outputs no longer
+  logs nothing.
+
+- **Website docs**: enable GitHub-flavored Markdown so MDX pages render
+  tables, and fix highlighted lines in the SDK guide code samples.
 
 ## [0.4.1] - 2026-09-12
 
