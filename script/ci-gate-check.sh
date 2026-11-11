@@ -4,7 +4,7 @@
 #
 # Usage: ./script/ci-gate-check.sh .github/workflows/vorpal.yaml
 #
-# Releases ship only after both gate jobs succeed: test-secret-argv, and
+# Releases ship only after both gate jobs succeed: test-artifact-secrets, and
 # release-gate-check, which runs this script. Each of these would quietly
 # drop that guarantee for a gate job, so each one fails the check:
 #   - the gate job is missing;
@@ -35,7 +35,7 @@
 
 set -uo pipefail
 
-gate_jobs=(test-secret-argv release-gate-check)
+gate_jobs=(test-artifact-secrets release-gate-check)
 release_jobs=(release release-container-image release-website-docs)
 
 if [ "$#" -ne 1 ]; then

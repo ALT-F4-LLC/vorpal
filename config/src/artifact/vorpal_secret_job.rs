@@ -6,7 +6,7 @@ use vorpal_sdk::{artifact::Job, context::ConfigContext};
 
 const SECRET_NAME: &str = "SYNTHETIC_SECRET";
 
-/// Prefix of the synthetic value. The `test-secret-argv` CI job searches host process
+/// Prefix of the synthetic value. The `test-artifact-secrets` CI job searches host process
 /// arguments for this exact string, so a change here must be mirrored in its `MARKER`.
 const MARKER: &str = "vorpal-synthetic-secret-c4d9e2f1";
 
@@ -18,7 +18,7 @@ const VALUE_SHA256: &str = "fdf32dd01e78a8844f6060c776abdb856b4d6dd50226793f8cf9
 /// prove it can see processes inside the build sandbox.
 const VISIBLE_TOKEN: &str = "vorpal-secret-job-visible";
 
-/// Printed by the step once the secret file matches `VALUE_SHA256`. The `test-secret-argv`
+/// Printed by the step once the secret file matches `VALUE_SHA256`. The `test-artifact-secrets`
 /// CI job requires this line in the build log, so a change here must be mirrored there.
 const RETRIEVED_MESSAGE: &str = "secret retrieved: SYNTHETIC_SECRET matches expected digest";
 
