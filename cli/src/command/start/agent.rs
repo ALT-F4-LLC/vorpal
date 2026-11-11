@@ -906,13 +906,6 @@ fn seal_step_secret(
         )));
     }
 
-    if std::str::from_utf8(&secret.value).is_err() {
-        return Err(Status::invalid_argument(format!(
-            "secret '{}' is not valid UTF-8",
-            secret.name
-        )));
-    }
-
     let associated_data = notary::secret_associated_data(namespace, &secret.name);
 
     let value = notary::seal(public_key, &secret.value, &associated_data).map_err(|err| {
@@ -1280,6 +1273,28 @@ mod tests {
                 value.as_bytes()
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prepares_binary_secret_that_opens_byte_for_byte() -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let private_key = notary::get_private_key(&private_key_path).await?;
+        let value = [b"binary-".as_slice(), &[0x00, 0xff, 0xfe, 0x80]].concat();
+        assert!(std::str::from_utf8(&value).is_err());
+
+        let step = secrets_step(vec![step_secret("SECRET", &value)]);
+        let prepared = prepare_step_secrets(&public_key_path, "team", step).await??;
+
+        let [secret] = prepared.as_slice() else {
+            anyhow::bail!("prepare returned {} secrets, expected 1", prepared.len());
+        };
+        let associated_data = notary::secret_associated_data("team", &secret.name);
+        assert_eq!(
+            notary::open(&private_key, &secret.value, &associated_data)?,
+            value
+        );
         Ok(())
     }
 

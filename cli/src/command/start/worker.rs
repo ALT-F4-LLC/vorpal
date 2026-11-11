@@ -690,13 +690,6 @@ async fn write_step_secrets(
             Status::internal(format!("failed to open secret '{}': {err}", secret.name))
         })?;
 
-        if std::str::from_utf8(&value).is_err() {
-            return Err(Status::invalid_argument(format!(
-                "secret '{}' is not valid UTF-8",
-                secret.name
-            )));
-        }
-
         secret_dir.write(&secret.name, &value).map_err(|err| {
             Status::internal(format!("failed to write secret '{}': {err}", secret.name))
         })?;
@@ -1476,7 +1469,7 @@ mod tests {
     };
     use tempfile::TempDir;
     use tokio::{process::Command, sync::mpsc::channel};
-    use tonic::{Code, Status};
+    use tonic::Status;
     use vorpal_sdk::api::artifact::{ArtifactStep, ArtifactStepSecret};
 
     const MARKER: &str = "MARKER-5ec7e7-";
@@ -1664,21 +1657,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn step_fails_on_secret_that_is_not_utf8_naming_it_without_its_value(
-    ) -> anyhow::Result<()> {
+    async fn step_reads_binary_secret_byte_for_byte_from_its_file() -> anyhow::Result<()> {
         let keys = tempfile::tempdir()?;
         let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
-        let value = [MARKER.as_bytes(), &[0xff]].concat();
+        let value = [MARKER.as_bytes(), &[0x00, 0xff, 0xfe, 0x80]].concat();
+        assert!(std::str::from_utf8(&value).is_err());
         let sealed = sealed_secret(&public_key_path, "team", "SECRET", &value).await?;
 
-        let Err(status) = run_secret_step(&private_key_path, "team", sealed).await? else {
-            anyhow::bail!("the step ran with a secret that is not UTF-8");
-        };
+        let delivered = run_secret_step(&private_key_path, "team", sealed).await??;
 
-        assert_eq!(status.code(), Code::InvalidArgument);
-        assert!(status.message().contains("'SECRET'"), "{status:?}");
-        assert!(status.message().contains("UTF-8"), "{status:?}");
-        assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+        assert_eq!(delivered, value);
         Ok(())
     }
 

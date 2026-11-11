@@ -88,7 +88,7 @@ message ArtifactStepSecret {
 }
 ```
 
-- A value is at most 64 KiB (65536 bytes) per secret and must be valid UTF-8. The agent rejects a value that is not valid UTF-8 with `INVALID_ARGUMENT`.
+- A value is at most 64 KiB (65536 bytes) per secret and may hold any bytes, including binary data that is not valid UTF-8. The file holds the value byte for byte.
 - A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
 - A step whose `arguments` or `environments` reference a secret (`$NAME` or `${NAME}`) fails.
 

@@ -20,8 +20,8 @@ All notable changes to this project will be documented in this file.
   not start with `VORPAL_`, and must not repeat within a step (no duplicates).
 
 - **Breaking — secret values**: step secret values are carried as `bytes`. A
-  value that is not valid UTF-8 is rejected at prepare with gRPC status
-  `INVALID_ARGUMENT` (message `secret '<name>' is not valid UTF-8`).
+  value may hold any bytes, including binary data that is not valid UTF-8, and
+  its file holds the value byte for byte.
 
 - **Breaking — issuer client secret**: the `--issuer-client-secret` flag is
   removed. Pass the secret in a file instead, with
