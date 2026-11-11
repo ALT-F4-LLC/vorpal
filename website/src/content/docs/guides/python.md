@@ -81,7 +81,7 @@ Use the `Python` builder to package a Python project into a cross-platform artif
 `Python` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5-10}
 from vorpal_sdk import SYSTEMS, ConfigContext, Python
 
 ctx = ConfigContext.create()
@@ -143,7 +143,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5,9}
 from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, Python
 
 ctx = ConfigContext.create()
@@ -169,7 +169,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,7-12}
 from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, PythonDevelopmentEnvironment
 
 ctx = ConfigContext.create()
@@ -215,7 +215,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default - ideal for CI tasks, tests, and automation.
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12,14-18}
 from vorpal_sdk import SYSTEMS, ConfigContext, Job, Python, get_env_key
 
 ctx = ConfigContext.create()
@@ -251,7 +251,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12-21}
 from vorpal_sdk import SYSTEMS, ConfigContext, Process, Python, get_env_key
 
 ctx = ConfigContext.create()
@@ -291,7 +291,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12-19}
 from vorpal_sdk import SYSTEMS, ConfigContext, Python, UserEnvironment, get_env_key
 
 ctx = ConfigContext.create()
@@ -331,7 +331,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5-13,15}
 from vorpal_sdk import SYSTEMS, Artifact, ArtifactStep, ConfigContext
 
 ctx = ConfigContext.create()

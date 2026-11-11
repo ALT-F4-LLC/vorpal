@@ -76,7 +76,7 @@ Use the `Rust` builder to compile a Rust project into a cross-platform artifact:
 `Rust` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```rust title="src/vorpal.rs" {4,14-18}
+```rust title="src/vorpal.rs" {3,11-15}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::Rust, system},
@@ -149,7 +149,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```rust title="src/vorpal.rs" {4,14,17}
+```rust title="src/vorpal.rs" {3,11,14}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::Rust, protoc::Protoc, system},
@@ -180,7 +180,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```rust title="src/vorpal.rs" {4,16-19}
+```rust title="src/vorpal.rs" {3,13-16}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, system},
@@ -232,7 +232,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```rust title="src/vorpal.rs" {4,22,24-26}
+```rust title="src/vorpal.rs" {3,19,21-23}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Job},
@@ -274,7 +274,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```rust title="src/vorpal.rs" {4,22-29}
+```rust title="src/vorpal.rs" {3,19-26}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Process},
@@ -320,7 +320,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```rust title="src/vorpal.rs" {4,19-22}
+```rust title="src/vorpal.rs" {3,16-19}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, system, UserEnvironment},
@@ -361,7 +361,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```rust title="src/vorpal.rs" {4,14-19,21-22}
+```rust title="src/vorpal.rs" {3,11-16,18-19}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{system, Artifact, ArtifactStep},

@@ -65,7 +65,7 @@ Use the `Go` builder from `language` package to compile a Go project into a cros
 `Go` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```go title="cmd/vorpal/main.go" {5,7,20-26}
+```go title="cmd/vorpal/main.go" {4,6,12-18}
 package main
 
 import (
@@ -136,7 +136,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is an artifact builder provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```go title="cmd/vorpal/main.go" {5,21-24,27}
+```go title="cmd/vorpal/main.go" {4,13-16,19}
 package main
 
 import (
@@ -175,7 +175,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```go title="cmd/vorpal/main.go" {6, 26-29}
+```go title="cmd/vorpal/main.go" {5, 18-21}
 package main
 
 import (
@@ -232,7 +232,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```go title="cmd/vorpal/main.go" {6,36-38,40-42}
+```go title="cmd/vorpal/main.go" {5,28-30,32-34}
 package main
 
 import (
@@ -285,7 +285,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```go title="cmd/vorpal/main.go" {6,36-43}
+```go title="cmd/vorpal/main.go" {5,28-35}
 package main
 
 import (
@@ -340,7 +340,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```go title="cmd/vorpal/main.go" {5,30-33}
+```go title="cmd/vorpal/main.go" {4,22-25}
 package main
 
 import (
@@ -387,7 +387,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```go title="cmd/vorpal/main.go" {5,19-25,27-28}
+```go title="cmd/vorpal/main.go" {5,12-18,20-21}
 package main
 
 import (
