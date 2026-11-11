@@ -895,6 +895,7 @@ jobs:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
     needs:
       - test
+      - test-secret-argv
     runs-on: ubuntu-latest
     permissions:
       contents: read
