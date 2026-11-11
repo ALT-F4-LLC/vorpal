@@ -20,9 +20,10 @@
 #     dependency goes unmaintained;
 #   - withdrawn advisories are ignored;
 #   - anything that stops the scan from completing exits 2, labelled
-#     INFRASTRUCTURE: OSV unreachable or answering in a shape this script cannot
-#     read, a paginated result, a tracked lockfile of a kind this script does
-#     not parse, a lockfile that parses to nothing, or a canary that fails.
+#     INFRASTRUCTURE: OSV unreachable after retries, answering HTTP 4xx, or
+#     answering in a shape this script cannot read, a paginated result, a
+#     tracked lockfile of a kind this script does not parse, a lockfile that
+#     parses to nothing, or a canary that fails.
 #     A scan that did not run has scanned nothing, so it is never a pass.
 #
 # CANARIES. Each run also queries one known-vulnerable version per ecosystem
@@ -60,6 +61,7 @@ readonly OSV_HOST="api.osv.dev"
 readonly OSV_BATCH_URL="https://${OSV_HOST}/v1/querybatch"
 readonly OSV_VULN_URL="https://${OSV_HOST}/v1/vulns"
 readonly BATCH_SIZE=500
+readonly OSV_ATTEMPTS=4
 
 for tool in curl jq git awk; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -79,6 +81,33 @@ infra() {
     echo "Do NOT go hunting for a finding: fix the cause and re-run the gate."
   } >&2
   exit 2
+}
+
+# osv_get <url> <out> <curl args...>: write the body of an HTTP 200 answer from
+# <url> to <out>. A curl error or HTTP 5xx is retried up to OSV_ATTEMPTS
+# attempts with a doubling delay; any other status fails at once, since
+# repeating a request OSV rejected cannot change its answer.
+osv_get() {
+  local url="$1" out="$2" attempt=1 delay=2 code failure
+  shift 2
+  while :; do
+    if code="$(curl -sS -o "$out" -w '%{http_code}' "$@" "$url" 2>"$work/curl.err")"; then
+      case "$code" in
+        200) return 0 ;;
+        5??) failure="HTTP ${code}" ;;
+        *) infra "${url} answered HTTP ${code} on attempt ${attempt} of ${OSV_ATTEMPTS}: $(head -c 300 "$out" 2>/dev/null | tr '\n' ' ')" ;;
+      esac
+    else
+      failure="$(tr '\n' ' ' <"$work/curl.err")"
+    fi
+    if [ "$attempt" -ge "$OSV_ATTEMPTS" ]; then
+      infra "could not get an answer from ${url} after ${attempt} attempts; last failure: ${failure}"
+    fi
+    echo "vuln-scan: ${url} attempt ${attempt} of ${OSV_ATTEMPTS} failed (${failure}); retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
 }
 
 # Base commit, if any.
@@ -246,15 +275,9 @@ while [ "$offset" -lt "$query_count" ]; do
     "$work/queries.json" >"$chunk"
   chunk_len="$(jq '.queries | length' "$chunk")"
 
-  http_code=""
-  if ! http_code="$(curl -sS --max-time 90 -o "$resp" -w '%{http_code}' \
+  osv_get "$OSV_BATCH_URL" "$resp" --max-time 90 \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
-    --data-binary @"$chunk" "$OSV_BATCH_URL" 2>"$work/curl.err")"; then
-    infra "could not reach ${OSV_HOST}: $(tr '\n' ' ' <"$work/curl.err")"
-  fi
-  if [ "$http_code" != "200" ]; then
-    infra "${OSV_BATCH_URL} answered HTTP ${http_code}: $(head -c 300 "$resp" 2>/dev/null | tr '\n' ' ')"
-  fi
+    --data-binary @"$chunk"
   # One result per query, in order, ties a hit back to its dependency.
   jq -e --argjson n "$chunk_len" \
     '(.results | type) == "array" and (.results | length) == $n' "$resp" >/dev/null ||
@@ -307,14 +330,7 @@ while IFS= read -r id; do
   fi
 
   detail="$work/vuln_${id}.json"
-  http_code=""
-  if ! http_code="$(curl -sS --max-time 60 -o "$detail" -w '%{http_code}' \
-    "${OSV_VULN_URL}/${id}" 2>"$work/curl.err")"; then
-    infra "could not fetch advisory ${id} from ${OSV_HOST}: $(tr '\n' ' ' <"$work/curl.err")"
-  fi
-  if [ "$http_code" != "200" ]; then
-    infra "${OSV_VULN_URL}/${id} answered HTTP ${http_code}"
-  fi
+  osv_get "${OSV_VULN_URL}/${id}" "$detail" --max-time 60
   jq -e --arg id "$id" '.id == $id' "$detail" >/dev/null ||
     infra "advisory ${id} came back in a shape this script cannot read"
 
