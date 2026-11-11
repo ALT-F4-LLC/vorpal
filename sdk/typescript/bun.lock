@@ -5,15 +5,15 @@
     "": {
       "name": "@altf4llc/vorpal-sdk",
       "dependencies": {
-        "@bufbuild/protobuf": "latest",
-        "@grpc/grpc-js": "latest",
-        "smol-toml": "latest",
+        "@bufbuild/protobuf": "2.17.0",
+        "@grpc/grpc-js": "1.14.7",
+        "smol-toml": "1.9.1",
       },
       "devDependencies": {
-        "@types/bun": "latest",
-        "ts-proto": "latest",
-        "tsx": "latest",
-        "typescript": "latest",
+        "@types/bun": "1.4.4",
+        "ts-proto": "2.18.4",
+        "tsx": "4.23.15",
+        "typescript": "7.0.2",
       },
     },
   },
