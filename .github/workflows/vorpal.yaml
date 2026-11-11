@@ -16,15 +16,6 @@ env:
   CI: "true"
 
 jobs:
-  gate-check:
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - run: ./script/ci-gate-check.sh .github/workflows/vorpal.yaml
-
   vendor:
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -677,10 +668,20 @@ jobs:
             --timeout 30
             ${{ env.VORPAL_WEBSITE_PATH }}
 
+  release-gate-check:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: ./script/ci-gate-check.sh .github/workflows/vorpal.yaml
+
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - build-artifacts
+      - release-gate-check
       - test-secret-argv
     permissions:
       attestations: write
@@ -734,6 +735,7 @@ jobs:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - build-artifacts
+      - release-gate-check
       - test-secret-argv
     permissions:
       contents: write
@@ -918,6 +920,7 @@ jobs:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
     needs:
       - build-artifacts
+      - release-gate-check
       - test-secret-argv
     runs-on: ubuntu-latest
     permissions:
