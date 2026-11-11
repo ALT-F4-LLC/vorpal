@@ -101,6 +101,24 @@ The `TypeScript` builder supports additional configuration:
 | `withSourceScripts(scripts)` | Scripts to run before build |
 | `withWorkingDir(dir)` | Custom working directory |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+`Job` and `Process` accept a `Uint8Array` value through `withSecrets`:
+
+```typescript
+await new Job("deploy", 'my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"', SYSTEMS)
+  .withSecrets(new Map([["API_TOKEN", new TextEncoder().encode("example-token")]]))
+  .build(ctx);
+```
+
+Text values still work: a `string` value is stored as its UTF-8 bytes.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies

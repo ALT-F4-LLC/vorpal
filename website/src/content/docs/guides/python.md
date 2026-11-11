@@ -113,6 +113,26 @@ The `Python` builder supports additional configuration:
 | `with_source_scripts(scripts)` | Scripts to run before the build |
 | `with_working_dir(directory)` | Working directory inside the source tree |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+`with_secrets` accepts a `bytes` value:
+
+```python
+(
+    Job("deploy", 'my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"', SYSTEMS)
+    .with_secrets({"API_TOKEN": b"example-token"})
+    .build(ctx)
+)
+```
+
+Text values still work: `{"API_TOKEN": "example-token"}` is stored as its UTF-8 bytes.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies

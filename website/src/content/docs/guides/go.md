@@ -108,6 +108,24 @@ The `Go` builder supports additional configuration:
 | `WithSource(source)` | Custom artifact source |
 | `WithSourceScript(script)` | Script to run before build |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+`Job` and `Process` accept a value as bytes through `WithSecretBytes`:
+
+```go
+artifact.NewJob("deploy", `my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"`, config.SYSTEMS).
+    WithSecretBytes(map[string][]byte{"API_TOKEN": []byte("example-token")}).
+    Build(ctx)
+```
+
+Text values still work through `WithSecrets(map[string]string)`.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies

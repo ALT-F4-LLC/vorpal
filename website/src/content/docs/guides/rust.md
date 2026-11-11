@@ -118,6 +118,27 @@ The `Rust` builder supports additional configuration:
 | `with_source(source)` | Custom artifact source |
 | `with_tests(bool)` | Enable `cargo test` |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+`Job` and `Process` accept a value as bytes through `with_secret_bytes`:
+
+```rust
+let script = r#"my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN""#.to_string();
+
+Job::new("deploy", script, system::SYSTEMS)
+    .with_secret_bytes(vec![("API_TOKEN", b"example-token".as_slice())])
+    .build(&mut ctx)
+    .await?;
+```
+
+Text values still work through `with_secrets(vec![("API_TOKEN", "example-token")])`.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies
