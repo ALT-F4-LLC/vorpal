@@ -16,6 +16,15 @@ env:
   CI: "true"
 
 jobs:
+  ci-gate-check:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: ./script/ci-gate-check.sh .github/workflows/vorpal.yaml
+
   vendor:
     runs-on: ${{ matrix.runner }}
     strategy:
