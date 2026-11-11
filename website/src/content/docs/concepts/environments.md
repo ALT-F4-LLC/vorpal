@@ -53,7 +53,7 @@ While activated, the environment provides:
 - **Custom environment variables** -- set through `.withEnvironments()`
 - **Isolation from the host** -- tools outside the environment are not affected
 
-Because development environments are artifacts, they benefit from the same [caching](./caching) as any other build output. If a teammate has already built the environment, you pull it from the cache instead of rebuilding.
+Because development environments are artifacts, they benefit from the same [caching](../caching/) as any other build output. If a teammate has already built the environment, you pull it from the cache instead of rebuilding.
 
 ## User environments
 
@@ -100,7 +100,7 @@ This is a deliberate design choice:
 - **Host integration** -- You can use host tools (editors, debuggers, system utilities) alongside environment-managed tools without workarounds.
 - **Simplicity** -- There is no container networking, no filesystem mapping, and no Docker dependency.
 
-The tradeoff is weaker isolation. If you need strict filesystem or network isolation for your build steps, consider using Docker or Bubblewrap as the entrypoint for your [artifact](./artifacts) build steps rather than environments.
+The tradeoff is weaker isolation. If you need strict filesystem or network isolation for your build steps, consider using Docker or Bubblewrap as the entrypoint for your [artifact](../artifacts/) build steps rather than environments.
 
 ## Cross-platform environments
 
@@ -114,4 +114,4 @@ Because environments are built through the same content-addressed pipeline as an
 
 - **The same config always produces the same environment.** If two developers run the same build configuration, they get identical tool versions.
 - **Environments are versioned by their inputs.** Changing a tool version or adding an environment variable changes the content digest, producing a new environment. The old one remains cached if you need to roll back.
-- **Environments are shareable.** Push a built environment to the Registry, and teammates can pull it instead of rebuilding. See [Caching](./caching) for how this works.
+- **Environments are shareable.** Push a built environment to the Registry, and teammates can pull it instead of rebuilding. See [Caching](../caching/) for how this works.

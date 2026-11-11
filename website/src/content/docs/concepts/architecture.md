@@ -74,7 +74,7 @@ When you run `vorpal build <name>`, the following sequence occurs:
 
 5. **Output** -- The CLI prints the artifact digest. Use `--path` to get the filesystem path to the output.
 
-This flow means that on a fresh build, everything is built from scratch. On subsequent builds, only artifacts whose inputs have changed are rebuilt -- everything else is served from the content-addressed cache. See [Caching](./caching) for details on how this works.
+This flow means that on a fresh build, everything is built from scratch. On subsequent builds, only artifacts whose inputs have changed are rebuilt -- everything else is served from the content-addressed cache. See [Caching](../caching/) for details on how this works.
 
 ## Communication
 
@@ -84,7 +84,7 @@ All inter-component communication uses gRPC with Protocol Buffers. This provides
 - **Streaming** for transferring large archives without loading them entirely into memory
 - **TLS support** for securing communication when running services remotely
 
-By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See the [Installation](../getting-started/installation) page for details on TLS key generation.
+By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See the [Installation](../../getting-started/installation/) page for details on TLS key generation.
 
 ## Why config-as-code?
 
