@@ -421,11 +421,20 @@ jobs:
       - build
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-latest
+          - macos-latest-large
+          - ubuntu-latest
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v6
 
-      - run: ./script/dev/debian.sh
+      - if: contains(matrix.runner, 'ubuntu')
+        run: ./script/dev/debian.sh
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
@@ -453,8 +462,13 @@ jobs:
       # The marker and the visibility token reach the watcher only through this
       # environment and files written by shell builtins, never through a process
       # argument, so the watcher cannot match itself. Hits are decided by grep's
-      # output, not its exit status: a process exiting mid-scan makes grep exit 2
-      # even when it printed a match.
+      # output, not its exit status, so a failing scan counts as no hit and the
+      # canary and visibility checks prove each run's scan saw processes.
+      #
+      # The scan reads arguments through `ps` rather than /proc, which macOS
+      # lacks. `a` and `x` list every user's processes, with or without a
+      # terminal, and `ww` lifts the column limit; the canary pads its marker
+      # past any terminal width so a truncated scan misses it.
       - name: Build vorpal-secret-job while watching host process arguments
         env:
           MARKER: vorpal-synthetic-secret-c4d9e2f1
@@ -469,7 +483,7 @@ jobs:
           printf '0\n' > "$watch_dir/scans"
 
           scan() {
-            grep -alF -f "$1" /proc/[0-9]*/cmdline 2>/dev/null || true
+            ps axww -o args= 2>/dev/null | grep -aF -f "$1" || true
           }
 
           if ! grep -qF -f "$watch_dir/marker" config/src/artifact/vorpal_secret_job.rs; then
@@ -477,7 +491,7 @@ jobs:
             exit 1
           fi
 
-          bash -c 'sleep 30; :' "canary-$MARKER" &
+          bash -c 'sleep 30; :' "$(printf '%0200d' 0)" "canary-$MARKER" &
           canary_pid=$!
           canary_seen=false
           for _ in $(seq 50); do
