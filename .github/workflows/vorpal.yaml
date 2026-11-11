@@ -669,6 +669,9 @@ jobs:
             ${{ env.VORPAL_WEBSITE_PATH }}
 
   release-gate-check:
+    needs:
+      - build-artifacts
+      - test-secret-argv
     permissions:
       contents: read
     runs-on: ubuntu-latest
