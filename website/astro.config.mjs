@@ -5,6 +5,13 @@ import starlight from '@astrojs/starlight';
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://docs.vorpal.build',
+	markdown: {
+		// Astro 6 leaves `gfm` undefined by default, which @astrojs/mdx reads as
+		// disabled, so `.mdx` pages lose GFM tables. Set it explicitly. The
+		// build's `markdown.gfm` deprecation warning is expected; when upgrading
+		// Astro, switch to an explicit `mdx({ gfm: true })` integration instead.
+		gfm: true,
+	},
 	integrations: [
 		starlight({
 			title: 'Vorpal',
