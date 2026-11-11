@@ -111,7 +111,15 @@ await context.run();
 | `new(name, entrypoint, systems)` | Create a Process with a name, binary path, and target platforms |
 | `with_arguments(args)` | Add command-line arguments passed to the entrypoint |
 | `with_artifacts(artifacts)` | Add dependency artifacts whose outputs are available at runtime |
-| `with_secrets(secrets)` | Add encrypted secrets available as environment variables |
+| `with_secrets(secrets)` | Add encrypted secrets, each read from the file `$VORPAL_SECRET_DIR/<NAME>` and not from an environment variable |
+
+### Secrets
+
+Each secret is delivered to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) per secret and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
 
 ## Lifecycle management
 

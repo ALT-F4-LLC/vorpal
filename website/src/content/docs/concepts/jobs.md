@@ -89,7 +89,15 @@ await context.run();
 |--------|-------------|
 | `new(name, script, systems)` | Create a Job with a name, shell script, and target platforms |
 | `with_artifacts(artifacts)` | Add dependency artifacts whose outputs are available during execution |
-| `with_secrets(secrets)` | Add encrypted secrets available as environment variables at runtime |
+| `with_secrets(secrets)` | Add encrypted secrets, each read at runtime from the file `$VORPAL_SECRET_DIR/<NAME>` and not from an environment variable |
+
+### Secrets
+
+Each secret is delivered to the job's step as a file at `$VORPAL_SECRET_DIR/<NAME>`. Read the value from that file in the script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) per secret and must be valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
 
 ## How it differs from an Artifact
 
