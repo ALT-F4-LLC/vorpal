@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking — step secrets**: step secrets now use a sealed secret envelope
+  format (RSA-OAEP with AES-256-GCM), bound to the artifact namespace and the
+  secret name. Each secret is limited to 64 KiB (65536 bytes). A secret sealed
+  in the older format fails with
+  `secret was encrypted with an older format and must be prepared again`;
+  prepare your artifacts again after upgrading.
+
+- **Breaking — secret delivery**: secrets are delivered to a build step as
+  files at `$VORPAL_SECRET_DIR/<NAME>` instead of environment variables. A
+  step that references a secret (`$NAME` or `${NAME}`) in its arguments or
+  environment fails. Secret names must match `[A-Za-z_][A-Za-z0-9_]*`, must
+  not start with `VORPAL_`, and must not repeat within a step (no duplicates).
+
+- **Breaking — secret values**: step secret values are carried as `bytes`. A
+  value that is not valid UTF-8 is rejected at prepare with gRPC status
+  `INVALID_ARGUMENT` (message `secret '<name>' is not valid UTF-8`).
+
+- **Breaking — issuer client secret**: the `--issuer-client-secret` flag is
+  removed. Pass the secret in a file instead, with
+  `--issuer-client-secret-file` or `VORPAL_ISSUER_CLIENT_SECRET_FILE`.
+  Existing service units that pass `--issuer-client-secret` break until the
+  installer is run again.
+
 ## [0.4.1] - 2026-09-12
 
 ### Changed
