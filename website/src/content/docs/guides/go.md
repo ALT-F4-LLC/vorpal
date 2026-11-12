@@ -65,7 +65,7 @@ Use the `Go` builder from `language` package to compile a Go project into a cros
 `Go` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```go title="cmd/vorpal/main.go" {5,7,20-26}
+```go title="cmd/vorpal/main.go" {4,6,12-18}
 package main
 
 import (
@@ -108,6 +108,26 @@ The `Go` builder supports additional configuration:
 | `WithSource(source)` | Custom artifact source |
 | `WithSourceScript(script)` | Script to run before build |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and may hold any bytes, including binary data that is not valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+A `Process` receives these files only while its lifecycle scripts are built, not when the process runs, so they cannot supply runtime credentials. Runtime secrets will be supported for processes in a future release. See [Processes](/concepts/processes/#secrets).
+
+`Job` and `Process` accept a value as bytes through `WithSecretBytes`:
+
+```go
+artifact.NewJob("deploy", `my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"`, config.SYSTEMS).
+    WithSecretBytes(map[string][]byte{"API_TOKEN": []byte("example-token")}).
+    Build(ctx)
+```
+
+Text values still work through `WithSecrets(map[string]string)`.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies
@@ -118,7 +138,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is an artifact builder provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```go title="cmd/vorpal/main.go" {5,21-24,27}
+```go title="cmd/vorpal/main.go" {4,13-16,19}
 package main
 
 import (
@@ -157,7 +177,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```go title="cmd/vorpal/main.go" {6, 26-29}
+```go title="cmd/vorpal/main.go" {5, 18-21}
 package main
 
 import (
@@ -206,7 +226,7 @@ The development environment builder supports additional configuration:
 | `WithArtifacts(artifacts)` | Artifact dependencies available in the shell |
 | `WithEnvironments(vars)` | Environment variables set in the shell |
 | `WithoutProtoc()` | Exclude the default Protoc artifact |
-| `WithSecrets(map)` | Secrets available in the shell |
+| `WithSecrets(map)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
 
 See [Environments](/concepts/environments/) to learn more.
 
@@ -214,7 +234,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```go title="cmd/vorpal/main.go" {6,36-38,40-42}
+```go title="cmd/vorpal/main.go" {5,28-30,32-34}
 package main
 
 import (
@@ -267,7 +287,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```go title="cmd/vorpal/main.go" {6,36-43}
+```go title="cmd/vorpal/main.go" {5,28-35}
 package main
 
 import (
@@ -314,7 +334,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `WithArguments(args)` | Command-line arguments for the process |
 | `WithArtifacts(artifacts)` | Artifact dependencies available during execution |
-| `WithSecrets(map)` | Secrets available during execution |
+| `WithSecrets(map)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 
@@ -322,7 +342,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```go title="cmd/vorpal/main.go" {5,30-33}
+```go title="cmd/vorpal/main.go" {4,22-25}
 package main
 
 import (
@@ -369,7 +389,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```go title="cmd/vorpal/main.go" {5,19-25,27-28}
+```go title="cmd/vorpal/main.go" {5,12-18,20-21}
 package main
 
 import (

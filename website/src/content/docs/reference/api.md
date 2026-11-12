@@ -79,14 +79,18 @@ message ArtifactStep {
 
 ### `ArtifactStepSecret`
 
-Encrypted secret passed to a build step.
+Secret passed to a build step. The agent seals the value at prepare; the worker writes it to the file `$VORPAL_SECRET_DIR/<NAME>`.
 
 ```protobuf
 message ArtifactStepSecret {
-    string name = 1;    // Secret name (exposed as env var)
-    string value = 2;   // Encrypted value
+    string name = 1;    // Secret name (file name under $VORPAL_SECRET_DIR)
+    bytes value = 2;    // Secret value, sealed by the agent
 }
 ```
+
+- A value is at most 64 KiB (65536 bytes) per secret and may hold any bytes, including binary data that is not valid UTF-8. The file holds the value byte for byte.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- A step whose `arguments` or `environments` reference a secret (`$NAME` or `${NAME}`) fails.
 
 ## AgentService
 
@@ -312,8 +316,9 @@ When a worker executes a build step, these environment variables are available:
 | `VORPAL_WORKSPACE` | Path to the build workspace directory |
 | `VORPAL_ARTIFACTS` | Space-separated list of all dependency artifact output paths |
 | `VORPAL_ARTIFACT_<DIGEST>` | Path to a dependency artifact's output directory. Also set for the artifact being built itself, pointing to its own output directory |
+| `VORPAL_SECRET_DIR` | Directory holding the step's secret files, set when the step has secrets |
 
-Additionally, all entries in the step's `environments` list are set as environment variables, and all `secrets` are decrypted and set as environment variables by name.
+Additionally, all entries in the step's `environments` list are set as environment variables. Each secret is decrypted and written as a file at `$VORPAL_SECRET_DIR/<NAME>`, not set as an environment variable. Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
 
 ## Authentication
 

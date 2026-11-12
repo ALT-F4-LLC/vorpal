@@ -95,7 +95,7 @@ The SDKs provide high-level builders for common artifact patterns:
 
 ### Custom artifacts
 
-The base `Artifact` type lets you define arbitrary build steps with any entrypoint. This is how you use Docker, Bubblewrap, or custom executors. See the [Quickstart](../getting-started/quickstart) for a basic example, or the SDK guides ([Rust](../guides/rust), [Go](../guides/go), [TypeScript](../guides/typescript)) for detailed usage.
+The base `Artifact` type lets you define arbitrary build steps with any entrypoint. This is how you use Docker, Bubblewrap, or custom executors. See the [Quickstart](../../getting-started/quickstart/) for a basic example, or the SDK guides ([Rust](../../guides/rust/), [Go](../../guides/go/), [TypeScript](../../guides/typescript/)) for detailed usage.
 
 ## Cross-platform targeting
 

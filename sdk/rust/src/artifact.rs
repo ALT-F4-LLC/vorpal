@@ -148,7 +148,8 @@ pub struct Process<'a> {
     pub entrypoint: &'a str,
     /// Name of the resulting artifact.
     pub name: &'a str,
-    /// Secrets made available to the process.
+    /// Secrets for the step that builds the lifecycle scripts; not available
+    /// when the process runs.
     pub secrets: Vec<api::artifact::ArtifactStepSecret>,
     systems: Vec<api::artifact::ArtifactSystem>,
     system_error: Option<anyhow::Error>,
@@ -324,6 +325,21 @@ impl<'a> ArtifactStep<'a> {
         self
     }
 
+    /// Adds `(name, value)` secrets with raw byte values, skipping any whose
+    /// name is already set.
+    #[must_use]
+    pub fn with_secret_bytes(self, secrets: Vec<(&str, &[u8])>) -> Self {
+        self.with_secrets(
+            secrets
+                .into_iter()
+                .map(|(name, value)| api::artifact::ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_vec(),
+                })
+                .collect(),
+        )
+    }
+
     /// Sets the script content passed to the step's entrypoint.
     #[must_use]
     pub fn with_script(mut self, script: String) -> Self {
@@ -450,12 +466,24 @@ impl<'a> Job<'a> {
     /// Adds `(name, value)` secrets made available to the job's script,
     /// skipping any name already present.
     #[must_use]
-    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+    pub fn with_secrets(self, secrets: Vec<(&str, &str)>) -> Self {
+        self.with_secret_bytes(
+            secrets
+                .into_iter()
+                .map(|(name, value)| (name, value.as_bytes()))
+                .collect(),
+        )
+    }
+
+    /// Adds `(name, value)` secrets with raw byte values made available to
+    /// the job's script, skipping any name already present.
+    #[must_use]
+    pub fn with_secret_bytes(mut self, secrets: Vec<(&str, &[u8])>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
                 self.secrets.push(api::artifact::ArtifactStepSecret {
                     name: name.to_string(),
-                    value: value.to_string(),
+                    value: value.to_vec(),
                 });
             }
         }
@@ -528,7 +556,7 @@ impl<'a> DevelopmentEnvironment<'a> {
             if !self.secrets.iter().any(|s| s.name == name) {
                 self.secrets.push(api::artifact::ArtifactStepSecret {
                     name: name.to_string(),
-                    value: value.to_string(),
+                    value: value.as_bytes().to_vec(),
                 });
             }
         }
@@ -693,15 +721,37 @@ impl<'a> Process<'a> {
         self
     }
 
-    /// Adds `(name, value)` secrets made available to the process, skipping
-    /// any name already present.
+    /// Adds `(name, value)` secrets for the step that builds the lifecycle
+    /// scripts, skipping any name already present.
+    ///
+    /// Each secret is a file under `$VORPAL_SECRET_DIR` only while the
+    /// lifecycle scripts are built; the directory is removed afterward, so
+    /// the running process cannot read it. Runtime secrets will be supported
+    /// for processes in a future release.
     #[must_use]
-    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+    pub fn with_secrets(self, secrets: Vec<(&str, &str)>) -> Self {
+        self.with_secret_bytes(
+            secrets
+                .into_iter()
+                .map(|(name, value)| (name, value.as_bytes()))
+                .collect(),
+        )
+    }
+
+    /// Adds `(name, value)` secrets with raw byte values for the step that
+    /// builds the lifecycle scripts, skipping any name already present.
+    ///
+    /// Each secret is a file under `$VORPAL_SECRET_DIR` only while the
+    /// lifecycle scripts are built; the directory is removed afterward, so
+    /// the running process cannot read it. Runtime secrets will be supported
+    /// for processes in a future release.
+    #[must_use]
+    pub fn with_secret_bytes(mut self, secrets: Vec<(&str, &[u8])>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
                 self.secrets.push(api::artifact::ArtifactStepSecret {
                     name: name.to_string(),
-                    value: value.to_string(),
+                    value: value.to_vec(),
                 });
             }
         }
@@ -1035,5 +1085,37 @@ mod tests {
         assert_eq!(err.to_string(), "unsupported system: loongarch64-linux");
 
         Ok(())
+    }
+
+    #[test]
+    fn secret_builders_store_text_as_its_bytes_and_bytes_as_given() {
+        let binary: &[u8] = &[0xff, 0x00, 0xfe, 0x3d, 0x0a];
+        let expected = vec![
+            api::artifact::ArtifactStepSecret {
+                name: "TOKEN".to_string(),
+                value: b"hunter2".to_vec(),
+            },
+            api::artifact::ArtifactStepSecret {
+                name: "BINARY".to_string(),
+                value: binary.to_vec(),
+            },
+        ];
+
+        let step = ArtifactStep::new("bash")
+            .with_secrets(vec![api::artifact::ArtifactStepSecret {
+                name: "TOKEN".to_string(),
+                value: b"hunter2".to_vec(),
+            }])
+            .with_secret_bytes(vec![("BINARY", binary), ("TOKEN", b"ignored")]);
+        let job = Job::new("example", String::new(), [Aarch64Darwin])
+            .with_secrets(vec![("TOKEN", "hunter2")])
+            .with_secret_bytes(vec![("BINARY", binary), ("TOKEN", b"ignored")]);
+        let process = Process::new("example", "bash", [Aarch64Darwin])
+            .with_secrets(vec![("TOKEN", "hunter2")])
+            .with_secret_bytes(vec![("BINARY", binary), ("TOKEN", b"ignored")]);
+
+        assert_eq!(step.secrets, expected);
+        assert_eq!(job.secrets, expected);
+        assert_eq!(process.secrets, expected);
     }
 }

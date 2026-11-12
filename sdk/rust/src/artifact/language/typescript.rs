@@ -95,8 +95,10 @@ impl<'a> TypeScript<'a> {
     pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
-                self.secrets
-                    .push(api::artifact::ArtifactStepSecret { name, value });
+                self.secrets.push(api::artifact::ArtifactStepSecret {
+                    name,
+                    value: value.into_bytes(),
+                });
             }
         }
 

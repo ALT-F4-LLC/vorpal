@@ -85,3 +85,4 @@ pub mod artifact;
 pub mod cli;
 /// Config-side context: registers artifacts and talks to the agent.
 pub mod context;
+mod serde_base64;

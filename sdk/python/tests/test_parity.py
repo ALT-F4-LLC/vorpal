@@ -39,6 +39,7 @@ from vorpal_sdk.context import (  # noqa: E402
     serialize_artifact,
     serialize_artifact_source,
     serialize_artifact_step,
+    serialize_artifact_step_secret,
 )
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "digest-parity"
@@ -77,10 +78,15 @@ def build_artifact(d: dict[str, Any]) -> artifact_pb2.Artifact:
             step.entrypoint = st["entrypoint"]
         if "script" in st:
             step.script = st["script"]
+        # A secret value is text stored as its UTF-8 bytes, or ``value_hex``
+        # for bytes that are not valid UTF-8.
         for sec in st.get("secrets", []):
             secp = step.secrets.add()
             secp.name = sec["name"]
-            secp.value = sec["value"]
+            if "value_hex" in sec:
+                secp.value = bytes.fromhex(sec["value_hex"])
+            else:
+                secp.value = sec["value"].encode("utf-8")
         step.arguments.extend(st.get("arguments", []))
         step.artifacts.extend(st.get("artifacts", []))
         step.environments.extend(st.get("environments", []))
@@ -107,6 +113,20 @@ def test_digest_parity_all_fixtures() -> None:
             f"digest mismatch for fixture {f['name']!r}: got {got}, want {want}\n"
             f"produced JSON: {artifact_to_json_bytes(art).decode('utf-8')}"
         )
+
+
+def test_secret_value_serializes_as_padded_standard_base64() -> None:
+    """A secret's bytes serialize as standard-alphabet, padded base64, the
+    form the Rust SDK writes; these bytes need ``+``, ``/`` and ``=``."""
+    secret = artifact_pb2.ArtifactStepSecret(
+        name="TOKEN", value=bytes([0xFF, 0x00, 0xFE, 0x3D, 0x0A])
+    )
+    out = json.dumps(
+        serialize_artifact_step_secret(secret),
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    assert out == '{"name":"TOKEN","value":"/wD+PQo="}'
 
 
 def test_optional_present_empty_emits_empty_string() -> None:

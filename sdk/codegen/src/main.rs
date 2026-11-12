@@ -178,8 +178,9 @@ fn parse_source_file(source: &str) -> Result<Vec<ParsedSourceFn>, Box<dyn std::e
             // Analyze the function body to extract name and path
             let body_str = quote::quote!(#func).to_string();
 
-            // Detect if this function has version.replace(".", "")
-            let has_version_replace = body_str.contains(r#"replace ("." , "")"#)
+            // Detect if this function has version.replace(".", "") or version.replace('.', "")
+            let has_version_replace = body_str.contains(r#"replace ('.' , "")"#)
+                || body_str.contains(r#"replace ("." , "")"#)
                 || body_str.contains(r#"replace(".", "")"#)
                 || body_str.contains("replace (\".\", \"\")");
 
@@ -2197,4 +2198,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_go_source, generate_py_source, generate_ts_source, parse_source_file};
+
+    fn unzip_source(replace_call: &str) -> String {
+        format!(
+            r#"
+pub fn unzip(version: &str) -> api::artifact::ArtifactSource {{
+    let name = "unzip";
+    let version = version.{replace_call};
+    let path = format!("https://sdk.vorpal.build/source/unzip{{version}}.tar.gz");
+
+    ArtifactSource::new(name, path.as_str()).build()
+}}
+"#
+        )
+    }
+
+    fn assert_emits_clean_version(replace_call: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let sources = parse_source_file(&unzip_source(replace_call))?;
+
+        let go = generate_go_source(&sources);
+        assert!(
+            go.contains("\tversionClean := strings.ReplaceAll(version, \".\", \"\")\n"),
+            "Go for {replace_call} lacks the versionClean line:\n{go}"
+        );
+        assert!(
+            go.contains(
+                "fmt.Sprintf(\"https://sdk.vorpal.build/source/unzip%s.tar.gz\", versionClean)"
+            ),
+            "Go for {replace_call} does not build the URL from versionClean:\n{go}"
+        );
+
+        let ts = generate_ts_source(&sources);
+        assert!(
+            ts.contains("  const versionClean = version.replaceAll(\".\", \"\");\n"),
+            "TypeScript for {replace_call} lacks the versionClean line:\n{ts}"
+        );
+        assert!(
+            ts.contains("`https://sdk.vorpal.build/source/unzip${versionClean}.tar.gz`"),
+            "TypeScript for {replace_call} does not build the URL from versionClean:\n{ts}"
+        );
+
+        let py = generate_py_source(&sources);
+        assert!(
+            py.contains("    version_clean = version.replace(\".\", \"\")\n"),
+            "Python for {replace_call} lacks the version_clean line:\n{py}"
+        );
+        assert!(
+            py.contains("f\"https://sdk.vorpal.build/source/unzip{version_clean}.tar.gz\""),
+            "Python for {replace_call} does not build the URL from version_clean:\n{py}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn version_replace_char_literal_emits_clean_version() -> Result<(), Box<dyn std::error::Error>>
+    {
+        assert_emits_clean_version(r#"replace('.', "")"#)?;
+        assert_emits_clean_version(r#"replace(".", "")"#)
+    }
 }

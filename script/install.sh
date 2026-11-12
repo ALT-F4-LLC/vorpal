@@ -4,28 +4,30 @@ set -euo pipefail
 # =============================================================================
 # Vorpal Installer
 # =============================================================================
-# Usage: curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
 #
 # Environment variables:
 #   VORPAL_NONINTERACTIVE=1    Enable non-interactive mode
 #   CI=true                    Enable non-interactive mode
-#   VORPAL_VERSION=<ver>       Version to install (default: 0.4.1)
+#   VORPAL_VERSION=<ver>       Version to install (default: 0.5.0)
 #   VORPAL_NO_SERVICE=1        Skip service installation
-#   VORPAL_SERVICES=<list>     Comma-separated services to install (default: agent,registry,worker)
+#   VORPAL_SERVICES=<list>     Services (default: agent,registry,worker)
 #   VORPAL_NO_PATH=1           Skip PATH configuration
 #   VORPAL_DRY_RUN=1           Show what would be done without making changes
 #   VORPAL_ISSUER=<url>        OIDC issuer URL for authenticated services
 #   VORPAL_ISSUER_AUDIENCE=<v> OIDC issuer audience
-#   VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
+#   VORPAL_ISSUER_CLIENT_ID=<v>     OIDC issuer client ID
 #   VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
 #   NO_COLOR=1                 Disable color output
 # =============================================================================
 
 # -- Constants ----------------------------------------------------------------
 
-VORPAL_VERSION="${VORPAL_VERSION:-0.4.1}"
+VORPAL_VERSION="${VORPAL_VERSION:-0.5.0}"
 VORPAL_INSTALL_DIR="$HOME/.vorpal"
 VORPAL_SYSTEM_DIR="/var/lib/vorpal"
+ISSUER_CLIENT_SECRET_FILE="${VORPAL_SYSTEM_DIR}/key/issuer-client-secret"
 VORPAL_REPO="ALT-F4-LLC/vorpal"
 VORPAL_GITHUB_URL="https://github.com/$VORPAL_REPO"
 
@@ -214,7 +216,7 @@ spin() {
     # Select character set based on Unicode support
     local frames
     if has_unicode; then
-        # Braille pattern cycle: U+2801 U+2802 U+2804 U+2840 U+2820 U+2810 U+2808 U+2800
+        # Braille cycle: U+2801 U+2802 U+2804 U+2840 U+2820 U+2810 U+2808 U+2800
         frames=(
             $'\xe2\xa0\x81'
             $'\xe2\xa0\x82'
@@ -232,10 +234,8 @@ spin() {
 
     local frame_count=${#frames[@]}
 
-    # Run spinner as a background subshell writing to stderr. Elapsed time is
-    # derived from the loop's own iteration count (~0.08s/tick) rather than
-    # shelling out to `date` on every frame, so no extra process/IPC is
-    # needed to carry live status into the subshell.
+    # Run the spinner as a background subshell writing to stderr. Elapsed time
+    # comes from the loop's iteration count (~0.08s/tick), not `date` per frame.
     (
         local i=0
         local elapsed=0
@@ -266,8 +266,8 @@ spin_stop() {
         printf '\r\033[2K' >&2
     fi
 
-    # In non-TTY / NO_COLOR mode, spin() printed a static step line but no
-    # result indicator — print the final status so CI logs show the outcome.
+    # In non-TTY / NO_COLOR mode spin() prints a static step line with no
+    # result; print the final status so CI logs show the outcome.
     if [[ ! -t 1 ]] || [[ -n "${NO_COLOR:-}" ]]; then
         if [[ -n "$message" ]]; then
             if [[ "$status" = "success" ]]; then
@@ -374,7 +374,7 @@ Install Vorpal to ~/.vorpal and configure system services.
 
 Options:
   -y, --yes              Run in non-interactive mode (skip prompts)
-  -v, --version <ver>    Version to install (default: 0.4.1)
+  -v, --version <ver>    Version to install (default: 0.5.0)
       --services <list>  Comma-separated services to install (default: agent,registry,worker)
       --no-service       Skip service installation
       --no-path          Skip PATH configuration
@@ -389,7 +389,7 @@ Options:
 Environment variables:
   VORPAL_NONINTERACTIVE=1    Enable non-interactive mode
   CI=true                    Enable non-interactive mode
-  VORPAL_VERSION=<ver>       Version to install (default: 0.4.1)
+  VORPAL_VERSION=<ver>       Version to install (default: 0.5.0)
   VORPAL_NO_SERVICE=1        Skip service installation
   VORPAL_SERVICES=<list>     Comma-separated services (default: agent,registry,worker)
   VORPAL_NO_PATH=1           Skip PATH configuration
@@ -399,6 +399,13 @@ Environment variables:
   VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
   VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
   NO_COLOR=1                 Disable color output
+
+Issuer client secret:
+  When the installed binary supports --issuer-client-secret-file, the
+  installer writes the secret to ${ISSUER_CLIENT_SECRET_FILE}
+  (mode 0600, owned by the installing user) and the service reads it from
+  that file, so the service definition holds only the path. Older binaries
+  receive the secret value on the service command line.
 EOF
 }
 
@@ -413,7 +420,7 @@ parse_args() {
                 if [[ $# -lt 2 ]]; then
                     print_error "Missing value for $1" \
                         "The $1 flag requires a version argument." \
-                        "Example: install.sh $1 0.4.1"
+                        "Example: install.sh $1 0.5.0"
                     exit 1
                 fi
                 VORPAL_VERSION="$2"
@@ -708,8 +715,8 @@ install_linux_prerequisites_apt() {
     fi
 
     if [[ "$need_docker_group" = 1 ]]; then
-        # docker-group membership grants root-equivalent access via the docker socket;
-        # this is the accepted tradeoff for running docker without sudo.
+        # docker-group membership is root-equivalent via the docker socket; this
+        # is the accepted tradeoff for running docker without sudo.
         print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
         spin "Adding ${invoking_user} to the docker group..."
         if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
@@ -727,10 +734,9 @@ install_linux_prerequisites_apt() {
     fi
 }
 
-# dnf config-manager syntax differs between dnf4 (--add-repo <url>) and dnf5
-# (addrepo --from-repofile=<url>). dnf5 additionally chokes on blank lines in
-# Docker's published .repo file (rpm-software-management/dnf5#1603), so fetch
-# it and strip blank lines first, matching Docker's own installer workaround.
+# dnf4 uses `config-manager --add-repo <url>`; dnf5 uses `addrepo
+# --from-repofile=<url>` and chokes on blank lines in Docker's .repo file, so
+# fetch it and strip them first, as Docker's own installer does.
 add_docker_ce_dnf_repo() {
     local repo_url="https://download.docker.com/linux/fedora/docker-ce.repo"
 
@@ -892,8 +898,8 @@ install_linux_prerequisites_dnf() {
     fi
 
     if [[ "$need_docker_group" = 1 ]]; then
-        # docker-group membership grants root-equivalent access via the docker socket;
-        # this is the accepted tradeoff for running docker without sudo.
+        # docker-group membership is root-equivalent via the docker socket; this
+        # is the accepted tradeoff for running docker without sudo.
         print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
         spin "Adding ${invoking_user} to the docker group..."
         if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
@@ -970,8 +976,8 @@ APPARMOR_EOF
 # -- Phase 2: Download & version resolution -----------------------------------
 
 resolve_version() {
-    # Note: Version resolution runs during --dry-run to validate the plan is realistic.
-    # This makes read-only HTTP requests (API query, HEAD validation).
+    # Version resolution also runs under --dry-run, to check the plan is
+    # realistic. It makes only read-only HTTP requests (API query, HEAD).
     local version="$VORPAL_VERSION"
     local artifact="vorpal-${ARCH}-${OS}.tar.gz"
 
@@ -987,8 +993,8 @@ resolve_version() {
 
         if [[ "$http_code" = "403" ]]; then
             spin_stop "failure"
-            print_warning "GitHub API rate limit reached. Falling back to 0.4.1."
-            version="0.4.1"
+            print_warning "GitHub API rate limit reached. Falling back to 0.5.0."
+            version="0.5.0"
         elif [[ "$http_code" = "200" ]]; then
             api_response="$(curl -fsSL "$api_url" 2>/dev/null)" || true
             if [[ -n "$api_response" ]]; then
@@ -1000,18 +1006,18 @@ resolve_version() {
                     spin_stop "success" "Resolved latest version (${tag})"
                 else
                     spin_stop "failure"
-                    print_warning "Could not parse latest version from GitHub API. Falling back to 0.4.1."
-                    version="0.4.1"
+                    print_warning "Could not parse latest version from GitHub API. Falling back to 0.5.0."
+                    version="0.5.0"
                 fi
             else
                 spin_stop "failure"
-                print_warning "Could not fetch latest version from GitHub API. Falling back to 0.4.1."
-                version="0.4.1"
+                print_warning "Could not fetch latest version from GitHub API. Falling back to 0.5.0."
+                version="0.5.0"
             fi
         else
             spin_stop "failure"
-            print_warning "GitHub API returned HTTP ${http_code}. Falling back to 0.4.1."
-            version="0.4.1"
+            print_warning "GitHub API returned HTTP ${http_code}. Falling back to 0.5.0."
+            version="0.5.0"
         fi
     fi
 
@@ -1031,7 +1037,7 @@ resolve_version() {
             "Available channels:
     ${_sym_bullet} nightly -- latest development build (updated daily)
     ${_sym_bullet} latest  -- most recent stable release" \
-            "Or specify an exact tag: --version v0.4.1
+            "Or specify an exact tag: --version v0.5.0
   See all releases: ${VORPAL_GITHUB_URL}/releases"
         exit 1
     fi
@@ -1304,16 +1310,43 @@ generate_keys() {
     spin_stop "success" "Generated security keys"
 }
 
-install_service_macos() {
-    local plist_dir="${HOME}/Library/LaunchAgents"
-    local plist_path="${plist_dir}/com.altf4llc.vorpal.plist"
+binary_supports_secret_file() {
+    local help
+    help="$("${VORPAL_INSTALL_DIR}/bin/vorpal" system services start --help 2>/dev/null)" || true
+    [[ "$help" == *--issuer-client-secret-file* ]]
+}
+
+# Creates the file through mktemp (mode 0600 from creation) and renames it
+# into place, so an existing file's wider mode or a symlink never carries over.
+write_issuer_client_secret_file() {
+    local temp_file
+
+    if ! temp_file="$(mktemp "${VORPAL_SYSTEM_DIR}/key/.issuer-client-secret.XXXXXX")"; then
+        print_error \
+            "Could not create the issuer client secret file" \
+            "mktemp failed in ${VORPAL_SYSTEM_DIR}/key." \
+            "Check ${VORPAL_SYSTEM_DIR} ownership and re-run the installer."
+        exit 1
+    fi
+
+    if ! printf '%s' "$ISSUER_CLIENT_SECRET" > "$temp_file" \
+        || ! mv -f "$temp_file" "$ISSUER_CLIENT_SECRET_FILE"; then
+        rm -f "$temp_file"
+        print_error \
+            "Could not write the issuer client secret file" \
+            "Writing ${ISSUER_CLIENT_SECRET_FILE} failed." \
+            "Check ${VORPAL_SYSTEM_DIR} ownership and re-run the installer."
+        exit 1
+    fi
+}
+
+# Arguments: the secret flag and its argument, both empty when no secret is set.
+render_launchd_plist() {
+    local secret_flag="$1"
+    local secret_arg="$2"
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
-    local gui_target="gui/$(id -u)"
 
-    mkdir -p "$plist_dir"
-
-    # Write the plist
-    cat > "$plist_path" <<PLIST
+    cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1331,7 +1364,7 @@ install_service_macos() {
 [[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n        <string>--issuer-client-secret</string>\n        <string>%s</string>' "$ISSUER_CLIENT_SECRET"
+[[ -n "$secret_flag" ]] && printf '\n        <string>%s</string>\n        <string>%s</string>' "$secret_flag" "$secret_arg"
 )
     </array>
     <key>RunAtLoad</key>
@@ -1345,8 +1378,17 @@ install_service_macos() {
 </dict>
 </plist>
 PLIST
+}
 
-    # Bootout existing service (ignore errors — may not be loaded on fresh install)
+install_service_macos() {
+    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist_path="${plist_dir}/com.altf4llc.vorpal.plist"
+    local gui_target="gui/$(id -u)"
+
+    mkdir -p "$plist_dir"
+    render_launchd_plist "$1" "$2" > "$plist_path"
+
+    # Boot out the existing service; errors are fine on a fresh install.
     launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
 
     spin "Starting LaunchAgent..."
@@ -1372,15 +1414,13 @@ PLIST
     spin_stop "success" "Installed LaunchAgent"
 }
 
-install_service_linux() {
-    local unit_dir="${HOME}/.config/systemd/user"
-    local unit_path="${unit_dir}/vorpal.service"
+# Arguments: the secret flag and its argument, both empty when no secret is set.
+render_systemd_unit() {
+    local secret_flag="$1"
+    local secret_arg="$2"
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
 
-    mkdir -p "$unit_dir"
-
-    # Write the systemd user unit
-    cat > "$unit_path" <<UNIT
+    cat <<UNIT
 [Unit]
 Description=Vorpal Build System Services
 After=network.target
@@ -1391,7 +1431,7 @@ ExecStart=${vorpal_bin} system services start --services ${SERVICES}$(
 [[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf ' --issuer-client-secret "%s"' "$ISSUER_CLIENT_SECRET"
+[[ -n "$secret_flag" ]] && printf ' %s "%s"' "$secret_flag" "$secret_arg"
 )
 Restart=on-failure
 RestartSec=5
@@ -1399,6 +1439,14 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
+}
+
+install_service_linux() {
+    local unit_dir="${HOME}/.config/systemd/user"
+    local unit_path="${unit_dir}/vorpal.service"
+
+    mkdir -p "$unit_dir"
+    render_systemd_unit "$1" "$2" > "$unit_path"
 
     # Stop existing service if running (graceful restart on upgrade)
     systemctl --user stop vorpal.service 2>/dev/null || true
@@ -1454,6 +1502,18 @@ UNIT
 install_service() {
     print_header "Starting services"
 
+    local secret_flag=""
+    local secret_arg=""
+    if [[ -n "$ISSUER_CLIENT_SECRET" ]]; then
+        if binary_supports_secret_file; then
+            secret_flag="--issuer-client-secret-file"
+            secret_arg="$ISSUER_CLIENT_SECRET_FILE"
+        else
+            secret_flag="--issuer-client-secret"
+            secret_arg="$ISSUER_CLIENT_SECRET"
+        fi
+    fi
+
     if [[ "$FLAG_DRY_RUN" = 1 ]]; then
         case "$OS" in
             darwin)
@@ -1467,17 +1527,36 @@ install_service() {
         [[ -n "$ISSUER" ]] && print_step "Would pass --issuer ${ISSUER}"
         [[ -n "$ISSUER_AUDIENCE" ]] && print_step "Would pass --issuer-audience ${ISSUER_AUDIENCE}"
         [[ -n "$ISSUER_CLIENT_ID" ]] && print_step "Would pass --issuer-client-id ${ISSUER_CLIENT_ID}"
-        [[ -n "$ISSUER_CLIENT_SECRET" ]] && print_step "Would pass --issuer-client-secret (set)"
+        if [[ "$secret_flag" = "--issuer-client-secret-file" ]]; then
+            print_step "Would write ${ISSUER_CLIENT_SECRET_FILE} (mode 0600)"
+            print_step "Would pass --issuer-client-secret-file ${ISSUER_CLIENT_SECRET_FILE}"
+        elif [[ -n "$secret_flag" ]]; then
+            print_step "Would pass --issuer-client-secret (set)"
+            secret_arg="REDACTED"
+        fi
+        print_step "Would write this service definition (for the binary now at ${VORPAL_INSTALL_DIR}/bin/vorpal):"
+        case "$OS" in
+            darwin)
+                render_launchd_plist "$secret_flag" "$secret_arg" | sed 's/^/      /'
+                ;;
+            linux)
+                render_systemd_unit "$secret_flag" "$secret_arg" | sed 's/^/      /'
+                ;;
+        esac
         print_success "Services (dry run)"
         return 0
     fi
 
+    if [[ "$secret_flag" = "--issuer-client-secret-file" ]]; then
+        write_issuer_client_secret_file
+    fi
+
     case "$OS" in
         darwin)
-            install_service_macos
+            install_service_macos "$secret_flag" "$secret_arg"
             ;;
         linux)
-            install_service_linux
+            install_service_linux "$secret_flag" "$secret_arg"
             ;;
     esac
 }
@@ -1753,8 +1832,8 @@ run_uninstall() {
     local rc_file
     for rc_file in "${rc_files[@]}"; do
         if [[ -f "$rc_file" ]] && grep -qF "$marker" "$rc_file" 2>/dev/null; then
-            # Remove the marker line and the line following it (the PATH/fish_add_path line)
-            # Use a temp file to avoid sed -i portability issues between macOS and Linux
+            # Remove the marker line and the PATH / fish_add_path line after it.
+            # A temp file avoids `sed -i` differences between macOS and Linux.
             local tmp_file
             tmp_file="$(mktemp)"
             local skip_next=0

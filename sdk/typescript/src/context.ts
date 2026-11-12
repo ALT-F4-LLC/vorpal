@@ -278,7 +278,7 @@ export async function clientAuthHeader(
 export function serializeArtifactStepSecret(secret: ArtifactStepSecret): object {
   return {
     name: secret.name,
-    value: secret.value,
+    value: Buffer.from(secret.value).toString("base64"),
   };
 }
 

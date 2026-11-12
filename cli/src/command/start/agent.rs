@@ -1,5 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    start::secrets,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -14,6 +15,8 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
+use prost::Message;
+use rsa::RsaPublicKey;
 use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,6 +47,10 @@ use vorpal_sdk::{
     },
     context::{build_channel, client_auth_header},
 };
+
+/// Largest encoded prepared artifact, in bytes: 4 MiB, the default gRPC decode
+/// limit its receivers apply, less 256 KiB for the rest of each message.
+const PREPARED_ARTIFACT_LIMIT: usize = 4 * 1024 * 1024 - 256 * 1024;
 
 #[derive(Debug, PartialEq)]
 enum ArtifactSourceType {
@@ -860,10 +867,62 @@ async fn resolve_and_upsert_source(
     Ok(())
 }
 
+/// Rejects a secret named `name` that `arguments` or `environments` reference, where the
+/// worker would expose its value in the process arguments. This fails the request here
+/// instead of at the worker after earlier steps have built; the worker still applies the
+/// same check.
+fn check_secret_unreferenced(
+    arguments: &[String],
+    environments: &[String],
+    name: &str,
+) -> Result<(), Status> {
+    let referenced = arguments
+        .iter()
+        .chain(environments)
+        .any(|text| !secrets::references(text, name).is_empty());
+
+    if referenced {
+        return Err(Status::invalid_argument(format!(
+            "step references secret {name:?} in its arguments or environment; read it from its file under $VORPAL_SECRET_DIR instead"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Seals `secret` for the worker, bound to `namespace` and the secret's name. Every
+/// error names the secret only: its value must not reach the status.
+fn seal_step_secret(
+    public_key: &RsaPublicKey,
+    namespace: &str,
+    secret: ArtifactStepSecret,
+) -> Result<ArtifactStepSecret, Status> {
+    if secret.value.len() > notary::SEALED_SECRET_LIMIT {
+        return Err(Status::invalid_argument(format!(
+            "secret '{}' is {} bytes, above the limit of {} bytes",
+            secret.name,
+            secret.value.len(),
+            notary::SEALED_SECRET_LIMIT
+        )));
+    }
+
+    let associated_data = notary::secret_associated_data(namespace, &secret.name);
+
+    let value = notary::seal(public_key, &secret.value, &associated_data).map_err(|err| {
+        Status::internal(format!("failed to seal secret '{}': {err}", secret.name))
+    })?;
+
+    Ok(ArtifactStepSecret {
+        name: secret.name,
+        value,
+    })
+}
+
 async fn prepare_artifact(
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: SourceCache,
+    public_key_path: &Path,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -873,22 +932,41 @@ async fn prepare_artifact(
 
     // TODO: Check if artifact already exists in the registry
 
-    let public_key_path = get_key_service_public_path();
+    let public_key = notary::get_public_key(public_key_path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to load public key: {err:#}")))?;
 
     let mut artifact_steps = vec![];
 
+    // A lower bound on the prepared artifact's encoded size, so a request of many
+    // secrets stops sealing once the limit is certain to be exceeded.
+    let mut sealed_secrets_len = 0;
+
     for step in artifact.steps {
+        // Every name is checked before any secret is sealed, so the sealing errors,
+        // which print the name unescaped, only ever see valid names.
+        secrets::validate_names(step.secrets.iter().map(|secret| secret.name.as_str()))
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
         let mut secrets = vec![];
 
         for secret in step.secrets {
-            let value = notary::encrypt(&public_key_path, secret.value)
-                .await
-                .map_err(|err| Status::internal(format!("failed to encrypt secret: {err}")))?;
+            // Checked secret by secret, so the encoded size limit below also bounds how
+            // many secrets are scanned for references.
+            check_secret_unreferenced(&step.arguments, &step.environments, &secret.name)?;
 
-            secrets.push(ArtifactStepSecret {
-                name: secret.name,
-                value,
-            });
+            let sealed = seal_step_secret(&public_key, &request.artifact_namespace, secret)?;
+
+            sealed_secrets_len += sealed.value.len();
+
+            if sealed_secrets_len > PREPARED_ARTIFACT_LIMIT {
+                return Err(Status::invalid_argument(format!(
+                    "artifact '{}' is at least {sealed_secrets_len} bytes encoded, above the limit of {PREPARED_ARTIFACT_LIMIT} bytes",
+                    artifact.name
+                )));
+            }
+
+            secrets.push(sealed);
         }
 
         artifact_steps.push(ArtifactStep {
@@ -938,6 +1016,15 @@ async fn prepare_artifact(
         systems: artifact.systems,
         target: artifact.target,
     };
+
+    let artifact_len = artifact.encoded_len();
+
+    if artifact_len > PREPARED_ARTIFACT_LIMIT {
+        return Err(Status::invalid_argument(format!(
+            "artifact '{}' is {artifact_len} bytes encoded, above the limit of {PREPARED_ARTIFACT_LIMIT} bytes",
+            artifact.name
+        )));
+    }
 
     let artifact_json =
         serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{err}")))?;
@@ -989,7 +1076,9 @@ impl AgentService for AgentServer {
         let source_cache = Arc::clone(&self.source_cache);
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(request, &tx, source_cache).await {
+            let public_key_path = get_key_service_public_path();
+
+            if let Err(err) = prepare_artifact(request, &tx, source_cache, &public_key_path).await {
                 let _ = tx.send(Err(err)).await;
             }
         });
@@ -1001,6 +1090,9 @@ impl AgentService for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::store::notary::test_fixtures::{
+        certificate_chain_and_service_account, write_service_keys,
+    };
 
     #[test]
     fn classify_local_when_path_exists() {
@@ -1089,5 +1181,268 @@ mod tests {
             false,
             false
         ));
+    }
+
+    fn step_secret(name: &str, value: &[u8]) -> ArtifactStepSecret {
+        ArtifactStepSecret {
+            name: name.to_string(),
+            value: value.to_vec(),
+        }
+    }
+
+    fn secrets_step(secrets: Vec<ArtifactStepSecret>) -> ArtifactStep {
+        ArtifactStep {
+            secrets,
+            ..Default::default()
+        }
+    }
+
+    /// Prepares an artifact named `secret-test` in `namespace` with `step` as its only
+    /// step and no sources, sealing with the public key at `public_key_path`, and
+    /// returns the step's prepared secrets.
+    async fn prepare_step_secrets(
+        public_key_path: &Path,
+        namespace: &str,
+        step: ArtifactStep,
+    ) -> anyhow::Result<Result<Vec<ArtifactStepSecret>, Status>> {
+        let context = tempfile::tempdir()?;
+        let request = Request::new(PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                name: "secret-test".to_string(),
+                steps: vec![step],
+                ..Default::default()
+            }),
+            artifact_context: context.path().display().to_string(),
+            artifact_namespace: namespace.to_string(),
+            ..Default::default()
+        });
+        let (tx, mut rx) = channel(1);
+        let source_cache = Arc::new(Mutex::new(SourceCacheState::default()));
+
+        if let Err(status) = prepare_artifact(request, &tx, source_cache, public_key_path).await {
+            return Ok(Err(status));
+        }
+
+        let Some(Ok(PrepareArtifactResponse {
+            artifact: Some(artifact),
+            ..
+        })) = rx.recv().await
+        else {
+            anyhow::bail!("prepare sent no artifact");
+        };
+
+        Ok(Ok(artifact
+            .steps
+            .into_iter()
+            .flat_map(|step| step.secrets)
+            .collect()))
+    }
+
+    #[tokio::test]
+    async fn prepares_secrets_that_open_under_their_namespace_and_name() -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let private_key = notary::get_private_key(&private_key_path).await?;
+        let [certificate_chain, service_account] = certificate_chain_and_service_account()?;
+        let values = ["key=value/".repeat(103), certificate_chain, service_account];
+        assert!(values[0].len() >= 1024);
+        let secrets = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
+            .collect();
+
+        // Reading a secret from its file, or a longer variable name, is not a reference.
+        let step = ArtifactStep {
+            arguments: vec![
+                "$VORPAL_SECRET_DIR/SECRET_0".to_string(),
+                "$SECRET_0_FILE".to_string(),
+            ],
+            environments: vec!["SECRET_1=${SECRET_1X}".to_string()],
+            ..secrets_step(secrets)
+        };
+
+        let prepared = prepare_step_secrets(&public_key_path, "team", step).await??;
+
+        assert_eq!(prepared.len(), values.len());
+        for (secret, value) in prepared.iter().zip(&values) {
+            assert_ne!(secret.value, value.as_bytes());
+            let associated_data = notary::secret_associated_data("team", &secret.name);
+            assert_eq!(
+                notary::open(&private_key, &secret.value, &associated_data)?,
+                value.as_bytes()
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prepares_binary_secret_that_opens_byte_for_byte() -> anyhow::Result<()> {
+        let keys = tempfile::tempdir()?;
+        let (public_key_path, private_key_path) = write_service_keys(keys.path())?;
+        let private_key = notary::get_private_key(&private_key_path).await?;
+        let value = [b"binary-".as_slice(), &[0x00, 0xff, 0xfe, 0x80]].concat();
+        assert!(std::str::from_utf8(&value).is_err());
+
+        let step = secrets_step(vec![step_secret("SECRET", &value)]);
+        let prepared = prepare_step_secrets(&public_key_path, "team", step).await??;
+
+        let [secret] = prepared.as_slice() else {
+            anyhow::bail!("prepare returned {} secrets, expected 1", prepared.len());
+        };
+        let associated_data = notary::secret_associated_data("team", &secret.name);
+        assert_eq!(
+            notary::open(&private_key, &secret.value, &associated_data)?,
+            value
+        );
+        Ok(())
+    }
+
+    mod abuse {
+        use super::{prepare_step_secrets, secrets_step, step_secret};
+        use crate::command::store::notary::test_fixtures::write_service_keys;
+        use tonic::{Code, Status};
+        use vorpal_sdk::api::artifact::ArtifactStep;
+
+        const MARKER: &str = "MARKER-5ec7e7-";
+
+        fn marker_value(len: usize) -> String {
+            MARKER.repeat(len / MARKER.len() + 1)[..len].to_string()
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_artifact_above_encoded_size_limit_naming_it_without_secrets(
+        ) -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+            let value = marker_value(65536);
+            // The sealed secrets alone stay under the limit; the script carries the
+            // artifact over it.
+            let secrets = (0..59)
+                .map(|index| step_secret(&format!("SECRET_{index}"), value.as_bytes()))
+                .collect();
+            let step = ArtifactStep {
+                script: Some("#".repeat(100_000)),
+                ..secrets_step(secrets)
+            };
+
+            let Err(status) = prepare_step_secrets(&public_key_path, "team", step).await? else {
+                anyhow::bail!("prepare accepted an artifact above the encoded size limit");
+            };
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("'secret-test'"), "{message}");
+            assert!(message.contains("limit of 3932160 bytes"), "{message}");
+            assert!(
+                message
+                    .split(|c: char| !c.is_ascii_digit())
+                    .filter_map(|number| number.parse::<usize>().ok())
+                    .any(|size| size > 3_932_160),
+                "{message}"
+            );
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_above_size_limit_naming_it_without_its_value(
+        ) -> anyhow::Result<()> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+            let value = marker_value(65537);
+
+            let Err(status) = prepare_step_secrets(
+                &public_key_path,
+                "team",
+                secrets_step(vec![step_secret("OVERSIZE", value.as_bytes())]),
+            )
+            .await?
+            else {
+                anyhow::bail!("prepare accepted a 65537-byte secret");
+            };
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("'OVERSIZE'"), "{message}");
+            assert!(message.contains("65537 bytes"), "{message}");
+            assert!(message.contains("limit of 65536 bytes"), "{message}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        /// Prepares `step` with freshly generated keys and returns the rejection status,
+        /// failing when prepare accepts the step.
+        async fn prepare_rejection(step: ArtifactStep) -> anyhow::Result<Status> {
+            let keys = tempfile::tempdir()?;
+            let (public_key_path, _) = write_service_keys(keys.path())?;
+
+            match prepare_step_secrets(&public_key_path, "team", step).await? {
+                Ok(_) => anyhow::bail!("prepare accepted the step"),
+                Err(status) => Ok(status),
+            }
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_referenced_in_arguments_naming_it() -> anyhow::Result<()> {
+            let step = ArtifactStep {
+                arguments: vec!["-c".to_string(), "curl -H ${TOKEN} x".to_string()],
+                ..secrets_step(vec![step_secret("TOKEN", MARKER.as_bytes())])
+            };
+
+            let status = prepare_rejection(step).await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            assert!(status.message().contains("\"TOKEN\""), "{status:?}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_secret_referenced_in_environment_naming_it() -> anyhow::Result<()>
+        {
+            let step = ArtifactStep {
+                environments: vec!["URL=https://h/$TOKEN".to_string()],
+                ..secrets_step(vec![step_secret("TOKEN", MARKER.as_bytes())])
+            };
+
+            let status = prepare_rejection(step).await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            assert!(status.message().contains("\"TOKEN\""), "{status:?}");
+            assert!(!format!("{status:?}").contains(MARKER), "{status:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_invalid_secret_name_naming_it_escaped() -> anyhow::Result<()> {
+            let status = prepare_rejection(secrets_step(vec![step_secret(
+                "a\nINFO forged",
+                MARKER.as_bytes(),
+            )]))
+            .await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("\"a\\nINFO forged\""), "{message:?}");
+            assert!(!message.chars().any(char::is_control), "{message:?}");
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn prepare_rejects_repeated_secret_name_naming_it() -> anyhow::Result<()> {
+            // The oversize secret comes first: the name rule applies to the whole step
+            // before any of its secrets is sealed.
+            let status = prepare_rejection(secrets_step(vec![
+                step_secret("TOKEN", marker_value(65537).as_bytes()),
+                step_secret("TOKEN", MARKER.as_bytes()),
+            ]))
+            .await?;
+
+            assert_eq!(status.code(), Code::InvalidArgument);
+            let message = status.message();
+            assert!(message.contains("\"TOKEN\" is repeated"), "{message}");
+            Ok(())
+        }
     }
 }

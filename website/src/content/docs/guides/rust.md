@@ -24,7 +24,7 @@ name = "vorpal"
 path = "src/vorpal.rs"
 
 [dependencies]
-vorpal-sdk = { version = "0.4.1" }
+vorpal-sdk = { version = "0.5.0" }
 anyhow = "1"
 tokio = { features = ["rt-multi-thread"], version = "1" }
 ```
@@ -76,7 +76,7 @@ Use the `Rust` builder to compile a Rust project into a cross-platform artifact:
 `Rust` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```rust title="src/vorpal.rs" {4,14-18}
+```rust title="src/vorpal.rs" {3,11-15}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::Rust, system},
@@ -118,6 +118,29 @@ The `Rust` builder supports additional configuration:
 | `with_source(source)` | Custom artifact source |
 | `with_tests(bool)` | Enable `cargo test` |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and may hold any bytes, including binary data that is not valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+A `Process` receives these files only while its lifecycle scripts are built, not when the process runs, so they cannot supply runtime credentials. Runtime secrets will be supported for processes in a future release. See [Processes](/concepts/processes/#secrets).
+
+`Job` and `Process` accept a value as bytes through `with_secret_bytes`:
+
+```rust
+let script = r#"my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN""#.to_string();
+
+Job::new("deploy", script, system::SYSTEMS)
+    .with_secret_bytes(vec![("API_TOKEN", b"example-token".as_slice())])
+    .build(&mut ctx)
+    .await?;
+```
+
+Text values still work through `with_secrets(vec![("API_TOKEN", "example-token")])`.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies
@@ -128,7 +151,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```rust title="src/vorpal.rs" {4,14,17}
+```rust title="src/vorpal.rs" {3,11,14}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::Rust, protoc::Protoc, system},
@@ -159,7 +182,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```rust title="src/vorpal.rs" {4,16-19}
+```rust title="src/vorpal.rs" {3,13-16}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, system},
@@ -203,7 +226,7 @@ The development environment builder supports additional configuration:
 | `with_artifacts(artifacts)` | Artifact dependencies available in the shell |
 | `with_environments(environments)` | Environment variables set in the shell |
 | `without_protoc()` | Exclude the default Protoc artifact |
-| `with_secrets(secrets)` | Secrets available in the shell |
+| `with_secrets(secrets)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
 
 See [Environments](/concepts/environments/) to learn more.
 
@@ -211,7 +234,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```rust title="src/vorpal.rs" {4,22,24-26}
+```rust title="src/vorpal.rs" {3,19,21-23}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Job},
@@ -253,7 +276,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```rust title="src/vorpal.rs" {4,22-29}
+```rust title="src/vorpal.rs" {3,19-26}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, protoc::Protoc, system, Process},
@@ -291,7 +314,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `with_arguments(arguments)` | Command-line arguments for the process |
 | `with_artifacts(artifacts)` | Artifact dependencies available during execution |
-| `with_secrets(secrets)` | Secrets available during execution |
+| `with_secrets(secrets)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 
@@ -299,7 +322,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```rust title="src/vorpal.rs" {4,19-22}
+```rust title="src/vorpal.rs" {3,16-19}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{get_env_key, language::rust::Rust, system, UserEnvironment},
@@ -340,7 +363,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```rust title="src/vorpal.rs" {4,14-19,21-22}
+```rust title="src/vorpal.rs" {3,11-16,18-19}
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{system, Artifact, ArtifactStep},

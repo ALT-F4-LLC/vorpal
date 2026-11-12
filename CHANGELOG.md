@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.5.0] - 2026-11-10
+
+### Added
+
+- **Prepared artifact size limit**: the agent rejects a prepared artifact
+  whose encoded size exceeds 3932160 bytes (4 MiB, the default gRPC decode
+  limit, less 256 KiB) with an `invalid_argument` error that names the
+  artifact, instead of failing later when a receiver decodes it.
+
+### Changed
+
+- **Breaking — step secrets**: step secrets now use a sealed secret envelope
+  format (RSA-OAEP with AES-256-GCM), bound to the artifact namespace and the
+  secret name. Each secret is limited to 64 KiB (65536 bytes). A secret sealed
+  in the older format fails with
+  `secret was encrypted with an older format and must be prepared again`;
+  prepare your artifacts again after upgrading.
+
+- **Breaking — secret delivery**: secrets are delivered to a build step as
+  files at `$VORPAL_SECRET_DIR/<NAME>` instead of environment variables. A
+  step that references a secret (`$NAME` or `${NAME}`) in its arguments or
+  environment fails. Secret names must match `[A-Za-z_][A-Za-z0-9_]*`, must
+  not start with `VORPAL_`, and must not repeat within a step (no duplicates).
+
+- **Breaking — secret values**: step secret values are carried as `bytes`. A
+  value may hold any bytes, including binary data that is not valid UTF-8, and
+  its file holds the value byte for byte.
+
+- **Breaking — issuer client secret**: the `--issuer-client-secret` flag is
+  removed. Pass the secret in a file instead, with
+  `--issuer-client-secret-file` or `VORPAL_ISSUER_CLIENT_SECRET_FILE`.
+  Existing service units that pass `--issuer-client-secret` break until the
+  installer is run again.
+
+- **Release metadata**: bump SDK packages, CLI/config crates, templates,
+  install script, website, and documentation to `0.5.0`.
+
+### Fixed
+
+- **CLI builds**: report a missing registry archive when the registry returns
+  `NotFound` inside the pull stream, so a build without outputs no longer
+  logs nothing.
+
+- **Website docs**: enable GitHub-flavored Markdown so MDX pages render
+  tables, and fix highlighted lines in the SDK guide code samples.
+
 ## [0.4.1] - 2026-09-12
 
 ### Changed

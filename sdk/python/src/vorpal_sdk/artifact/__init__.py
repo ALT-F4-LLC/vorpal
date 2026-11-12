@@ -13,7 +13,7 @@ for the within-SDK-family builder-output parity gate.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.step import BuildContext, shell
@@ -43,16 +43,20 @@ def get_env_key(digest: str) -> str:
 
 
 def secrets_to_proto(
-    secrets: dict[str, str],
+    secrets: Mapping[str, str | bytes],
 ) -> list[artifact_pb2.ArtifactStepSecret]:
     """Convert a mapping of secrets to a name-sorted list of proto objects.
 
+    A ``bytes`` value is carried as given; a ``str`` value as its UTF-8 bytes.
     Matches Go ``SecretsToProto`` / TS ``secretsToProto`` — the sort is
     load-bearing for cross-SDK digest parity.
     """
     return [
-        artifact_pb2.ArtifactStepSecret(name=name, value=secrets[name])
-        for name in sorted(secrets)
+        artifact_pb2.ArtifactStepSecret(
+            name=name,
+            value=value.encode("utf-8") if isinstance(value, str) else value,
+        )
+        for name, value in sorted(secrets.items())
     ]
 
 
@@ -233,7 +237,7 @@ class Job:
     ) -> None:
         self._artifacts: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._script = script
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
@@ -243,7 +247,7 @@ class Job:
         self._artifacts = artifacts
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> Job:
+    def with_secrets(self, secrets: Mapping[str, str | bytes]) -> Job:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value
@@ -279,7 +283,7 @@ class Process:
         self._artifacts: list[str] = []
         self._entrypoint = entrypoint
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
         )
@@ -294,7 +298,7 @@ class Process:
                 self._artifacts.append(artifact)
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> Process:
+    def with_secrets(self, secrets: Mapping[str, str | bytes]) -> Process:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value
@@ -389,7 +393,7 @@ class DevelopmentEnvironment:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
         )
@@ -404,7 +408,9 @@ class DevelopmentEnvironment:
         self._environments = environments
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> DevelopmentEnvironment:
+    def with_secrets(
+        self, secrets: Mapping[str, str | bytes]
+    ) -> DevelopmentEnvironment:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value

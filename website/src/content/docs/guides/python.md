@@ -48,7 +48,7 @@ name = "example"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "vorpal-sdk>=0.4.1",
+    "vorpal-sdk>=0.5.0",
 ]
 
 [tool.uv]
@@ -81,7 +81,7 @@ Use the `Python` builder to package a Python project into a cross-platform artif
 `Python` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5-10}
 from vorpal_sdk import SYSTEMS, ConfigContext, Python
 
 ctx = ConfigContext.create()
@@ -113,6 +113,26 @@ The `Python` builder supports additional configuration:
 | `with_source_scripts(scripts)` | Scripts to run before the build |
 | `with_working_dir(directory)` | Working directory inside the source tree |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and may hold any bytes, including binary data that is not valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+`with_secrets` accepts a `bytes` value:
+
+```python
+(
+    Job("deploy", 'my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"', SYSTEMS)
+    .with_secrets({"API_TOKEN": b"example-token"})
+    .build(ctx)
+)
+```
+
+Text values still work: `{"API_TOKEN": "example-token"}` is stored as its UTF-8 bytes.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies
@@ -123,7 +143,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5,9}
 from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, Python
 
 ctx = ConfigContext.create()
@@ -149,7 +169,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,7-12}
 from vorpal_sdk import SYSTEMS, ConfigContext, Protoc, PythonDevelopmentEnvironment
 
 ctx = ConfigContext.create()
@@ -187,7 +207,7 @@ The `PythonDevelopmentEnvironment` builder supports additional configuration:
 |--------|-------------|
 | `with_artifacts(artifacts)` | Artifact dependencies available in the shell |
 | `with_environments(environments)` | Environment variables set in the shell |
-| `with_secrets(secrets)` | Secrets available in the shell |
+| `with_secrets(secrets)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
 
 See [Environments](/concepts/environments/) to learn more.
 
@@ -195,7 +215,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default - ideal for CI tasks, tests, and automation.
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12,14-18}
 from vorpal_sdk import SYSTEMS, ConfigContext, Job, Python, get_env_key
 
 ctx = ConfigContext.create()
@@ -231,7 +251,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12-21}
 from vorpal_sdk import SYSTEMS, ConfigContext, Process, Python, get_env_key
 
 ctx = ConfigContext.create()
@@ -263,7 +283,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `with_arguments(arguments)` | Command-line arguments for the process |
 | `with_artifacts(artifacts)` | Artifact dependencies available during execution |
-| `with_secrets(secrets)` | Secrets available during execution |
+| `with_secrets(secrets)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 
@@ -271,7 +291,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,12-19}
 from vorpal_sdk import SYSTEMS, ConfigContext, Python, UserEnvironment, get_env_key
 
 ctx = ConfigContext.create()
@@ -311,7 +331,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```python title="src/vorpal.py"
+```python title="src/vorpal.py" {1,5-13,15}
 from vorpal_sdk import SYSTEMS, Artifact, ArtifactStep, ConfigContext
 
 ctx = ConfigContext.create()

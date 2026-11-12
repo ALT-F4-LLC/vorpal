@@ -10,9 +10,12 @@ use crate::command::{
         get_key_service_key_path, get_key_service_path, get_lock_path, get_socket_path,
     },
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context as _, Result};
 use fs4::fs_std::FileExt;
+use std::fs::File;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::read_to_string;
 use tokio::net::{TcpListener, UnixListener};
@@ -30,6 +33,7 @@ use vorpal_sdk::api::{
 mod agent;
 pub mod auth;
 mod registry;
+mod secrets;
 mod worker;
 
 pub struct RunArgs {
@@ -52,6 +56,64 @@ pub struct RunArgs {
     pub registry_backend_s3_force_path_style: bool,
     pub services: Vec<String>,
     pub tls: bool,
+}
+
+/// Reads the issuer client secret from `path`, dropping one trailing newline.
+///
+/// Refuses a file whose mode grants group or others any access, read from the
+/// opened handle so the checked file is the file read. Errors name the path
+/// and never carry file content.
+pub fn read_issuer_client_secret_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path).with_context(|| {
+        format!(
+            "failed to open issuer client secret file {}",
+            path.display()
+        )
+    })?;
+
+    let mode = file
+        .metadata()
+        .with_context(|| {
+            format!(
+                "failed to read metadata of issuer client secret file {}",
+                path.display()
+            )
+        })?
+        .permissions()
+        .mode()
+        & 0o7777;
+
+    if mode & 0o077 != 0 {
+        bail!(
+            "issuer client secret file {} has mode {mode:04o}; it must not be accessible by group or others (use 0600)",
+            path.display()
+        );
+    }
+
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).with_context(|| {
+        format!(
+            "failed to read issuer client secret file {}",
+            path.display()
+        )
+    })?;
+
+    let Ok(content) = String::from_utf8(bytes) else {
+        bail!(
+            "issuer client secret file {} is not valid UTF-8",
+            path.display()
+        );
+    };
+
+    let secret = content
+        .strip_suffix('\n')
+        .map_or(content.as_str(), |s| s.strip_suffix('\r').unwrap_or(s));
+
+    if secret.is_empty() {
+        bail!("issuer client secret file {} is empty", path.display());
+    }
+
+    Ok(secret.to_string())
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
@@ -565,4 +627,107 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod abuse {
+    use super::read_issuer_client_secret_file;
+    use std::error::Error;
+    use std::fs::{set_permissions, write, Permissions};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+
+    type TestResult = Result<(), Box<dyn Error>>;
+
+    fn secret_file(
+        dir: &TempDir,
+        name: &str,
+        content: &[u8],
+        mode: u32,
+    ) -> Result<PathBuf, Box<dyn Error>> {
+        let path = dir.path().join(name);
+        write(&path, content)?;
+        set_permissions(&path, Permissions::from_mode(mode))?;
+        Ok(path)
+    }
+
+    /// Both renderings of the start-up error, or an error when reading succeeds.
+    fn error_text(path: &Path) -> Result<String, Box<dyn Error>> {
+        match read_issuer_client_secret_file(path) {
+            Ok(_) => Err(format!("start-up accepted {}", path.display()).into()),
+            Err(err) => Ok(format!("{err:#} | {err:?}")),
+        }
+    }
+
+    #[test]
+    fn abuse_trailing_newline_is_not_part_of_the_secret() -> TestResult {
+        let dir = TempDir::new()?;
+
+        let lf = secret_file(&dir, "lf", b"s3cr3t\n", 0o600)?;
+        assert_eq!(read_issuer_client_secret_file(&lf)?, "s3cr3t");
+
+        let crlf = secret_file(&dir, "crlf", b"s3cr3t\r\n", 0o400)?;
+        assert_eq!(read_issuer_client_secret_file(&crlf)?, "s3cr3t");
+
+        let bare = secret_file(&dir, "bare", b"s3cr3t", 0o600)?;
+        assert_eq!(read_issuer_client_secret_file(&bare)?, "s3cr3t");
+        Ok(())
+    }
+
+    #[test]
+    fn abuse_empty_file_fails_naming_the_path() -> TestResult {
+        let dir = TempDir::new()?;
+
+        for (name, content) in [("empty", &b""[..]), ("newline-only", &b"\n"[..])] {
+            let path = secret_file(&dir, name, content, 0o600)?;
+            let text = error_text(&path)?;
+            assert!(text.contains(&path.display().to_string()), "{text}");
+            assert!(text.contains("empty"), "{text}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn abuse_missing_file_fails_naming_the_path() -> TestResult {
+        let dir = TempDir::new()?;
+        let path = dir.path().join("does-not-exist");
+
+        let text = error_text(&path)?;
+        assert!(text.contains(&path.display().to_string()), "{text}");
+        Ok(())
+    }
+
+    #[test]
+    fn abuse_file_content_never_appears_in_errors() -> TestResult {
+        let marker = "MARKER-7f3a9c";
+        let dir = TempDir::new()?;
+
+        let readable = secret_file(&dir, "readable", marker.as_bytes(), 0o644)?;
+        let text = error_text(&readable)?;
+        assert!(!text.contains(marker), "{text}");
+
+        let mut invalid_utf8 = vec![0xff];
+        invalid_utf8.extend_from_slice(marker.as_bytes());
+        let invalid = secret_file(&dir, "invalid-utf8", &invalid_utf8, 0o600)?;
+        let text = error_text(&invalid)?;
+        assert!(text.contains(&invalid.display().to_string()), "{text}");
+        assert!(!text.contains(marker), "{text}");
+        // A byte-level dump (e.g. `FromUtf8Error`'s `Debug`) would show "MARK" as decimals.
+        assert!(!text.contains("77, 65, 82, 75"), "{text}");
+        Ok(())
+    }
+
+    #[test]
+    fn abuse_file_readable_by_group_or_others_fails_naming_path_and_mode() -> TestResult {
+        let dir = TempDir::new()?;
+
+        for (mode, rendered) in [(0o640, "0640"), (0o604, "0604"), (0o644, "0644")] {
+            let path = secret_file(&dir, rendered, b"s3cr3t", mode)?;
+            let text = error_text(&path)?;
+            assert!(text.contains(&path.display().to_string()), "{text}");
+            assert!(text.contains(rendered), "{text}");
+        }
+        Ok(())
+    }
 }

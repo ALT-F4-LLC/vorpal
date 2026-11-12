@@ -71,7 +71,7 @@ Use the `TypeScript` builder to compile a TypeScript project into a cross-platfo
 `TypeScript` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```typescript title="vorpal.ts" {1,12-15}
+```typescript title="vorpal.ts" {1,5-8}
 import { ConfigContext, SYSTEMS, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
@@ -101,6 +101,26 @@ The `TypeScript` builder supports additional configuration:
 | `withSourceScripts(scripts)` | Scripts to run before build |
 | `withWorkingDir(dir)` | Custom working directory |
 
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and may hold any bytes, including binary data that is not valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+A `Process` receives these files only while its lifecycle scripts are built, not when the process runs, so they cannot supply runtime credentials. Runtime secrets will be supported for processes in a future release. See [Processes](/concepts/processes/#secrets).
+
+`Job` and `Process` accept a `Uint8Array` value through `withSecrets`:
+
+```typescript
+await new Job("deploy", 'my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"', SYSTEMS)
+  .withSecrets(new Map([["API_TOKEN", new TextEncoder().encode("example-token")]]))
+  .build(ctx);
+```
+
+Text values still work: a `string` value is stored as its UTF-8 bytes.
+
 See [Artifacts](/concepts/artifacts/) to learn more.
 
 ### Define artifact dependencies
@@ -111,7 +131,7 @@ Build artifacts like `Protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {3,10,13}
 import {
   ConfigContext,
   Protoc,
@@ -140,7 +160,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {5,12-15}
 import {
   ConfigContext,
   Protoc,
@@ -181,7 +201,7 @@ The development environment builder supports additional configuration:
 |--------|-------------|
 | `withArtifacts(artifacts)` | Artifact dependencies available in the shell |
 | `withEnvironments(environments)` | Environment variables set in the shell |
-| `withSecrets(secrets)` | Secrets available in the shell |
+| `withSecrets(secrets)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
 
 See [Environments](/concepts/environments/) to learn more.
 
@@ -189,7 +209,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {3,7,20,22-24}
 import {
   ConfigContext,
   Job,
@@ -231,7 +251,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {3,7,20-27}
 import {
   ConfigContext,
   Process,
@@ -269,7 +289,7 @@ The `Process` builder supports additional configuration:
 |--------|-------------|
 | `withArguments(args)` | Command-line arguments for the process |
 | `withArtifacts(artifacts)` | Artifact dependencies available during execution |
-| `withSecrets(secrets)` | Secrets available during execution |
+| `withSecrets(secrets)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
 
 See [Processes](/concepts/processes/) to learn more.
 
@@ -277,7 +297,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {5-6,16-19}
 import {
   ConfigContext,
   SYSTEMS,
@@ -317,7 +337,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```typescript title="vorpal.ts"
+```typescript title="vorpal.ts" {3-4,10-15,17-18}
 import {
   ConfigContext,
   Artifact,

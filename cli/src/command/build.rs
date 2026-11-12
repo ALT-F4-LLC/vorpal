@@ -166,7 +166,10 @@ async fn pull_archive(
                     bail!("registry stream error ({error_label}): {status:?}");
                 }
 
-                break;
+                // The registry returns NotFound inside the stream, not from the call.
+                on_not_found();
+
+                return Ok(());
             }
         }
     }

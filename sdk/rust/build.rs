@@ -11,6 +11,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "vorpal.artifact.ArtifactStepSecret",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
+        .field_attribute(
+            "vorpal.artifact.ArtifactStepSecret.value",
+            "#[serde(with = \"crate::serde_base64\")]",
+        )
         .message_attribute(
             "vorpal.artifact.ArtifactStep",
             "#[derive(serde::Serialize, serde::Deserialize)]",

@@ -39,8 +39,8 @@ class ArtifactStepSecret(_message.Message):
     NAME_FIELD_NUMBER: _ClassVar[int]
     VALUE_FIELD_NUMBER: _ClassVar[int]
     name: str
-    value: str
-    def __init__(self, name: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    value: bytes
+    def __init__(self, name: _Optional[str] = ..., value: _Optional[bytes] = ...) -> None: ...
 
 class ArtifactStep(_message.Message):
     __slots__ = ("entrypoint", "script", "secrets", "arguments", "artifacts", "environments")

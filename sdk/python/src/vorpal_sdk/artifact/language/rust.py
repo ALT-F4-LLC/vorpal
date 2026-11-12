@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -255,7 +255,7 @@ class Rust:
         self._lint = False
         self._name = name
         self._packages: list[str] = []
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._source: str | None = None
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
@@ -302,7 +302,7 @@ class Rust:
         self._packages = packages
         return self
 
-    def with_secrets(self, secrets: dict[str, str]) -> Rust:
+    def with_secrets(self, secrets: Mapping[str, str | bytes]) -> Rust:
         for key, value in secrets.items():
             if key not in self._secrets:
                 self._secrets[key] = value
@@ -527,7 +527,7 @@ class RustDevelopmentEnvironment:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
-        self._secrets: dict[str, str] = {}
+        self._secrets: dict[str, str | bytes] = {}
         self._systems, self._systems_error = _normalize_systems_for_build(
             systems
         )
@@ -550,7 +550,7 @@ class RustDevelopmentEnvironment:
         return self
 
     def with_secrets(
-        self, secrets: dict[str, str]
+        self, secrets: Mapping[str, str | bytes]
     ) -> RustDevelopmentEnvironment:
         for key, value in secrets.items():
             if key not in self._secrets:

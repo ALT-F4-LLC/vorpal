@@ -118,7 +118,7 @@ def _build_all() -> dict[str, str]:
     step = bash(
         ["digart"],
         ["ENVKEY=enval"],
-        [artifact_pb2.ArtifactStepSecret(name="KEY", value="val")],
+        [artifact_pb2.ArtifactStepSecret(name="KEY", value=b"val")],
         "echo s",
     )
     s1 = ArtifactSource("s1", "/p1").build()
