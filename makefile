@@ -11,6 +11,13 @@ VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+
+# Pin the C dependencies (aws-lc, ring, zstd, liblzma) to the baseline x86-64
+# ISA. Ubuntu's amd64v3 GCC defaults to -march=x86-64-v3, which emits AVX2 and
+# BMI2 into code that runs before main and crashes older CPUs with SIGILL.
+# cc-rs reads these target-scoped variables, so other targets are unaffected.
+export CFLAGS_x86_64_unknown_linux_gnu ?= -march=x86-64
+export CXXFLAGS_x86_64_unknown_linux_gnu ?= -march=x86-64
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
 LIMA_DISK := 100
