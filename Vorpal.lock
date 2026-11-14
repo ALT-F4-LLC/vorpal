@@ -1,6 +1,30 @@
 lockfile = 1
 
 [[sources]]
+name = "bash"
+path = "https://sdk.vorpal.build/source/bash-5.3.tar.gz"
+includes = []
+excludes = []
+digest = "8e8da18fe5560d744bd6ca32d4128badb699394567b6b7ae18b8a734268655a4"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "binutils"
+path = "https://sdk.vorpal.build/source/binutils-2.45.tar.gz"
+includes = []
+excludes = []
+digest = "ef4e00c3b96def973211d311ea2874d15f2bbcdce670053759bf09584db2d545"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "bison"
+path = "https://sdk.vorpal.build/source/bison-3.8.2.tar.gz"
+includes = []
+excludes = []
+digest = "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "bun"
 path = "https://sdk.vorpal.build/source/bun-1.4.4-darwin-x64.zip"
 includes = []
@@ -15,6 +39,14 @@ includes = []
 excludes = []
 digest = "56d76fe9db969c64477ac94c9c81b617048ece0ca2fbfb9e8c7773ae333e22ef"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "bun"
+path = "https://sdk.vorpal.build/source/bun-1.4.4-linux-x64-baseline.zip"
+includes = []
+excludes = []
+digest = "9ee58bb01b51d1e0ba56a5e734d18c40a7d1fb9a484db6509a73c0cf192ab997"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "cargo"
@@ -33,6 +65,14 @@ digest = "5ac6b9f989abcdaba2cf300a60ad7cdd70588104802d4b31975e02ca50892625"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "cargo"
+path = "https://sdk.vorpal.build/source/cargo-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "e79fb9dc6b8afa491484d29d78dda567ac808ee85acfbeb32fca65fcca7757d7"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "clippy"
 path = "https://sdk.vorpal.build/source/clippy-1.100.0-x86_64-apple-darwin.tar.gz"
 includes = []
@@ -47,6 +87,22 @@ includes = []
 excludes = []
 digest = "4c54eacb059d15f92300890d90cf2acb8daa6716f5c5a26f0b97769697253aa9"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "clippy"
+path = "https://sdk.vorpal.build/source/clippy-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "9c12a614b6bf271999a586ffc21ecb7de15e7bc9080179bfba3a7e7cff5449d0"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "coreutils"
+path = "https://sdk.vorpal.build/source/coreutils-9.7.tar.gz"
+includes = []
+excludes = []
+digest = "a7abdad032ae6c318dbb4c9b444d9031ab34d1308700005c4bd5eb5156cad523"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "cpython"
@@ -65,6 +121,14 @@ digest = "621e716848af22b7e60994984588f112bd7bc5e9fcf5c80d585f7d6d82afc315"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "cpython"
+path = "https://sdk.vorpal.build/source/cpython-3.14.7-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "772e9c56c2ef9d7b7e827f9564e1c7461bad37c33cacd3fab50958da4e923fe6"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "crane"
 path = "https://sdk.vorpal.build/source/crane-v0.22.1.tar.gz"
 includes = []
@@ -79,6 +143,86 @@ includes = []
 excludes = []
 digest = "eee53b25157ad022de63c3df4b36f698e07109f071038f3540574154e044b344"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "crane"
+path = "https://sdk.vorpal.build/source/crane-v0.22.1.tar.gz"
+includes = []
+excludes = []
+digest = "eee53b25157ad022de63c3df4b36f698e07109f071038f3540574154e044b344"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "curl"
+path = "https://sdk.vorpal.build/source/curl-8.15.0.tar.xz"
+includes = []
+excludes = []
+digest = "565e83672abb0ba470bbfcb07f49877b54abc68a51c4dd7831c61129fed9e244"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "curl-cacert"
+path = "https://sdk.vorpal.build/source/cacert-1776122862.pem"
+includes = []
+excludes = []
+digest = "2f4bfe5eb47cf2325d70469a0488a20d0b451d622c5b4bbf02935c5661d9de36"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "diffutils"
+path = "https://sdk.vorpal.build/source/diffutils-3.12.tar.xz"
+includes = []
+excludes = []
+digest = "7e416707fa95ffddaae20d11541834bad8d6df24b6bcc8044c2f16a7fb27755e"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "file"
+path = "https://sdk.vorpal.build/source/file-5.46.tar.gz"
+includes = []
+excludes = []
+digest = "07a8a2f5e1458359d20f420865e4a246c55c1b85176274dfee81e109e9789fb2"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "findutils"
+path = "https://sdk.vorpal.build/source/findutils-4.10.0.tar.xz"
+includes = []
+excludes = []
+digest = "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gawk"
+path = "https://sdk.vorpal.build/source/gawk-5.3.2.tar.gz"
+includes = []
+excludes = []
+digest = "33ad80dd59a028d9ac67cffeb9cb35483b268c530bd90d18bb245596d3847103"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gcc"
+path = "https://sdk.vorpal.build/source/gcc-15.2.0.tar.xz"
+includes = []
+excludes = []
+digest = "cf322f18454e1f54a0ebf661b4c3b556de43651aea8bc7a3bb14ee3863ed56d4"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gettext"
+path = "https://sdk.vorpal.build/source/gettext-0.26.tar.gz"
+includes = []
+excludes = []
+digest = "459265943fcb010124e5056bfff3e9fc95d571f3abef9d022b0af18cbc282b02"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gh"
+path = "https://sdk.vorpal.build/source/gh_2.104.0_linux_amd64.tar.gz"
+includes = []
+excludes = []
+digest = "90b32066348ca16c2741186586efbd62e8516f4dec044e35afb6cbcc118f64ab"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "gh"
@@ -113,12 +257,52 @@ digest = "40bf26a1c4760295ea03e4021324e2734979714a6734836399337160bb068af5"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "git"
+path = "https://sdk.vorpal.build/source/git-2.56.1.tar.gz"
+includes = []
+excludes = []
+digest = "40bf26a1c4760295ea03e4021324e2734979714a6734836399337160bb068af5"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "glibc"
+path = "https://sdk.vorpal.build/source/glibc-2.42.tar.gz"
+includes = []
+excludes = []
+digest = "ce551ab3767e6b55726d763a14f98bfc4bff9ebcd3516f478885408e454942b1"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "glibc-patch"
+path = "https://sdk.vorpal.build/source/glibc-2.42-fhs-1.patch"
+includes = []
+excludes = []
+digest = "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gmp"
+path = "https://sdk.vorpal.build/source/gmp-6.3.0.tar.gz"
+includes = []
+excludes = []
+digest = "191226cef6e9ce60e291e178db47682aadea28cb3e92f35f006ba317f3e10195"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "go"
 path = "https://sdk.vorpal.build/source/go1.27.4.darwin-amd64.tar.gz"
 includes = []
 excludes = []
 digest = "1d71de57f171d6cb03800bf44d9fbdc8283e1d1b27f50dbde499c364287ca6c9"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "go"
+path = "https://sdk.vorpal.build/source/go1.27.4.linux-amd64.tar.gz"
+includes = []
+excludes = []
+digest = "bad14029288873e33a5b183dac153abe884473f801743d540b9a8ca0b8c53324"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "go"
@@ -145,6 +329,14 @@ digest = "d70336617c0a161e9cd4b4283ea9c08fb78f80bf43910870335a1063770c938c"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "goimports"
+path = "https://sdk.vorpal.build/source/go-tools-v0.52.0.tar.gz"
+includes = []
+excludes = []
+digest = "d70336617c0a161e9cd4b4283ea9c08fb78f80bf43910870335a1063770c938c"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "gopls"
 path = "https://sdk.vorpal.build/source/go-tools-v0.52.0.tar.gz"
 includes = []
@@ -161,6 +353,22 @@ digest = "d70336617c0a161e9cd4b4283ea9c08fb78f80bf43910870335a1063770c938c"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "gopls"
+path = "https://sdk.vorpal.build/source/go-tools-v0.52.0.tar.gz"
+includes = []
+excludes = []
+digest = "d70336617c0a161e9cd4b4283ea9c08fb78f80bf43910870335a1063770c938c"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "grep"
+path = "https://sdk.vorpal.build/source/grep-3.12.tar.gz"
+includes = []
+excludes = []
+digest = "127096050676822f1f9f18e2bdf847f74907ec691562959cdcbf07e7d524012c"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "grpcurl"
 path = "https://sdk.vorpal.build/source/grpcurl-v1.9.4.tar.gz"
 includes = []
@@ -175,6 +383,94 @@ includes = []
 excludes = []
 digest = "480204bca87bea23c54741e9e0f6becbce0f1dd27bf047f0e8c84fef0e80f77c"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "grpcurl"
+path = "https://sdk.vorpal.build/source/grpcurl-v1.9.4.tar.gz"
+includes = []
+excludes = []
+digest = "480204bca87bea23c54741e9e0f6becbce0f1dd27bf047f0e8c84fef0e80f77c"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gzip"
+path = "https://sdk.vorpal.build/source/gzip-1.14.tar.gz"
+includes = []
+excludes = []
+digest = "82c708cb0f1ae98c1bcd38edb744ece2cc13cbbd65379a11ff030f86a140ce3d"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "libidn2"
+path = "https://sdk.vorpal.build/source/libidn2-2.3.8.tar.gz"
+includes = []
+excludes = []
+digest = "a5a46eb63af153ca526f17133b2f5be09bc434b7cdc25f924a2580b879ab9b9c"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "libpsl"
+path = "https://sdk.vorpal.build/source/libpsl-0.21.5.tar.gz"
+includes = []
+excludes = []
+digest = "65ecfe61646c50119a018a2003149833c11387efd92462f974f1ff9f907c1d78"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "libunistring"
+path = "https://sdk.vorpal.build/source/libunistring-1.3.tar.gz"
+includes = []
+excludes = []
+digest = "e9d4afe75ff42ffce5e55c7267a45d2b6a2c3909d8d8e1ba09cdb99f28896b4d"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "linux"
+path = "https://sdk.vorpal.build/source/linux-6.16.1.tar.xz"
+includes = []
+excludes = []
+digest = "40d7204e3d3f1112f0fb32d32cd18421db103a8564c7b277c2b83d54df5b2ff2"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "m4"
+path = "https://sdk.vorpal.build/source/m4-1.4.20.tar.gz"
+includes = []
+excludes = []
+digest = "633adb94257b39e0e3f9785ea7ccad7ce9b31b22914fdacdcc5accf2b09fba16"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "make"
+path = "https://sdk.vorpal.build/source/make-4.4.1.tar.gz"
+includes = []
+excludes = []
+digest = "8dfe7b0e51b3e190cd75e046880855ac1be76cf36961e5cfcc82bfa91b2c3ba8"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "mpc"
+path = "https://sdk.vorpal.build/source/mpc-1.3.1.tar.gz"
+includes = []
+excludes = []
+digest = "c179fbcd6e48931a16c0af37d0c4a5e1688dd07d71e2b4a532c68cd5edbb5b72"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "mpfr"
+path = "https://sdk.vorpal.build/source/mpfr-4.2.2.tar.xz"
+includes = []
+excludes = []
+digest = "837f1bf914eb615761136e6bcd2d49502865b18c0f0d18b4decb513355c4449b"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "ncurses"
+path = "https://sdk.vorpal.build/source/ncurses-6.5-20250809.tar.gz"
+includes = []
+excludes = []
+digest = "e67077219f4e56cc6cc56958104a9271871ef65ef7985081aced1fd5024f9f47"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "nodejs"
@@ -186,11 +482,51 @@ platform = "aarch64-darwin"
 
 [[sources]]
 name = "nodejs"
+path = "https://sdk.vorpal.build/source/node-v26.13.1-linux-x64.tar.gz"
+includes = []
+excludes = []
+digest = "099d9b6b99db9f9ac68f5847491f74b9cd8579cbce9b1e3ef02c3d48cc7abfcd"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "nodejs"
 path = "https://sdk.vorpal.build/source/node-v26.13.1-darwin-x64.tar.gz"
 includes = []
 excludes = []
 digest = "f288eb13af5e4c4d55ff5ed9d78546f0a8b3fb109668bcda47872ce3b4f065a0"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "openssl"
+path = "https://sdk.vorpal.build/source/openssl-3.5.2.tar.gz"
+includes = []
+excludes = []
+digest = "c18db5dccbd9ee71d1454dbf275b508c1fa452b133f0e8e9812d6f8135c29362"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "patch"
+path = "https://sdk.vorpal.build/source/patch-2.8.tar.gz"
+includes = []
+excludes = []
+digest = "a003cf376248ecf2dc3edbce55f672f7677ff95ef94dd7ce6fdcef8353ecde7c"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "perl"
+path = "https://sdk.vorpal.build/source/perl-5.42.0.tar.xz"
+includes = []
+excludes = []
+digest = "43a6f8cf15fcedeb66e95c4957ec8bc43db40515de89483e507c01c255fce853"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "pnpm"
+path = "https://sdk.vorpal.build/source/pnpm-12.21.0-linux-x64.tar.gz"
+includes = []
+excludes = []
+digest = "2ff67356535d14b50a1926d380c192461c84440b44b32ae31380c44f737c2c63"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "pnpm"
@@ -218,6 +554,14 @@ platform = "x86_64-darwin"
 
 [[sources]]
 name = "protoc"
+path = "https://sdk.vorpal.build/source/protoc-36.2-linux-x86_64.zip"
+includes = []
+excludes = []
+digest = "c3c3ac93d295f01f0cfba581ba59d08de46e241f55d4df3cfe907e42833d0ecc"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "protoc"
 path = "https://sdk.vorpal.build/source/protoc-36.2-osx-aarch_64.zip"
 includes = []
 excludes = []
@@ -231,6 +575,14 @@ includes = []
 excludes = []
 digest = "10f16e9a9c29d3386e6faa26494f36c0adab9b566de7b5fbde50cc7e165f2b48"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "protoc-gen-go"
+path = "https://sdk.vorpal.build/source/protoc-gen-go.v1.36.12.linux.amd64.tar.gz"
+includes = []
+excludes = []
+digest = "45d4134b4f9a3720c18d13b0e2a1bdcba8dec33388826c5a78b6d41c0efb0e77"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "protoc-gen-go"
@@ -257,6 +609,22 @@ digest = "382d515d3e6df44e660d49b6abd2e6e8a760e8159f4e0da103b8298b32627c97"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "protoc-gen-go-grpc"
+path = "https://sdk.vorpal.build/source/protoc-gen-go-grpc-v1.85.0.tar.gz"
+includes = []
+excludes = []
+digest = "382d515d3e6df44e660d49b6abd2e6e8a760e8159f4e0da103b8298b32627c97"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "python"
+path = "https://sdk.vorpal.build/source/Python-3.13.7.tar.xz"
+includes = []
+excludes = []
+digest = "2118e11e9ee7b73a88e2fb7c9122455c314660de29beb4d4f15af2d21e15ec42"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "rsync"
 path = "https://sdk.vorpal.build/source/rsync-3.5.2.tar.gz"
 includes = []
@@ -271,6 +639,14 @@ includes = []
 excludes = []
 digest = "65f42791643ac74f5b02254818d79ec0027cac0dd1fb87dcd6b00073bda488c0"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "rsync"
+path = "https://sdk.vorpal.build/source/rsync-3.5.2.tar.gz"
+includes = []
+excludes = []
+digest = "65f42791643ac74f5b02254818d79ec0027cac0dd1fb87dcd6b00073bda488c0"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "rust-analyzer"
@@ -289,6 +665,14 @@ digest = "8903e16773dbb9eeb5eeb84e3c2f2180b7bf47517aaf3ba6455e5ed103bf5c34"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "rust-analyzer"
+path = "https://sdk.vorpal.build/source/rust-analyzer-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "f0ed035e8eaa32a2388886aa48a9158b09582394109ae4e1862b91ca504094b0"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "rust-src"
 path = "https://sdk.vorpal.build/source/rust-src-1.100.0.tar.gz"
 includes = []
@@ -303,6 +687,22 @@ includes = []
 excludes = []
 digest = "bf8591ba7bac8036b8f7700d665270a6333512d1c72f29208ee47716f46c1348"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "rust-src"
+path = "https://sdk.vorpal.build/source/rust-src-1.100.0.tar.gz"
+includes = []
+excludes = []
+digest = "bf8591ba7bac8036b8f7700d665270a6333512d1c72f29208ee47716f46c1348"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "rust-std"
+path = "https://sdk.vorpal.build/source/rust-std-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "7f7f116878a892d43a20fcae7a1fe8f7e0035bd345d112386391e416df789d14"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "rust-std"
@@ -337,6 +737,22 @@ digest = "8b7aa408460b4beac3d77af95bcf8a44b39f3bc265e7f7d1c19445233cc5806b"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "rustc"
+path = "https://sdk.vorpal.build/source/rustc-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "e1236df26f206e966900fbfc8455933df61544418382b5202df9afab8f951d5a"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "rustfmt"
+path = "https://sdk.vorpal.build/source/rustfmt-1.100.0-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "23f30a1ea45f92dd718a11c19026606b036549b6d93d6ff223289551d80f5caf"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "rustfmt"
 path = "https://sdk.vorpal.build/source/rustfmt-1.100.0-x86_64-apple-darwin.tar.gz"
 includes = []
@@ -353,6 +769,14 @@ digest = "6800f617e0d78b135df555b78e82005419fba606c0dcc2b3d7c83ea2777f760f"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "sed"
+path = "https://sdk.vorpal.build/source/sed-4.9.tar.gz"
+includes = []
+excludes = []
+digest = "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "staticcheck"
 path = "https://sdk.vorpal.build/source/staticcheck-2026.2.2.tar.gz"
 includes = []
@@ -367,6 +791,70 @@ includes = []
 excludes = []
 digest = "1cfbe131693bb3854d1c182b85532145deec5e589a4d1a03f7d0188f8c93b2ec"
 platform = "x86_64-darwin"
+
+[[sources]]
+name = "staticcheck"
+path = "https://sdk.vorpal.build/source/staticcheck-2026.2.2.tar.gz"
+includes = []
+excludes = []
+digest = "1cfbe131693bb3854d1c182b85532145deec5e589a4d1a03f7d0188f8c93b2ec"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "tar"
+path = "https://sdk.vorpal.build/source/tar-1.35.tar.gz"
+includes = []
+excludes = []
+digest = "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "texinfo"
+path = "https://sdk.vorpal.build/source/texinfo-7.2.tar.gz"
+includes = []
+excludes = []
+digest = "6bc4aa1be570367196b2488d4783f02dae702822db9d2aa9e5d650339e0f770e"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "unzip"
+path = "https://sdk.vorpal.build/source/unzip60.tar.gz"
+includes = []
+excludes = []
+digest = "4585067be297ae977da3f81587fcf0a141a8d6ceb6137d199255683ed189c3ed"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "unzip-patch-fixes"
+path = "https://sdk.vorpal.build/source/unzip-6.0-consolidated_fixes-1.patch"
+includes = []
+excludes = []
+digest = "11350935be5bbb743f1a97ec069b78fc2904f92b24abbc7fb3d7f0ff8bb889ea"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "unzip-patch-gcc14"
+path = "https://sdk.vorpal.build/source/unzip-6.0-gcc14-1.patch"
+includes = []
+excludes = []
+digest = "d6ac941672086ea4c8d5047d550b40047825a685cc7c48626d2f0939e1a0c797"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "util-linux"
+path = "https://sdk.vorpal.build/source/util-linux-2.41.1.tar.xz"
+includes = []
+excludes = []
+digest = "1f10bfbd4ac7b3e8058fe837b0ed9274d2b3f603dc2d7cbc3d325dc612b06aaa"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "uv"
+path = "https://sdk.vorpal.build/source/uv-0.13.8-x86_64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "a70e4a8437435abde7207b764fdf34c725921bfa5c31c914f264cf62c5bc1fa4"
+platform = "x86_64-linux"
 
 [[sources]]
 name = "uv"
@@ -383,3 +871,19 @@ includes = []
 excludes = []
 digest = "fe8de6915a3052cf582978ab725b113f6842e4083a6546bbaed7159348c31e7e"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "xz"
+path = "https://sdk.vorpal.build/source/xz-5.8.1.tar.xz"
+includes = []
+excludes = []
+digest = "24827cfbd8504ed6499a08262caf7d4c4584a5ee2505843526f0f020daf9ab93"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "zlib"
+path = "https://sdk.vorpal.build/source/zlib-1.3.1.tar.gz"
+includes = []
+excludes = []
+digest = "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683"
+platform = "x86_64-linux"
