@@ -5,11 +5,11 @@ import { type ArtifactSystemInput, getSystemStr, SYSTEMS } from "../system.js";
 
 /// Canonical conforming copy of the build-target CPython interpreter pin.
 ///
-/// Operator rule: CPython 3.13, latest patch. Concrete pin: 3.13.14 from
-/// python-build-standalone release tag `20260623`, `install_only` (relocatable).
+/// Operator rule: CPython follows the LFS book's Python. Concrete pin: 3.14.7 from
+/// python-build-standalone release tag `20260929`, `install_only` (relocatable).
 /// Byte-equal to the Rust canonical in sdk/rust/src/artifact/cpython.rs
 /// (ADR 0001 Part B; DKT-19 asserts byte-equality).
-export const DEFAULT_PYTHON_VERSION = "3.13.14";
+export const DEFAULT_PYTHON_VERSION = "3.14.7";
 
 /**
  * Maps a target system to the python-build-standalone target triple.

@@ -7,11 +7,11 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-const defaultUvVersion = "0.10.11"
+const defaultUvVersion = "0.13.8"
 
 // Uv builds the Astral uv toolchain (standalone release).
 //
-// HASH-ENFORCEMENT (C3 foundation): on "uv sync --frozen", uv-0.10.11 verifies each
+// HASH-ENFORCEMENT (C3 foundation): on "uv sync --frozen", uv-0.13.8 verifies each
 // package against the per-package hashes in uv.lock and rejects any content-hash
 // mismatch. There is no "uv sync --require-hashes" CLI flag (--require-hashes is uv's
 // pip-interface flag); the hashed-lock verification IS the enforcement surface.

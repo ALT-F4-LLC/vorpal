@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
 
 # Canonical conforming copy of the build-target CPython interpreter pin. Operator rule:
-# CPython 3.13, latest patch. Concrete pin: 3.13.14 (python-build-standalone tag
-# 20260623, install_only). Byte-equal to the Rust canonical (ADR 0001 Part B).
-DEFAULT_PYTHON_VERSION = "3.13.14"
+# CPython follows the LFS book's Python. Concrete pin: 3.14.7 (python-build-standalone tag
+# 20260929, install_only). Byte-equal to the Rust canonical (ADR 0001 Part B).
+DEFAULT_PYTHON_VERSION = "3.14.7"
 
 
 def cpython_target(system: artifact_pb2.ArtifactSystem) -> str:

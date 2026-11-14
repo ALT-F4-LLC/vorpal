@@ -9,7 +9,7 @@ import (
 
 func Staticcheck(context *config.ConfigContext) (*string, error) {
 	name := "staticcheck"
-	version := "2026.1"
+	version := "2026.2.2"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/staticcheck-%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()

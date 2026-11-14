@@ -8,7 +8,7 @@ import (
 )
 
 func sourceTools(name string) api.ArtifactSource {
-	version := "0.42.0"
+	version := "0.52.0"
 	path := fmt.Sprintf("https://sdk.vorpal.build/source/go-tools-v%s.tar.gz", version)
 	return NewArtifactSource(name, path).Build()
 }
@@ -32,7 +32,7 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
-	sourceVersion := "1.26.0"
+	sourceVersion := "1.27.4"
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/go%s.%s.tar.gz", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()

@@ -37,7 +37,7 @@ impl NodeJS {
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "22.22.0";
+        let source_version = "26.13.1";
         let source_path = format!(
             "https://sdk.vorpal.build/source/node-v{source_version}-{source_target}.tar.gz"
         );

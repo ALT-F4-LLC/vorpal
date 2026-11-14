@@ -11,12 +11,12 @@ use indoc::formatdoc;
 
 /// Canonical single source of truth for the build-target `CPython` interpreter pin.
 ///
-/// Operator rule: `CPython` 3.13, latest patch. Concrete pin: 3.13.14 from
-/// python-build-standalone release tag `20260623`, `install_only` (relocatable). Every
+/// Operator rule: `CPython` follows the LFS book's Python. Concrete pin: 3.14.7 from
+/// python-build-standalone release tag `20260929`, `install_only` (relocatable). Every
 /// other Python-version pin in the repo — the Go/TS builder constants, `sdk/python`'s
 /// `.python-version` and `requires-python` — is a conforming copy derived from THIS
 /// constant, never an independent pin (ADR 0001 Part B).
-pub const DEFAULT_PYTHON_VERSION: &str = "3.13.14";
+pub const DEFAULT_PYTHON_VERSION: &str = "3.14.7";
 
 /// Maps a Vorpal `ArtifactSystem` to the python-build-standalone target triple.
 ///

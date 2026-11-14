@@ -51,9 +51,9 @@ def _extract(path: Path, identifier: str) -> str:
     """Return the string literal assigned to ``identifier`` in ``path``.
 
     Matches the three declaration forms across SDKs in one pattern:
-      Rust  ``pub const DEFAULT_PYTHON_VERSION: &str = "3.13.14";``
-      Go    ``const defaultPythonVersion = "3.13.14"``
-      TS    ``export const DEFAULT_PYTHON_VERSION = "3.13.14";``
+      Rust  ``pub const DEFAULT_PYTHON_VERSION: &str = "3.14.7";``
+      Go    ``const defaultPythonVersion = "3.14.7"``
+      TS    ``export const DEFAULT_PYTHON_VERSION = "3.14.7";``
     Raises AssertionError if the declaration is absent (renamed/moved) — a
     missing pin must fail, never pass by omission.
     """

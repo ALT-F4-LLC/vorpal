@@ -23,19 +23,33 @@
     },
     "rust": {
       "url": "https://static.rust-lang.org/rust-key.gpg.ascii",
-      "sha256": null
+      "sha256": "97e694f136f8c106e8f94fdadf593d2fc10de3ff3f558536c41469aa5be7f635",
+      "fingerprints": [
+        "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE"
+      ]
     },
     "kernel": {
-      "url": "https://www.kernel.org/signature.html",
-      "sha256": null
+      "url": "https://git.kernel.org/pub/scm/docs/kernel/pgpkeys.git/plain/keys/632D3A06589DA6B1.asc",
+      "sha256": "7082b8659516e21b40729e950c5e302228f09d841e9a8fcabbd6aab959f69f2c",
+      "fingerprints": [
+        "B8868C80BA62A1FFFAF5FDA9632D3A06589DA6B1"
+      ],
+      "stated_at": "kernel.org WKD for autosigner@kernel.org (https://www.kernel.org/signature.html)"
     },
     "nodejs": {
-      "url": "https://github.com/nodejs/release-keys/raw/main/gpg/pubring.kbx",
-      "sha256": null
+      "url": "https://github.com/nodejs/release-keys/raw/main/gpg-only-active-keys/pubring.kbx",
+      "sha256": "eacb2c1a673150bdb3c28eec29b46490f4f09c779c34254f1262eef940f655ff"
     },
     "bun": {
-      "url": "https://github.com/oven-sh/bun/blob/main/.github/workflows/release.yml",
-      "sha256": null
+      "url": "https://github.com/robobun.gpg",
+      "sha256": "323fef77bc474daf35d7f3fd3d252efe1300fd7d8ed63a800c90725386471d88",
+      "fingerprints": [
+        "F3DCC08A8572C0749B3E18888EAB4D40A7B22B59"
+      ],
+      "fetched_from": [
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/F3DCC08A8572C0749B3E18888EAB4D40A7B22B59"
+      ],
+      "stated_at": "none: trust-on-first-use; the release workflow (https://github.com/oven-sh/bun/blob/main/.github/workflows/release.yml) imports it from a secret"
     },
     "curl": {
       "url": "https://daniel.haxx.se/mykey.asc",
@@ -43,7 +57,15 @@
     },
     "rsync": {
       "url": "https://rsync.samba.org/download.html",
-      "sha256": null
+      "sha256": "9ed27795b44dbc93edcb8dda64b0ac80cd7de55d8a06c51cc9ff821e33f4ba04",
+      "fingerprints": [
+        "C0E1054505704F757D925AB26A64E8AA2EFBCF5D",
+        "9FEF112DCE19A0DC7E882CB81BB24997A8535F6F"
+      ],
+      "fetched_from": [
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/C0E1054505704F757D925AB26A64E8AA2EFBCF5D",
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/9FEF112DCE19A0DC7E882CB81BB24997A8535F6F"
+      ]
     },
     "ncurses": {
       "url": "https://invisible-island.net/public/public.html",
@@ -73,7 +95,7 @@
       "groups": [
         "typescript"
       ],
-      "version": "1.3.10",
+      "version": "1.4.4",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -131,7 +153,7 @@
       "groups": [
         "python"
       ],
-      "version": "3.13.14",
+      "version": "3.14.7",
       "track": "lfs:python",
       "latest": {
         "method": "python-build-standalone",
@@ -178,7 +200,7 @@
           "marker": "export const DEFAULT_PYTHON_VERSION = \""
         }
       ],
-      "release": "20260623"
+      "release": "20260929"
     },
     {
       "name": "crane",
@@ -187,7 +209,7 @@
         "oci",
         "go"
       ],
-      "version": "0.21.1",
+      "version": "0.22.1",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -243,7 +265,7 @@
       "groups": [
         "vcs"
       ],
-      "version": "2.87.3",
+      "version": "2.104.0",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -298,7 +320,7 @@
       "groups": [
         "go"
       ],
-      "version": "1.26.0",
+      "version": "1.27.4",
       "track": "newest",
       "latest": {
         "method": "go-dl"
@@ -347,7 +369,7 @@
       "groups": [
         "go"
       ],
-      "version": "0.42.0",
+      "version": "0.52.0",
       "track": "newest",
       "latest": {
         "method": "go-proxy",
@@ -437,7 +459,7 @@
         "vcs",
         "go"
       ],
-      "version": "2.53.0",
+      "version": "2.56.1",
       "track": "newest",
       "latest": {
         "method": "html-index",
@@ -485,7 +507,7 @@
         "go",
         "protobuf"
       ],
-      "version": "1.9.3",
+      "version": "1.9.4",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -538,7 +560,7 @@
       "groups": [
         "typescript"
       ],
-      "version": "22.22.0",
+      "version": "26.13.1",
       "track": "lts",
       "latest": {
         "method": "nodejs"
@@ -588,7 +610,7 @@
       "groups": [
         "typescript"
       ],
-      "version": "10.30.3",
+      "version": "12.21.0",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -596,13 +618,13 @@
         "tag": "^v([0-9.]+)$"
       },
       "systems": {
-        "aarch64-darwin": "macos-arm64",
+        "aarch64-darwin": "darwin-arm64",
         "aarch64-linux": "linux-arm64",
-        "x86_64-darwin": "macos-x64",
+        "x86_64-darwin": "darwin-x64",
         "x86_64-linux": "linux-x64"
       },
-      "upstream": "https://github.com/pnpm/pnpm/releases/download/v{version}/pnpm-{target}",
-      "mirror": "pnpm-{version}-{target}",
+      "upstream": "https://github.com/pnpm/pnpm/releases/download/v{version}/pnpm-{target}.tar.gz",
+      "mirror": "pnpm-{version}-{target}.tar.gz",
       "verify": [
         {
           "method": "github-asset-digest",
@@ -641,7 +663,7 @@
         "go",
         "rust"
       ],
-      "version": "34.0",
+      "version": "36.2",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -694,7 +716,7 @@
         "protobuf",
         "go"
       ],
-      "version": "1.36.11",
+      "version": "1.36.12",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -746,7 +768,7 @@
         "protobuf",
         "go"
       ],
-      "version": "1.79.1",
+      "version": "1.85.0",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -799,7 +821,7 @@
       "groups": [
         "system"
       ],
-      "version": "3.4.1",
+      "version": "3.5.2",
       "track": "newest",
       "latest": {
         "method": "html-index",
@@ -850,7 +872,7 @@
       "groups": [
         "go"
       ],
-      "version": "2026.1",
+      "version": "2026.2.2",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -902,7 +924,7 @@
       "groups": [
         "python"
       ],
-      "version": "0.10.11",
+      "version": "0.13.8",
       "track": "newest",
       "latest": {
         "method": "github-release",
@@ -969,7 +991,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1028,7 +1050,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1087,7 +1109,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1146,7 +1168,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1205,7 +1227,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1264,7 +1286,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -1323,7 +1345,7 @@
       "groups": [
         "rust"
       ],
-      "version": "1.93.1",
+      "version": "1.100.0",
       "track": "rust-toolchain.toml",
       "latest": {
         "method": "rust-toolchain"
@@ -3507,26 +3529,6 @@
     }
   ],
   "provenance_exemptions": [
-    {
-      "key": "crane-v0.21.1.tar.gz",
-      "reason": "Tag archive packed by another gzip; rebuilt bytes differ from the mirror object. Ends at the next crane bump."
-    },
-    {
-      "key": "go-tools-v0.42.0.tar.gz",
-      "reason": "Tag archive packed by another gzip; rebuilt bytes differ from the mirror object. Ends at the next go-tools bump."
-    },
-    {
-      "key": "grpcurl-v1.9.3.tar.gz",
-      "reason": "Tag archive packed by another gzip; rebuilt bytes differ from the mirror object (inline digest equals Vorpal.lock). Ends at the next grpcurl bump."
-    },
-    {
-      "key": "protoc-gen-go-grpc-v1.79.1.tar.gz",
-      "reason": "Tag archive packed by another gzip; rebuilt bytes differ from the mirror object. Ends at the next protoc-gen-go-grpc bump."
-    },
-    {
-      "key": "staticcheck-2026.1.tar.gz",
-      "reason": "Tag archive packed by another gzip; rebuilt bytes differ from the mirror object. Ends at the next staticcheck bump."
-    },
     {
       "key": "unzip-6.0-consolidated_fixes-1.patch",
       "reason": "BLFS prints no MD5 for this patch, so its authority cannot verify. Ends when the open UnZip deviation closes."

@@ -34,9 +34,45 @@ All notable changes to this project will be documented in this file.
   the registry covers every `Vorpal.lock` source and matches every SDK pin,
   and checks `provenance.json` records for every mirrored file, not only
   cpython and uv, including their inline digests against `Vorpal.lock`.
-  Seven files are exempt by exact key, each with a reason in
-  `registry.json`: five tag archives the mirror holds in another gzip
-  packing, and two UnZip patches BLFS prints no MD5 for.
+  Two files are exempt by exact key, each with a reason in
+  `registry.json`: the two UnZip patches BLFS prints no MD5 for.
+
+### Changed
+
+- **Rust toolchain**: cargo, clippy, rust-analyzer, rust-std, rustc,
+  rustfmt, and rust-src 1.93.1 -> 1.100.0.
+- **bun**: 1.3.10 -> 1.4.4.
+- **cpython**: 3.13.14 -> 3.14.7 (python-build-standalone 20260929), the
+  LFS book's Python. The Python SDK and the Python project template now
+  require Python 3.14 (`requires-python = ">=3.14,<3.15"`); projects that
+  cap below 3.14 no longer resolve against the Vorpal interpreter.
+- **crane**: 0.21.1 -> 0.22.1.
+- **gh**: 2.87.3 -> 2.104.0.
+- **git**: 2.53.0 -> 2.56.1. The build passes `NO_RUST=1`, since git 2.55 and later build Rust code by default and the build has no Cargo.
+- **go**: 1.26.0 -> 1.27.4, with the `go` directive of the Go SDK and the
+  Go project template.
+- **go-tools**: 0.42.0 -> 0.52.0.
+- **grpcurl**: 1.9.3 -> 1.9.4.
+- **nodejs**: 22.22.0 -> 26.13.1 (LTS).
+- **pnpm**: 10.30.3 -> 12.21.0. pnpm 12 ships a `.tar.gz` holding the
+  executable and its `dist` tree, so the artifact now unpacks both into
+  `bin`, and its macOS targets are `darwin-arm64` and `darwin-x64`.
+- **protoc**: 34.0 -> 36.2.
+- **protoc-gen-go**: 1.36.11 -> 1.36.12.
+- **protoc-gen-go-grpc**: 1.79.1 -> 1.85.0.
+- **rsync**: 3.4.1 -> 3.5.2.
+- **staticcheck**: 2026.1 -> 2026.2.2.
+- **uv**: 0.10.11 -> 0.13.8.
+- **Lima VM**: `lima.yaml` moves from Debian 12 (bookworm, 20250316-2053)
+  to Debian 13 (trixie, 20261111-2659), with trixie/latest as the fallback.
+- **Source keyrings**: `script/source/keys/` pins the bun, kernel.org
+  autosigner, Node.js (active releasers), rsync, and Rust signing keys.
+
+### Fixed
+
+- `script/source.sh check` no longer reports cpython blocked when GitHub's
+  API times out listing python-build-standalone releases: it reads them in
+  pages of 10 and fails with the listing error instead.
 
 ## [0.5.0] - 2026-11-10
 

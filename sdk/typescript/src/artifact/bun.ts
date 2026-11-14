@@ -3,7 +3,7 @@ import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
 import { getSystemStr, SYSTEMS } from "../system.js";
 
-export const DEFAULT_BUN_VERSION = "1.3.10";
+export const DEFAULT_BUN_VERSION = "1.4.4";
 
 /**
  * Builder for the Bun runtime artifact.

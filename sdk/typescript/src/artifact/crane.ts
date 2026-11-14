@@ -12,7 +12,7 @@ import { SYSTEMS } from "../system.js";
 export class Crane {
   async build(context: ConfigContext): Promise<string> {
     const name = "crane";
-    const version = "0.21.1";
+    const version = "0.22.1";
 
     const sourcePath = `https://sdk.vorpal.build/source/crane-v${version}.tar.gz`;
     const source = new ArtifactSource(name, sourcePath).build();

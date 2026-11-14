@@ -7,7 +7,7 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-const defaultPythonVersion = "3.13.14"
+const defaultPythonVersion = "3.14.7"
 
 // CpythonTarget maps a Vorpal ArtifactSystem to the python-build-standalone target triple.
 // Exported for reuse by uv and other python-toolchain artifacts.

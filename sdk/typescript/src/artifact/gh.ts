@@ -3,7 +3,7 @@ import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
 import { getSystemStr, SYSTEMS } from "../system.js";
 
-export const DEFAULT_GH_VERSION = "2.87.3";
+export const DEFAULT_GH_VERSION = "2.104.0";
 
 /**
  * Builder for the GitHub CLI artifact.

@@ -14,7 +14,7 @@ export class Gopls {
     const name = "gopls";
 
     return new Go(name, SYSTEMS)
-      .withAliases([`${name}:0.42.0`])
+      .withAliases([`${name}:0.52.0`])
       .withBuildDirectory(name)
       .withSource(sourceTools(name))
       .build(context);

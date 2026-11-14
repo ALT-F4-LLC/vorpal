@@ -23,7 +23,7 @@ impl Crane {
     /// artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "crane";
-        let version = "0.21.1";
+        let version = "0.22.1";
 
         let source_path = format!("https://sdk.vorpal.build/source/crane-v{version}.tar.gz");
         let source = ArtifactSource::new(name, source_path.as_str()).build();

@@ -13,7 +13,7 @@ import { getSystemStr, SYSTEMS } from "../system.js";
  * Mirrors Rust `go::source_tools()` in `sdk/rust/src/artifact/go.rs`.
  */
 export function sourceTools(name: string): ArtifactSourceMsg {
-  const version = "0.42.0";
+  const version = "0.52.0";
   const path = `https://sdk.vorpal.build/source/go-tools-v${version}.tar.gz`;
   return new ArtifactSource(name, path).build();
 }
@@ -52,7 +52,7 @@ export class GoBin {
         throw new Error(`unsupported ${name} system: ${system}`);
     }
 
-    const sourceVersion = "1.26.0";
+    const sourceVersion = "1.27.4";
     const sourcePath = `https://sdk.vorpal.build/source/go${sourceVersion}.${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();

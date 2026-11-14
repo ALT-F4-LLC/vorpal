@@ -31,7 +31,7 @@ class Grpcurl:
 
         name = "grpcurl"
 
-        source_version = "1.9.3"
+        source_version = "1.9.4"
         source_path = (
             f"https://sdk.vorpal.build/source/grpcurl-v{source_version}.tar.gz"
         )

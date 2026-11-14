@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 use indoc::formatdoc;
 
 /// Canonical pin for the build-target `bun` runtime.
-pub const DEFAULT_BUN_VERSION: &str = "1.3.10";
+pub const DEFAULT_BUN_VERSION: &str = "1.4.4";
 
 /// Build-target `bun` JavaScript runtime, fetched as a prebuilt binary release.
 pub struct Bun {

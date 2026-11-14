@@ -6,11 +6,11 @@ use anyhow::Result;
 use indoc::formatdoc;
 
 /// Canonical pin for the build-target `uv` toolchain (Astral release).
-pub const DEFAULT_UV_VERSION: &str = "0.10.11";
+pub const DEFAULT_UV_VERSION: &str = "0.13.8";
 
 /// Build-target `uv` toolchain (Astral standalone release).
 ///
-/// HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-0.10.11 verifies each
+/// HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-0.13.8 verifies each
 /// package against the per-package hashes carried in `uv.lock` and rejects any content-hash
 /// mismatch. That hashed-lock verification IS the require-hashes enforcement surface the
 /// build helpers (DKT-7/8/9) wire — there is no `uv sync --require-hashes` CLI flag

@@ -23,7 +23,7 @@ impl Staticcheck {
     /// system or a failure to register the source or artifact with the build context.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "staticcheck";
-        let source_version = "2026.1";
+        let source_version = "2026.2.2";
         let source_path =
             format!("https://sdk.vorpal.build/source/staticcheck-{source_version}.tar.gz");
 

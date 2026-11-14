@@ -11,7 +11,7 @@ use anyhow::{bail, Result};
 /// Builds the shared source used by the Go tooling artifacts (`goimports`, `gopls`).
 #[must_use]
 pub fn source_tools(name: &str) -> api::artifact::ArtifactSource {
-    let version = "0.42.0";
+    let version = "0.52.0";
 
     let path = format!("https://sdk.vorpal.build/source/go-tools-v{version}.tar.gz");
 
@@ -48,7 +48,7 @@ impl Go {
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "1.26.0";
+        let source_version = "1.27.4";
         let source_path =
             format!("https://sdk.vorpal.build/source/go{source_version}.{source_target}.tar.gz");
 

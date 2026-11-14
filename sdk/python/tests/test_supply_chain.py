@@ -36,20 +36,20 @@ Prerequisites and how to satisfy them:
     ``triple`` is ``any`` for a platform-independent source). Written by
     ``script/source.sh provenance`` from staged bytes:
         {"records": [
-          {"artifact": "cpython", "version": "3.13.14", "system": "aarch64-darwin",
+          {"artifact": "cpython", "version": "3.14.7", "system": "aarch64-darwin",
            "triple": "aarch64-apple-darwin",
-           "upstream_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.13.14+20260623-aarch64-apple-darwin-install_only.tar.gz",
+           "upstream_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7+20260929-aarch64-apple-darwin-install_only.tar.gz",
            "upstream_sha256": "<hex of the downloaded file>",
-           "mirror_key": "cpython-3.13.14-aarch64-apple-darwin.tar.gz",
-           "mirror_url": "https://sdk.vorpal.build/source/cpython-3.13.14-aarch64-apple-darwin.tar.gz",
+           "mirror_key": "cpython-3.14.7-aarch64-apple-darwin.tar.gz",
+           "mirror_url": "https://sdk.vorpal.build/source/cpython-3.14.7-aarch64-apple-darwin.tar.gz",
            "inline_digest": "<get_source_digest over the UNPACKED tree>",
            "authority": {"method": "sha256-list",
-                         "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/SHA256SUMS",
+                         "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/SHA256SUMS",
                          "value": "<hex the authority published>"}},
           ...]}
     Path: ``$VORPAL_PROVENANCE_MANIFEST`` or, by default, a ``provenance.json``
     co-located with ``Vorpal.lock`` (ADR 0001: same CODEOWNERS/--unlock review).
-  * ``uv`` binary: ``$VORPAL_UV_BIN`` or ``uv`` on PATH (the pinned 0.10.11).
+  * ``uv`` binary: ``$VORPAL_UV_BIN`` or ``uv`` on PATH (the pinned 0.13.8).
   * A hashed fixture project (``pyproject.toml`` + ``uv.lock`` with per-package
     hashes): ``$VORPAL_UV_FIXTURE`` pointing at the project dir.
   * Vorpal CLI binary: ``$VORPAL_BIN``.
@@ -209,7 +209,7 @@ def _load_manifest() -> list[dict[str, Any]]:
 def _uv_bin() -> str:
     found = os.environ.get("VORPAL_UV_BIN") or shutil.which("uv")
     if not found:
-        _skip("uv binary absent (pinned uv 0.10.11 not provisioned — DKT-21). Set $VORPAL_UV_BIN.")
+        _skip("uv binary absent (pinned uv 0.13.8 not provisioned — DKT-21). Set $VORPAL_UV_BIN.")
     return found  # type: ignore[return-value]
 
 
