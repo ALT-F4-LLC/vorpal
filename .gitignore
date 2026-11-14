@@ -12,3 +12,5 @@ vorpal-*-*
 website/dist/
 website/node_modules/
 /.source-stage
+/provenance.json
+/script/source/keys/*.gpg
