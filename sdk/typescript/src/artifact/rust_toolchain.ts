@@ -13,7 +13,7 @@ import { SYSTEMS } from "../system.js";
 import { rustToolchainTarget } from "./language/rust.js";
 export { rustToolchainTarget } from "./language/rust.js";
 
-export const RUST_TOOLCHAIN_VERSION = "1.93.1";
+export const RUST_TOOLCHAIN_VERSION = "1.100.0";
 
 /**
  * Builder for the unified Rust toolchain artifact.

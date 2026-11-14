@@ -918,7 +918,7 @@ export class OciImage {
 
   /**
    * Overrides the default crane artifact used for building the OCI image.
-   * When not set, crane is fetched from the registry alias "crane:0.21.1".
+   * When not set, crane is fetched from the registry alias "crane:0.22.1".
    *
    * @param crane - Artifact digest for crane
    */
@@ -929,7 +929,7 @@ export class OciImage {
 
   /**
    * Overrides the default rsync artifact used for building the OCI image.
-   * When not set, rsync is fetched from the registry alias "rsync:3.4.1".
+   * When not set, rsync is fetched from the registry alias "rsync:3.5.2".
    *
    * @param rsync - Artifact digest for rsync
    */

@@ -29,7 +29,7 @@ func RustToolchainTarget(system string) (*string, error) {
 }
 
 func RustToolchainVersion() string {
-	return "1.93.1"
+	return "1.100.0"
 }
 
 func RustToolchain(context *config.ConfigContext) (*string, error) {

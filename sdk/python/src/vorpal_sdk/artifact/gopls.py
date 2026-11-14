@@ -25,7 +25,7 @@ class Gopls:
 
         return (
             Go(name, SYSTEMS)
-            .with_aliases([f"{name}:0.42.0"])
+            .with_aliases([f"{name}:0.52.0"])
             .with_build_directory(name)
             .with_source(source_tools(name))
             .build(context)

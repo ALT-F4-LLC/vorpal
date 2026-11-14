@@ -20,7 +20,7 @@ class Git:
 
     def build(self, context: ConfigContext) -> str:
         name = "git"
-        source_version = "2.53.0"
+        source_version = "2.56.1"
         source_path = (
             f"https://sdk.vorpal.build/source/git-{source_version}.tar.gz"
         )
@@ -33,8 +33,8 @@ pushd ./source/{name}/git-{source_version}
 
 ./configure --prefix=$VORPAL_OUTPUT
 
-make
-make install"""
+make NO_RUST=1
+make NO_RUST=1 install"""
 
         steps = [shell(context, [], [], step_script, [])]
 

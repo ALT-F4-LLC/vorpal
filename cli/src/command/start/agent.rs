@@ -109,7 +109,7 @@ async fn unpack_by_mime_type(
             let file_name = path
                 .path_segments()
                 .and_then(|mut segments| segments.next_back())
-                .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                .filter(|&name| !name.is_empty())
                 .unwrap_or(&artifact_source.name);
 
             let file_path = source_sandbox.join(file_name);
@@ -243,7 +243,7 @@ async fn download_and_unpack_http_source(
             let file_name = path
                 .path_segments()
                 .and_then(|mut segments| segments.next_back())
-                .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                .filter(|&name| !name.is_empty())
                 .unwrap_or(&artifact_source.name);
 
             let file_path = source_sandbox.join(file_name);

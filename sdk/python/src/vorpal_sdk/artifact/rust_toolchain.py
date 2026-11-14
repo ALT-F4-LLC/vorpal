@@ -23,7 +23,7 @@ from vorpal_sdk.system import SYSTEMS, get_system_str
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
 
-RUST_TOOLCHAIN_VERSION = "1.93.1"
+RUST_TOOLCHAIN_VERSION = "1.100.0"
 
 
 def rust_toolchain_target(system: artifact_pb2.ArtifactSystem) -> str:

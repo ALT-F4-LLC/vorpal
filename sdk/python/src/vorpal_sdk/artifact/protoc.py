@@ -34,7 +34,7 @@ class Protoc:
         else:
             raise ValueError(f"unsupported {name} system: {system}")
 
-        source_version = "34.0"
+        source_version = "36.2"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"protoc-{source_version}-{source_target}.zip"

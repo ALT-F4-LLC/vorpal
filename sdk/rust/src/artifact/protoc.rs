@@ -37,7 +37,7 @@ impl Protoc {
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "34.0";
+        let source_version = "36.2";
         let source_path =
             format!("https://sdk.vorpal.build/source/protoc-{source_version}-{source_target}.zip");
         let source = ArtifactSource::new(name, source_path.as_str()).build();

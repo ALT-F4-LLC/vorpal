@@ -34,7 +34,7 @@ class ProtocGenGo:
         else:
             raise ValueError(f"unsupported {name} system: {system}")
 
-        source_version = "1.36.11"
+        source_version = "1.36.12"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"protoc-gen-go.v{source_version}.{source_target}.tar.gz"

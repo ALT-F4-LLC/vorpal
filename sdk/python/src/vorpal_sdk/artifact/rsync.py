@@ -15,7 +15,7 @@ class Rsync:
 
     def build(self, context: ConfigContext) -> str:
         name = "rsync"
-        version = "3.4.1"
+        version = "3.5.2"
 
         path = f"https://sdk.vorpal.build/source/rsync-{version}.tar.gz"
         source = ArtifactSource(name, path).build()
@@ -28,7 +28,8 @@ class Rsync:
             f' --disable-openssl'
             f' --disable-xxhash'
             f' --disable-zstd'
-            f' --disable-lz4\n'
+            f' --disable-lz4'
+            f' --disable-idn\n'
             f'make\n'
             f'make install'
         )

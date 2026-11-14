@@ -9,14 +9,14 @@ import (
 
 func Rsync(context *config.ConfigContext) (*string, error) {
 	name := "rsync"
-	version := "3.4.1"
+	version := "3.5.2"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/rsync-%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT"
 pushd ./source/%s/%s-%s
-./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4
+./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4 --disable-idn
 make
 make install`, name, name, version)
 

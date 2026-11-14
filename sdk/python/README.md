@@ -27,7 +27,7 @@ from vorpal_sdk import ConfigContext, Artifact
 
 ## Requirements
 
-- Python 3.13 (pinned via `.python-version` + `requires-python`)
+- Python 3.14 (pinned via `.python-version` + `requires-python`)
 - Runtime dependencies: `grpcio`, `protobuf`
 
 ## Development

@@ -13,7 +13,7 @@ export class Rsync {
   async build(context: ConfigContext): Promise<string> {
     const name = "rsync";
 
-    const version = "3.4.1";
+    const version = "3.5.2";
 
     const path = `https://sdk.vorpal.build/source/rsync-${version}.tar.gz`;
 
@@ -21,7 +21,7 @@ export class Rsync {
 
     const stepScript = `mkdir -p "$VORPAL_OUTPUT"
 pushd ./source/${name}/${name}-${version}
-./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4
+./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4 --disable-idn
 make
 make install`;
 

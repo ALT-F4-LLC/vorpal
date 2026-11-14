@@ -3,7 +3,7 @@ import { Artifact, ArtifactSource } from "../artifact.js";
 import { shell } from "./step.js";
 import { getSystemStr, SYSTEMS } from "../system.js";
 
-export const DEFAULT_PNPM_VERSION = "10.30.3";
+export const DEFAULT_PNPM_VERSION = "12.21.0";
 
 /**
  * Builder for the pnpm package manager artifact.
@@ -31,13 +31,13 @@ export class Pnpm {
 
     switch (system) {
       case "aarch64-darwin":
-        sourceTarget = "macos-arm64";
+        sourceTarget = "darwin-arm64";
         break;
       case "aarch64-linux":
         sourceTarget = "linux-arm64";
         break;
       case "x86_64-darwin":
-        sourceTarget = "macos-x64";
+        sourceTarget = "darwin-x64";
         break;
       case "x86_64-linux":
         sourceTarget = "linux-x64";
@@ -47,15 +47,15 @@ export class Pnpm {
     }
 
     const sourceVersion = this.version;
-    const sourcePath = `https://sdk.vorpal.build/source/pnpm-${sourceVersion}-${sourceTarget}`;
+    const sourcePath = `https://sdk.vorpal.build/source/pnpm-${sourceVersion}-${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 
-    // macos-arm64 ships with the version in the filename; all other targets do not.
-    const sourceFilename = `pnpm-${sourceVersion}-${sourceTarget}`;
-
+    // The archive holds the pnpm executable and the dist tree it loads from
+    // its own directory, so both land in bin, as pnpm's installer lays out
+    // PNPM_HOME.
     const stepScript = `mkdir -p "$VORPAL_OUTPUT/bin"
-cp -p "./source/${name}/${sourceFilename}" "$VORPAL_OUTPUT/bin/pnpm"
+cp -pR "./source/${name}/." "$VORPAL_OUTPUT/bin/"
 chmod +x "$VORPAL_OUTPUT/bin/pnpm"`;
 
     const steps = [await shell(context, [], [], stepScript, [])];

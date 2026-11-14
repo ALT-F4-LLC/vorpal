@@ -12,7 +12,7 @@ import { SYSTEMS } from "../system.js";
 export class Staticcheck {
   async build(context: ConfigContext): Promise<string> {
     const name = "staticcheck";
-    const sourceVersion = "2026.1";
+    const sourceVersion = "2026.2.2";
     const sourcePath = `https://sdk.vorpal.build/source/staticcheck-${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();

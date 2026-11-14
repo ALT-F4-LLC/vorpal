@@ -20,7 +20,7 @@ class Crane:
 
     def build(self, context: ConfigContext) -> str:
         name = "crane"
-        version = "0.21.1"
+        version = "0.22.1"
 
         source_path = f"https://sdk.vorpal.build/source/crane-v{version}.tar.gz"
         source = ArtifactSource(name, source_path).build()

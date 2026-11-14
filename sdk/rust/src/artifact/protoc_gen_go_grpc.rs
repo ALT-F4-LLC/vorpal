@@ -25,7 +25,7 @@ impl ProtocGenGoGrpc {
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "protoc-gen-go-grpc";
 
-        let source_version = "1.79.1";
+        let source_version = "1.85.0";
         let source_path =
             format!("https://sdk.vorpal.build/source/protoc-gen-go-grpc-v{source_version}.tar.gz");
 

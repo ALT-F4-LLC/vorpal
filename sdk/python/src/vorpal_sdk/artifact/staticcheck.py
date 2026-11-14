@@ -22,7 +22,7 @@ class Staticcheck:
         from vorpal_sdk.artifact.language.go import Go
 
         name = "staticcheck"
-        source_version = "2026.1"
+        source_version = "2026.2.2"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"staticcheck-{source_version}.tar.gz"

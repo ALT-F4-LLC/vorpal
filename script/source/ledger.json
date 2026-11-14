@@ -1,0 +1,963 @@
+{
+  "lfs": {
+    "tracked": "12.4-systemd",
+    "book": "https://www.linuxfromscratch.org/lfs/view/12.4-systemd/",
+    "stable": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/",
+    "patches": "https://www.linuxfromscratch.org/patches/lfs/12.4/"
+  },
+  "blfs": {
+    "tracked": "12.4-systemd",
+    "book": "https://www.linuxfromscratch.org/blfs/view/12.4-systemd/",
+    "stable": "https://www.linuxfromscratch.org/blfs/view/stable-systemd/",
+    "patches": "https://www.linuxfromscratch.org/patches/blfs/12.4/"
+  },
+  "deviations": [
+    {
+      "package": "*",
+      "kind": "subset",
+      "detail": "linux-vorpal builds only the packages listed under kind=linux-vorpal in registry.json, not the full LFS chapter 5-8 set.",
+      "reason": "The rootfs is a build environment for Vorpal artifacts, not a bootable system."
+    },
+    {
+      "package": "bash, binutils, bison, coreutils, gawk, gettext, glibc, gmp, grep, gzip, libunistring, m4, make, mpc, patch, sed, tar, texinfo",
+      "kind": "archive-format",
+      "detail": "Mirrored as the upstream .tar.gz instead of the book's .tar.xz where both exist.",
+      "reason": "Historic mirror keys; each .tar.gz is published by the same upstream with its own signature. A bump should switch to the book's archive when the helper in source.rs allows it."
+    },
+    {
+      "package": "coreutils",
+      "kind": "patch-omitted",
+      "detail": "coreutils-9.7-upstream_fix-1.patch and coreutils-9.7-i18n-1.patch from the 12.4 Needed Patches are not applied.",
+      "reason": "Not yet reviewed against the stage_02/stage_04 scripts; the next book move must diff these commands."
+    },
+    {
+      "package": "unzip",
+      "kind": "not-in-book",
+      "detail": "BLFS 12.4 and 13.1 no longer carry UnZip (only libarchive's bsdunzip). The consolidated_fixes-1 and gcc14-1 patches come from the BLFS patches archive, and stage_05 writes an inline gcc15.patch that is in no Needed Patches list.",
+      "reason": "Open: patches outside the tracked Needed Patches violate the patch rule. The skill stops on unzip until the operator chooses bsdunzip (BLFS libarchive) or records an exception here."
+    },
+    {
+      "package": "curl-cacert",
+      "kind": "not-in-book",
+      "detail": "Mozilla CA bundle from https://curl.se/ca/ instead of BLFS make-ca's certdata.txt.",
+      "reason": "Upstream source with a published SHA-256; version is the bundle's date."
+    },
+    {
+      "package": "python",
+      "kind": "patch-omitted",
+      "detail": "Any Python-*.patch listed in Needed Patches for the tracked book is not applied.",
+      "reason": "None listed for 12.4; 13.1 lists Python-3.14.7-openssl_4-1.patch, which the move to 13.1 must add."
+    },
+    {
+      "package": "python",
+      "kind": "authority",
+      "detail": "Declared authority is the SHA-256 in python.org's SPDX SBOM next to the tarball; the book MD5 is the stated fallback.",
+      "reason": "python.org signs 3.14 releases with Sigstore only and the skill has no Sigstore verifier. The pinned 3.13.7 still ships a PGP .asc, which the declared authority does not use, so one authority covers the move to 3.14. The SBOM shares an origin with the tarball, like the uv, perl, and cacert checksum files."
+    }
+  ],
+  "book_sections": [
+    {
+      "id": "lfs:chapter04/creatingminlayout",
+      "sha": "b96f3769b7a9d4422b08fd068e1fc8353d4a9f4d2625b68281a9c04f2888424c",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter04/settingenvironment",
+      "sha": "b0584be9fc7b349def3f1d049aad9ace3ed24dbb03873b2dd4825c83b5c86d11",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter05/binutils-pass1",
+      "sha": "75338c1333d6820fcd47a0a0f35a304d2b3b316b10c6a2668c495a45f85c184e",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter05/gcc-pass1",
+      "sha": "d1cb778004a71f2472d717281c935e0b9e828c2b556a9572da4a7e236390605a",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter05/linux-headers",
+      "sha": "ad1a26d0c5841ecbd61ef6a8b644d02a6b3d548cdbcd2fb9d5d3bb06faa89877",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter05/glibc",
+      "sha": "c0f311e75e30e4743ad692c98c99c925753b310d41a068c9abf061402522e92e",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter05/gcc-libstdc++",
+      "sha": "d6c77860a6cbbd42c046de2f831c5fca45c6ec7ff823c87c95a0eef413ea184b",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/m4",
+      "sha": "691a3223f74c317aa7c862dece8b0cd67cdfbd2c32bfa0f1bf455092aac1ffc1",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/ncurses",
+      "sha": "7d75b22cee6709d8f1613e38cf77668739be83c35f7e846bab6e0774e236f2e4",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/bash",
+      "sha": "69d738ba1ccaa54fbc89c2614e5ad8691fcb159b17de2cd44fbe0617efcc4877",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/coreutils",
+      "sha": "ddd53355ad9f3326c0d3cb3eda4b77c4d0ea4041444964723a5efa27198e9959",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/diffutils",
+      "sha": "a09acf8b54184e5ff914ffbcf7d256600f2614c78267e7514a56cee2b798190b",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/file",
+      "sha": "8675973fc1c6870dd1acd2624aa2fa264399164f049fcb9687979a36ed3164f0",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/findutils",
+      "sha": "772361195fa55c22d29937a101cbe4005b27bae43a26e7062c5f611f008e57a5",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/gawk",
+      "sha": "46c12561244c17c7d451211bff6774f4a44949443818a3c13c2417a696d8f857",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/grep",
+      "sha": "12e629d395743072e51b7f62c32e5ea52ad0fa6f29795fcb566bd9b872ce3067",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/gzip",
+      "sha": "edbbae0cf985f7c2a61d3a1385eae2e2fe4b4f642ed851a25a3ac401d58b4514",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/make",
+      "sha": "691a3223f74c317aa7c862dece8b0cd67cdfbd2c32bfa0f1bf455092aac1ffc1",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/patch",
+      "sha": "691a3223f74c317aa7c862dece8b0cd67cdfbd2c32bfa0f1bf455092aac1ffc1",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/sed",
+      "sha": "12e629d395743072e51b7f62c32e5ea52ad0fa6f29795fcb566bd9b872ce3067",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/tar",
+      "sha": "691a3223f74c317aa7c862dece8b0cd67cdfbd2c32bfa0f1bf455092aac1ffc1",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/xz",
+      "sha": "4095c48e39e99731cb38a3b56da1928eeb29f5f6a6dea055bdc3fee6cc1c06bf",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/binutils-pass2",
+      "sha": "e505ab057916e30a86a6ba8ced5cb43cc16fe08b1f0f7720de4fdf0b772019a9",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter06/gcc-pass2",
+      "sha": "af6b37b586687fc579dbe8bc8ce788d49ba8fcc96be09c4554ba9586f2dc543e",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/kernfs",
+      "sha": "835caa8b701bc8ecaa68bd5ac12cc1f911c84d618b7e7e88097834a7052c6cb7",
+      "status": "unaudited",
+      "disposition": "deviation",
+      "reason": "Vorpal mounts no virtual file systems: step::bwrap in sdk/rust/src/artifact/step.rs gives each step a new /dev, /proc, and a tmpfs /tmp, and the bwrap arguments in linux_vorpal.rs bind the rootfs directories; /sys and /run are not mounted."
+    },
+    {
+      "id": "lfs:chapter07/chroot",
+      "sha": "db9eb470e8eeee8b3b6b50f86113bab34187d821d479ce59091d52bb38aaf26e",
+      "status": "unaudited",
+      "disposition": "deviation",
+      "reason": "Each stage runs under bubblewrap instead of chroot: step::bwrap in sdk/rust/src/artifact/step.rs clears the environment (--clearenv), the bwrap arguments in linux_vorpal.rs bind the rootfs directories and run as uid and gid 0, step_environments sets PATH=/usr/bin:/usr/sbin, and each stage script sets MAKEFLAGS in its Setup environment block in place of the env list of the chroot command."
+    },
+    {
+      "id": "lfs:chapter07/creatingdirs",
+      "sha": "58c248f5593aeb3bf77879c1f8c6ceaee692a806b142507932aac6d0962eb0f7",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/createfiles",
+      "sha": "2aad5a1b313146f6374b784e2fd855d16c3c5344ec8b3e743cec4e068b417c7d",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/gettext",
+      "sha": "6462aaf92f82cb5b4a2e5507e3e3c9f11ce14a09127a0c639e9b4113a27aabaf",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/bison",
+      "sha": "f1dcfc171b4dafbf48043ee2bbee726242e5131fa506a3b11fa9eb489d8cfcb0",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/perl",
+      "sha": "221e6cc5137534fed509f48b1eb79aa751ca8a288633a402d9840a54bb79b2d6",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/Python",
+      "sha": "44e4c1f87388db2df4f0a534013585c4b66909ada3ea597f49fb202d06844f1e",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/texinfo",
+      "sha": "c74f9b96b64f625b22f45a5eec56452c5d54c6b2a05b53a9f23e60feee527a44",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/util-linux",
+      "sha": "a32206672055ca0988efdf2f8d4a8a52da8a9afec065b0d23697179bcb19b0c5",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter07/cleanup",
+      "sha": "1b4101627d898b0547a36f7760e3d323476f5ed858b31543ffee49a2d6fc00eb",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/glibc",
+      "sha": "b9c458c6f9b930be4889c1c3826298a01e1e82d4dc61ff7a9940a5d6fd51b324",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/zlib",
+      "sha": "5b7402fc43f3b0a0223d4cdf0eef952d1b79df3d625ac5340b6208821fb3306a",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/binutils",
+      "sha": "4c9d03e58fefa69e0b65dc02de82f5b332108687a9f8ee8b4d0419a2c61da112",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/gcc",
+      "sha": "c6b16c0b8e12090946d3d07e050a5d69d35c188773ba9baba6992fdc22129a8d",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/openssl",
+      "sha": "943cd94f5d67682055f45e4d13eedd1d5cd343bed66dfde1c6e9e70084432667",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "lfs:chapter08/cleanup",
+      "sha": "1f8c055dbb98a91515ff417b5380f9295a8ad6ec4e4ad95ad435f0e00222a7c0",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "blfs:general/libunistring",
+      "sha": "a1ba45160feeb6efc09a9a9f29459a100f2c182c421edb4ee22bf6317fca9b75",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "blfs:general/libidn2",
+      "sha": "955ed37e2922029af983493ef01a128f771ce3188ff09165987e54aa70e1a336",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "blfs:basicnet/libpsl",
+      "sha": "71fb1a25f7ca28c886b7c934bd1c0b6dc7a9b97dec38dc487fbe22bbbadb025d",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    },
+    {
+      "id": "blfs:basicnet/curl",
+      "sha": "79793e3e44bf6467fe6304cd31d5bb7cceb295bcad6f1e06cfbcae1bac7abc71",
+      "status": "unaudited",
+      "disposition": null,
+      "reason": null
+    }
+  ],
+  "book_skipped": [
+    {
+      "id": "lfs:chapter04/introduction",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter04/addinguser",
+      "reason": "Vorpal builds as its own user inside the build sandbox; there is no lfs user.",
+      "sha": "33e9c075c7cc9dbbad801cfa91d8ecfa39c690242c371a1c02db95181a18a9b3"
+    },
+    {
+      "id": "lfs:chapter04/aboutsbus",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter04/abouttestsuites",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter05/introduction",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter06/introduction",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter07/introduction",
+      "reason": "Prose only; no commands.",
+      "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "lfs:chapter07/changingowner",
+      "reason": "The build sandbox owns $VORPAL_OUTPUT; there is no ownership to change.",
+      "sha": "99674ba5ecc9e1415fe49ac0063d4f50509e94367de116b91dbfe1e43fb0e77a"
+    },
+    {
+      "prefix": "lfs:chapter08/",
+      "reason": "Ledger deviation subset: the rootfs builds only the chapter 8 packages Vorpal artifacts need."
+    }
+  ],
+  "stage_blocks": [
+    {
+      "file": "setup",
+      "heading": "(preamble)",
+      "sha": "45b0062bfeaa4f57b9a37a081f064b58345aaa99f1610e3ae48d2e1dccc76c0c",
+      "sections": [
+        "lfs:chapter04/settingenvironment"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Setup environment",
+      "sha": "f5769e0a804d8a673855c407db3933f2617a36b11fff5a3717bc986ecaf63b01",
+      "local": "Points VORPAL_SOURCE at the artifact's unpacked sources; the book uses $LFS/sources."
+    },
+    {
+      "file": "setup",
+      "heading": "Setup GCC (base)",
+      "sha": "f7b050478d5770233a3b4889580d244cbafe2c13b8addaaed58facb86582f703",
+      "sections": [
+        "lfs:chapter05/gcc-pass1"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Setup ncurses",
+      "sha": "4467d9da80904efad7974be9e064d6dc0e223a78a190e5dd2292fc74e6a0057b",
+      "sections": [
+        "lfs:chapter06/ncurses"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Setup gawk",
+      "sha": "5ce4e2e6fda2960e9c2397fd64b87a6c5f74109852b5a5a6864e56fbace038b7",
+      "sections": [
+        "lfs:chapter06/gawk"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Patch GLIBC",
+      "sha": "6978ad51ecf684a6b1ea77d0442cd41c83a0d485427479ec0ffb99691a21ac8e",
+      "sections": [
+        "lfs:chapter05/glibc"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Setup source paths",
+      "sha": "edeebebc02fdf731fd4685d7c9b2a38355d4d1936de63f74baa0b1aaa41dde37",
+      "local": "Copies one unpacked tree per build pass; the book unpacks each package again for every pass."
+    },
+    {
+      "file": "setup",
+      "heading": "Patch binutils-pass-02",
+      "sha": "a4a985b7ab55f89d5fb218cdc31df5b38ce23e34edf9ca3bbd83fd3f0660ba66",
+      "sections": [
+        "lfs:chapter06/binutils-pass2"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Patch gcc-pass-02",
+      "sha": "f3124d7abd30f86eef5c2bed66b33c50b4e13c20e27f094807f0cd6e735d0a0e",
+      "sections": [
+        "lfs:chapter06/gcc-pass2"
+      ]
+    },
+    {
+      "file": "setup",
+      "heading": "Setup paths",
+      "sha": "a7f3b5d662f1fb033fa5f3bb12b70b21c4dc493e17f9b4cad5eb852b55c3664c",
+      "sections": [
+        "lfs:chapter04/creatingminlayout"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "(preamble)",
+      "sha": "45b0062bfeaa4f57b9a37a081f064b58345aaa99f1610e3ae48d2e1dccc76c0c",
+      "sections": [
+        "lfs:chapter04/settingenvironment"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Setup environment",
+      "sha": "b16a39137b93008e4c3b793529a1a65975f3655f840febe8202dc50eccd400f6",
+      "sections": [
+        "lfs:chapter04/settingenvironment"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Build binutils (pass 01)",
+      "sha": "df160c686e017017e3393c5f81ecf271c66636c29ae51296d92194c415f31a50",
+      "sections": [
+        "lfs:chapter05/binutils-pass1"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Build gcc (pass 01)",
+      "sha": "f47e7d658bb564fc56f4e8a0f1fc7b61f5dca37173bd3e2b5d81032b0e1f4cb9",
+      "sections": [
+        "lfs:chapter05/gcc-pass1"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Build linux headers",
+      "sha": "373d935f11744cc98da89945af92b1aa856ba189b3c9c88ca7264401a6699bd9",
+      "sections": [
+        "lfs:chapter05/linux-headers"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Build glibc-pass-01",
+      "sha": "ba178de44f48db0ae12cf0f2bcd78554d2c4797573c97f0b1661ddfdf32a5caf",
+      "sections": [
+        "lfs:chapter05/glibc"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Test glibc",
+      "sha": "705eb5f2c2354d0d7583a355ff03a097f863330938862ef735f2c1e26719bf29",
+      "sections": [
+        "lfs:chapter05/glibc"
+      ]
+    },
+    {
+      "file": "stage_01",
+      "heading": "Build libstdc++",
+      "sha": "4bf0b2d826d1559c5853553b57109cc88cbbcd4bab7ffc8d58925446e6734c4b",
+      "sections": [
+        "lfs:chapter05/gcc-libstdc++"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "(preamble)",
+      "sha": "45b0062bfeaa4f57b9a37a081f064b58345aaa99f1610e3ae48d2e1dccc76c0c",
+      "sections": [
+        "lfs:chapter04/settingenvironment"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Setup environment",
+      "sha": "fd6ad16d797d17a29fa8853370ec1adb23280bc1286c6ed5fff0c95038d6cd8d",
+      "sections": [
+        "lfs:chapter04/settingenvironment"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build m4",
+      "sha": "0052bdacac328a033351fbe463193166509018717021d4091f87784fd0589891",
+      "sections": [
+        "lfs:chapter06/m4"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build ncurses",
+      "sha": "a42b8a0011affa43c7a2cc8ea331f6c41252cf14cac5e123776215e79b04ae29",
+      "sections": [
+        "lfs:chapter06/ncurses"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build bash",
+      "sha": "f85908fea149f5e5563d0d8cdd02463f3f12a0b041e49c5fe8d5e390745d8111",
+      "sections": [
+        "lfs:chapter06/bash"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build coreutils",
+      "sha": "23fe298733633640726fc9bbc1073a5f8bd09135fd7e97b96a0c21dfabf0fc43",
+      "sections": [
+        "lfs:chapter06/coreutils"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build diffutils",
+      "sha": "be2792b8ae5836d377e2c4ebec52a26b5b10fd01719ecef40edda9321c1cbe46",
+      "sections": [
+        "lfs:chapter06/diffutils"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build file",
+      "sha": "0767175277542a7fe17a0e38a4c47ebf344dc4459e69f6859ff96ac6eff4cbb4",
+      "sections": [
+        "lfs:chapter06/file"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build findutils",
+      "sha": "9575d9e8cbef6b77f261d18c13e962a9ee4da46a1b4d0bc4d187ace535fab0cd",
+      "sections": [
+        "lfs:chapter06/findutils"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build gawk",
+      "sha": "9fd5c7a4fbf1daf7c6b42379cf0d040a0026bedb607286fb39acf37f5e8b3f06",
+      "sections": [
+        "lfs:chapter06/gawk"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build grep",
+      "sha": "ca9be74a40489e84d12e3ce616483a97d5f04f68c8a70caa1e56bfb46555fa32",
+      "sections": [
+        "lfs:chapter06/grep"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build gzip",
+      "sha": "5cbccd7eac654aacc4c4ab1a6526eb9d76bdb5a2db89d81d561b42198568a57b",
+      "sections": [
+        "lfs:chapter06/gzip"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build make",
+      "sha": "638f75f1042c48396959d3f3c8ee11a3b769ecddb1a4a9617b75a984c729a134",
+      "sections": [
+        "lfs:chapter06/make"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build patch",
+      "sha": "e6c4213e5077c4888ce4f51a0b9af5e369f8ff9bbe7baa32660769f547714539",
+      "sections": [
+        "lfs:chapter06/patch"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build sed",
+      "sha": "f28d8e326eaaf4c19cf4e1217d274dae55a4a586b6ba9f19d0eaabfb3ddbb885",
+      "sections": [
+        "lfs:chapter06/sed"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build tar",
+      "sha": "cfadb565b603a3b34fd39aaeb69124aeefc2e5ad3c08445a1fb4ca18b536531a",
+      "sections": [
+        "lfs:chapter06/tar"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build xz",
+      "sha": "e3800bcb3d852bb36a9583a0cafb5c8bd12a63dd9af5fa4f7c0606df56c7df7e",
+      "sections": [
+        "lfs:chapter06/xz"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build binutils (pass 02)",
+      "sha": "64ea5c09f34601b1f262c00301a58d5d89166ee237770e277b3322ad4d055d17",
+      "sections": [
+        "lfs:chapter06/binutils-pass2"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Build gcc (pass 02)",
+      "sha": "86da04b3d4580db7212b56523bb865d8f42b2bf2c39b065685174a55ce573667",
+      "sections": [
+        "lfs:chapter06/gcc-pass2"
+      ]
+    },
+    {
+      "file": "stage_02",
+      "heading": "Setup root symlinks",
+      "sha": "861cb962c809c65098f2f2ea1b07bfae954112dde023204fbc12da6eeabd6a13",
+      "sections": [
+        "lfs:chapter04/creatingminlayout"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup paths",
+      "sha": "db67b4d9f9337545465e1dd2dc7b24dabf545e53620f7f930cccc4f079c85990",
+      "local": "Points VORPAL_SOURCE at the artifact's unpacked sources; the book uses /sources."
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup environment",
+      "sha": "f66ee3947bda38f45105f8139ffec90da04313a0e14e632d100a2532af91f4e2",
+      "sections": [
+        "lfs:chapter07/chroot"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup system directories",
+      "sha": "d41c3bc887f41f06c749d60cf99a8f73a19b7b3f46cbc00e8baf3155af4d33aa",
+      "sections": [
+        "lfs:chapter07/creatingdirs"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup root",
+      "sha": "85bc7a6b31f1e1b5139a064d06168d877f0535aa65042e64a61b919bff088503",
+      "sections": [
+        "lfs:chapter07/creatingdirs"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup system files",
+      "sha": "5022e71b98ae0982b35db90d81bbb0ce8099c71334a7bf4b4eb3a1148fc19983",
+      "sections": [
+        "lfs:chapter07/createfiles"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup locale",
+      "sha": "865e96393b2525a13d514e359181a96f17e61a41902e5b7ebc196a278f08593a",
+      "sections": [
+        "lfs:chapter08/glibc"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup logs",
+      "sha": "8049f84b31c72ef291fa79d538f45794c25a6967c0cd4a582a7c7cc73ffa35f4",
+      "sections": [
+        "lfs:chapter07/createfiles"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Setup resolv.conf",
+      "sha": "9e6f55ebe36399f364e167cd1ae645c61b90c52563b527c97fad8fd75a7eb0d8",
+      "local": "Name resolution for builds inside the rootfs; the book configures it in chapter 9, which the subset deviation leaves out."
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build gettext",
+      "sha": "36bc9d0e973eccb982abd2118590eb0313f82952f7fe2326eac6b26b6b9cd831",
+      "sections": [
+        "lfs:chapter07/gettext"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build bison",
+      "sha": "b22a79f86731bef7d53b1899abe1ecb543a721512ab46998ff1e9e114ff1d6dc",
+      "sections": [
+        "lfs:chapter07/bison"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build perl",
+      "sha": "ecb46e08913896d080fc7b24483bbe31b1df9be59617e955ac9e7e52271f76cf",
+      "sections": [
+        "lfs:chapter07/perl"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build Python",
+      "sha": "ad5f867e66af63ac319a3be98ca6fd7a6764964b5b36c49f581105f1bea70343",
+      "sections": [
+        "lfs:chapter07/Python"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build texinfo",
+      "sha": "c4a6ee993dbef317cfcb23f444c59552419066aee20fbf8e833abea7f86e749d",
+      "sections": [
+        "lfs:chapter07/texinfo"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Build util-linux",
+      "sha": "2b5921547425045792c81a23bd9a05967d6a907972b7abae927a32f44627ef50",
+      "sections": [
+        "lfs:chapter07/util-linux"
+      ]
+    },
+    {
+      "file": "stage_03",
+      "heading": "Cleanup",
+      "sha": "17cfe4b1bf3727891ba62ff73619518e4084aa294563c580dacb9a69caab30b0",
+      "sections": [
+        "lfs:chapter07/cleanup"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Setup paths",
+      "sha": "db67b4d9f9337545465e1dd2dc7b24dabf545e53620f7f930cccc4f079c85990",
+      "local": "Points VORPAL_SOURCE at the artifact's unpacked sources; the book uses /sources."
+    },
+    {
+      "file": "stage_04",
+      "heading": "Setup environment",
+      "sha": "f66ee3947bda38f45105f8139ffec90da04313a0e14e632d100a2532af91f4e2",
+      "sections": [
+        "lfs:chapter07/chroot"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Build glibc-pass-02",
+      "sha": "74a7a999a3d930856d3dea7106574122c6abea9a85a88d325373fa05dfacd321",
+      "sections": [
+        "lfs:chapter08/glibc"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Build zlib",
+      "sha": "cf07e326c822a485dbe719a1713fc7bfaa16127942c26c9770e194baa12b608b",
+      "sections": [
+        "lfs:chapter08/zlib"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Build binutils-pass-03",
+      "sha": "41fc1ff4e185d024bda977deec947546014d92653ffef613e62b5ae2b38233f5",
+      "sections": [
+        "lfs:chapter08/binutils"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Build gcc-pass-03",
+      "sha": "1bcb3d9afa1e77741cb87f87c4690b437e37c96125ed46acf289754fbec8e939",
+      "sections": [
+        "lfs:chapter08/gcc"
+      ]
+    },
+    {
+      "file": "stage_04",
+      "heading": "Build openssl",
+      "sha": "2a4e1214a94559b133c9dee80cce6df1fa79cc359b5662004ad2a7e28b695967",
+      "sections": [
+        "lfs:chapter08/openssl"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Setup environment",
+      "sha": "aa561cd0b13f253877ba935f6bc9e141d4f1fe4c2013cc053ab0dfb21a1c10c2",
+      "sections": [
+        "lfs:chapter07/chroot"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build libunistring",
+      "sha": "a28f805ff9b8f75e836e159600deaa0a13b17d80c8deb6d265cb136fb553b52a",
+      "sections": [
+        "blfs:general/libunistring"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build libidn2",
+      "sha": "200400a55be300bf50b0e05271c3bae4a3c786d491a03956f3e9f56c2ca7c38e",
+      "sections": [
+        "blfs:general/libidn2"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build libpsl",
+      "sha": "e0e9c9c5d3d3c0dd83ffbb1b35f491740e230dff32a2739b99aa52fce4a6e8c1",
+      "sections": [
+        "blfs:basicnet/libpsl"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build CA certificates",
+      "sha": "6e1b1f2e7ff21f4b34a4df703321d4946849f31117c45dc4909aa54b22e5b13a",
+      "local": "Installs the curl-cacert bundle (ledger deviation not-in-book); BLFS uses make-ca."
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build curl",
+      "sha": "6e6f82753e0a89753f2e1a01bbef816c3435c4bfa91c5609877474d7717765c3",
+      "sections": [
+        "blfs:basicnet/curl"
+      ]
+    },
+    {
+      "file": "stage_05",
+      "heading": "Build unzip",
+      "sha": "8a58c0655e2a5cd7ae176a4b9683f832ce88c1f07780ea3531d12cbbfcdd31e6",
+      "local": "UnZip is not in BLFS 12.4 (ledger deviation not-in-book)."
+    },
+    {
+      "file": "stage_05",
+      "heading": "Cleanup",
+      "sha": "0e7d1ffc07ff70488d768e0f97544794de5df0c66ec6d46ae56bd54cdb0e70ce",
+      "sections": [
+        "lfs:chapter08/cleanup"
+      ]
+    },
+    {
+      "file": "linux_vorpal",
+      "heading": "(steps)",
+      "sha": "64e030dc3e7b1262aa9009305f5353a5bbb3ddf713c5bbae1def945059018155",
+      "sections": [
+        "lfs:chapter07/kernfs",
+        "lfs:chapter07/chroot",
+        "lfs:chapter07/cleanup"
+      ]
+    }
+  ]
+}

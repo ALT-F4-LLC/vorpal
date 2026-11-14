@@ -14,6 +14,7 @@ function sync {
     --delete \
     --exclude=".env" \
     --exclude=".git" \
+    --exclude=".source-stage" \
     --exclude="dist" \
     --exclude="target" \
     --exclude="website" \

@@ -299,13 +299,10 @@ the comparison by `ArtifactSystem` — for each system, assert the Rust/Go/TS
 builder digests are identical; never compare digests across systems. Everything
 else (start services, build per-SDK, extract digest) is reused unchanged.
 
-**RUNTIME-GATED.** This arm cannot run until both land:
-- the `cpython` / `uv` toolchain is published on `sdk.vorpal.build` (DKT-25 — the
-  mirror returns 403 today), and
-- the pinned 3.13.14 interpreter + uv 0.10.11 are provisioned in the build env
-  (DKT-21; `cpython.rs` / `uv.rs` are intentionally unpinned until capture).
-Until then the build fails closed at the C1 mint gate (`unpinned - use --unlock`),
-so a build-and-compare run is not yet meaningful. Run this arm as part of the
-`vorpal` build-flow validation once DKT-21/DKT-25 close; the version-equality
-invariant it depends on is enforced now by
+**Sources published.** cpython 3.13.14 (python-build-standalone) and uv
+0.10.11 are on `sdk.vorpal.build/source` (HTTP 200) and pinned in
+`Vorpal.lock` for all four systems, so the mirror gate that blocked this arm
+is gone. A build-and-compare run has not yet been recorded; run this arm after
+any cpython or uv bump made with the upgrade-sources skill. The
+version-equality invariant is also enforced by
 `sdk/python/tests/test_version_equality.py`.

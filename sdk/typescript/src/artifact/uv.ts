@@ -8,14 +8,14 @@ import { SYSTEMS } from "../system.js";
 ///
 /// Byte-equal to the Rust canonical in sdk/rust/src/artifact/uv.rs
 /// (ADR 0001 Part B; DKT-19 asserts byte-equality).
-export const DEFAULT_UV_VERSION = "0.10.11";
+export const DEFAULT_UV_VERSION = "0.13.8";
 
 /**
  * Builder for the uv toolchain artifact (Astral standalone release).
  *
  * Mirrors Rust `Uv` struct in `sdk/rust/src/artifact/uv.rs`.
  *
- * HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-0.10.11 verifies each
+ * HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-0.13.8 verifies each
  * package against the per-package hashes carried in `uv.lock` and rejects any
  * content-hash mismatch. That hashed-lock verification IS the require-hashes enforcement
  * surface the build helpers wire — there is no `uv sync --require-hashes` CLI flag
@@ -24,8 +24,8 @@ export const DEFAULT_UV_VERSION = "0.10.11";
  *
  * PROVENANCE — no inline `withDigest` (ADR 0001 Part A). The canonical pin is the
  * per-triple `Vorpal.lock` entry captured via `--unlock`, mirroring bun/nodejs/cargo.
- * Until that capture lands, the HTTP source is intentionally unpinned: the C1 mint gate
- * fails the build closed with "unpinned - use --unlock". A placeholder digest is
+ * `Vorpal.lock` pins it for all four systems; a system without an entry fails the C1
+ * mint gate closed with "unpinned - use --unlock". A placeholder digest is
  * intentionally avoided — `agent.rs` returns an inline digest on a registry-cache hit
  * without verifying content, so a predictable placeholder is a pre-seedable cache-poison key.
  */

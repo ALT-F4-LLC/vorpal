@@ -43,7 +43,7 @@ impl Gh {
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "2.87.3";
+        let source_version = "2.104.0";
         let source_path = format!("https://sdk.vorpal.build/source/gh_{source_version}_{source_target}.{source_extension}");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

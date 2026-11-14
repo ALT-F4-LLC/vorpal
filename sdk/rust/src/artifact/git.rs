@@ -24,7 +24,7 @@ impl Git {
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "git";
 
-        let source_version = "2.53.0";
+        let source_version = "2.56.1";
 
         let source_path = format!("https://sdk.vorpal.build/source/git-{source_version}.tar.gz");
 
@@ -37,8 +37,8 @@ impl Git {
 
             ./configure --prefix=$VORPAL_OUTPUT
 
-            make
-            make install",
+            make NO_RUST=1
+            make NO_RUST=1 install",
         };
 
         let steps = vec![step::shell(context, &[], &[], step_script, &[]).await?];

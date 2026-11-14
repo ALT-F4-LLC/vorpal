@@ -22,7 +22,7 @@ def source_tools(name: str) -> artifact_pb2.ArtifactSource:
     Used by goimports and gopls, which both build from the same source.
     Mirrors Rust ``go::source_tools()``.
     """
-    version = "0.42.0"
+    version = "0.52.0"
     path = f"https://sdk.vorpal.build/source/go-tools-v{version}.tar.gz"
     return ArtifactSource(name, path).build()
 
@@ -46,7 +46,7 @@ class GoBin:
         else:
             raise ValueError(f"unsupported {name} system: {system}")
 
-        source_version = "1.26.0"
+        source_version = "1.27.4"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"go{source_version}.{source_target}.tar.gz"

@@ -16,7 +16,7 @@ export class Goimports {
     const buildDirectory = `cmd/${name}`;
 
     return new Go(name, SYSTEMS)
-      .withAliases([`${name}:0.42.0`])
+      .withAliases([`${name}:0.52.0`])
       .withBuildDirectory(buildDirectory)
       .withSource(sourceTools(name))
       .build(context);

@@ -14,7 +14,7 @@ from vorpal_sdk.system import SYSTEMS, get_system_str
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
 
-DEFAULT_PNPM_VERSION = "10.30.3"
+DEFAULT_PNPM_VERSION = "12.21.0"
 
 
 class Pnpm:
@@ -33,24 +33,28 @@ class Pnpm:
         system_str = get_system_str(system)
 
         if system_str == "aarch64-darwin":
-            source_target = "macos-arm64"
+            source_target = "darwin-arm64"
         elif system_str == "aarch64-linux":
             source_target = "linux-arm64"
         elif system_str == "x86_64-darwin":
-            source_target = "macos-x64"
+            source_target = "darwin-x64"
         elif system_str == "x86_64-linux":
             source_target = "linux-x64"
         else:
             raise ValueError(f"unsupported {name} system: {system}")
 
         source_version = self._version
-        source_filename = f"pnpm-{source_version}-{source_target}"
-        source_path = f"https://sdk.vorpal.build/source/{source_filename}"
+        source_path = (
+            f"https://sdk.vorpal.build/source/pnpm-{source_version}-{source_target}.tar.gz"
+        )
 
         source = ArtifactSource(name, source_path).build()
 
+        # The archive holds the pnpm executable and the dist tree it loads
+        # from its own directory, so both land in bin, as pnpm's installer
+        # lays out PNPM_HOME.
         step_script = f"""mkdir -p "$VORPAL_OUTPUT/bin"
-cp -p "./source/{name}/{source_filename}" "$VORPAL_OUTPUT/bin/pnpm"
+cp -pR "./source/{name}/." "$VORPAL_OUTPUT/bin/"
 chmod +x "$VORPAL_OUTPUT/bin/pnpm\""""
         steps = [shell(context, [], [], step_script, [])]
 

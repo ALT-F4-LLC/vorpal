@@ -9,7 +9,7 @@ import (
 
 func Crane(context *config.ConfigContext) (*string, error) {
 	name := "crane"
-	version := "0.21.1"
+	version := "0.22.1"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/crane-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()

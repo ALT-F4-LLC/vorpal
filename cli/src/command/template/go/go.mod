@@ -1,6 +1,6 @@
 module github.com/example/example
 
-go 1.26.0
+go 1.27.4
 
 require github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261112004409-56d9bfe3f08b
 

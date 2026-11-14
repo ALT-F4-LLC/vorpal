@@ -39,7 +39,7 @@ impl<'a> Grpcurl<'a> {
 
         let name = "grpcurl";
 
-        let source_version = "1.9.3";
+        let source_version = "1.9.4";
         let source_path =
             format!("https://sdk.vorpal.build/source/grpcurl-v{source_version}.tar.gz");
 

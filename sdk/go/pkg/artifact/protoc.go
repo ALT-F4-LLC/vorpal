@@ -26,7 +26,7 @@ func Protoc(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
-	sourceVersion := "34.0"
+	sourceVersion := "36.2"
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-%s-%s.zip", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()

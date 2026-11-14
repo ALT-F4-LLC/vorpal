@@ -68,7 +68,7 @@ go clean -modcache`, sourceDir, name, name)
 	}
 
 	return NewArtifact(name, []*api.ArtifactStep{step}, config.SYSTEMS).
-		WithAliases([]string{fmt.Sprintf("%s:0.42.0", name)}).
+		WithAliases([]string{fmt.Sprintf("%s:0.52.0", name)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)
 }

@@ -9,7 +9,7 @@ import (
 
 func Grpcurl(context *config.ConfigContext) (*string, error) {
 	name := "grpcurl"
-	version := "1.9.3"
+	version := "1.9.4"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/grpcurl-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()

@@ -33,7 +33,7 @@ export class ProtocGenGo {
         throw new Error(`unsupported ${name} system: ${system}`);
     }
 
-    const sourceVersion = "1.36.11";
+    const sourceVersion = "1.36.12";
     const sourcePath = `https://sdk.vorpal.build/source/protoc-gen-go.v${sourceVersion}.${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();

@@ -35,7 +35,7 @@ func Gh(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
-	sourceVersion := "2.87.3"
+	sourceVersion := "2.104.0"
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/gh_%s_%s.%s", sourceVersion, sourceTarget, sourceExtension)
 	source := NewArtifactSource(name, sourcePath).Build()
 

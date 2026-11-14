@@ -26,7 +26,7 @@ func NodeJS(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
-	sourceVersion := "22.22.0"
+	sourceVersion := "26.13.1"
 	sourcePath := fmt.Sprintf(
 		"https://sdk.vorpal.build/source/node-v%s-%s.tar.gz",
 		sourceVersion, sourceTarget,

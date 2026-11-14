@@ -10,7 +10,7 @@ import (
 func Git(context *config.ConfigContext) (*string, error) {
 	name := "git"
 
-	sourceVersion := "2.53.0"
+	sourceVersion := "2.56.1"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/git-%s.tar.gz", sourceVersion)
 
@@ -22,8 +22,8 @@ pushd ./source/%s/git-%s
 
 ./configure --prefix=$VORPAL_OUTPUT
 
-make
-make install`, name, sourceVersion)
+make NO_RUST=1
+make NO_RUST=1 install`, name, sourceVersion)
 
 	step, err := Shell(context, []*string{}, []string{}, stepScript, nil)
 	if err != nil {

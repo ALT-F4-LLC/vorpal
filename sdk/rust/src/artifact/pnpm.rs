@@ -31,24 +31,25 @@ impl Pnpm {
         let system = context.get_system();
 
         let source_target = match system {
-            Aarch64Darwin => "macos-arm64",
+            Aarch64Darwin => "darwin-arm64",
             Aarch64Linux => "linux-arm64",
-            X8664Darwin => "macos-x64",
+            X8664Darwin => "darwin-x64",
             X8664Linux => "linux-x64",
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "10.30.3";
+        let source_version = "12.21.0";
         let source_path =
-            format!("https://sdk.vorpal.build/source/pnpm-{source_version}-{source_target}");
-
-        let source_filename = format!("pnpm-{source_version}-{source_target}");
+            format!("https://sdk.vorpal.build/source/pnpm-{source_version}-{source_target}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
+        // The archive holds the `pnpm` executable and the `dist` tree it loads
+        // from its own directory, so both land in `bin`, as pnpm's installer
+        // lays out PNPM_HOME.
         let step_script = formatdoc! {"
             mkdir -p \"$VORPAL_OUTPUT/bin\"
-            cp -p \"./source/{name}/{source_filename}\" \"$VORPAL_OUTPUT/bin/pnpm\"
+            cp -pR \"./source/{name}/.\" \"$VORPAL_OUTPUT/bin/\"
             chmod +x \"$VORPAL_OUTPUT/bin/pnpm\""
         };
 

@@ -46,9 +46,9 @@ Define your project dependencies in `pyproject.toml`:
 [project]
 name = "example"
 version = "0.1.0"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = [
-    "vorpal-sdk>=0.5.0",
+    "vorpal-sdk>=0.6.0",
 ]
 
 [tool.uv]

@@ -5,11 +5,11 @@ import { type ArtifactSystemInput, getSystemStr, SYSTEMS } from "../system.js";
 
 /// Canonical conforming copy of the build-target CPython interpreter pin.
 ///
-/// Operator rule: CPython 3.13, latest patch. Concrete pin: 3.13.14 from
-/// python-build-standalone release tag `20260623`, `install_only` (relocatable).
+/// Operator rule: CPython follows the LFS book's Python. Concrete pin: 3.14.7 from
+/// python-build-standalone release tag `20260929`, `install_only` (relocatable).
 /// Byte-equal to the Rust canonical in sdk/rust/src/artifact/cpython.rs
 /// (ADR 0001 Part B; DKT-19 asserts byte-equality).
-export const DEFAULT_PYTHON_VERSION = "3.13.14";
+export const DEFAULT_PYTHON_VERSION = "3.14.7";
 
 /**
  * Maps a target system to the python-build-standalone target triple.
@@ -42,8 +42,8 @@ export function cpythonTarget(system: ArtifactSystemInput): string {
  *
  * PROVENANCE — no inline `withDigest` (ADR 0001 Part A). The canonical pin is the
  * per-triple `Vorpal.lock` entry captured via `--unlock`, mirroring bun/nodejs/cargo.
- * Until that capture lands, the HTTP source is intentionally unpinned: the C1 mint gate
- * fails the build closed with "unpinned - use --unlock", which is the true state. We do
+ * `Vorpal.lock` pins it for all four systems; a system without an entry fails the C1
+ * mint gate closed with "unpinned - use --unlock". We do
  * NOT set a placeholder digest — `agent.rs` resolves an inline digest against the registry
  * cache (`check`) and returns it on a hit WITHOUT downloading or verifying content, so a
  * predictable placeholder would be a pre-seedable cache-poison key.
