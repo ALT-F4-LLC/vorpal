@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Source upgrades**: `script/source.sh` gains `check`, `stage`,
+  `mirror-check`, `upload-cmd`, `provenance`, `pins`, `set-version`,
+  `digest`, and `digest-fill`, driven by `script/source/registry.json` (every
+  SDK artifact source with its upstream, declared checksum or signature
+  authority, mirror key, and SDK pins) and `script/source/ledger.json` (the
+  tracked LFS/BLFS books and each deviation). Staging verifies each download
+  against its authority, fails closed, and writes a deterministic tree plus a
+  manifest; uploads use `aws s3api put-object --if-none-match '*'`.
+- **Book command tracking**: `script/source.sh book-diff` maps every block of
+  the linux-vorpal stage scripts, and the step sequence in `linux_vorpal.rs`,
+  to the LFS/BLFS sections it implements (`ledger.json` `book_sections`,
+  `book_skipped`, `stage_blocks`) and keeps the reviewed commands of each
+  mapped or skipped section under `script/source/book/` (extracted under the
+  books' MIT License). On a book move it diffs every mapped section's
+  commands beside its stage blocks and reports new, removed, moved, and
+  changed skipped sections. `--accept` marks the changed and moved sections
+  for review, and `--mark` records each review. `--check` and
+  `sdk/python/tests/test_book_map.py` fail when a stage block changes or
+  moves without review or the map is incomplete. The 45 mapped sections start
+  unaudited; the first book move reviews them all. Nothing runs these checks
+  automatically yet: `make test` and CI do not include them.
+- **Rust toolchain drift test**: `sdk/codegen/tests/rust_toolchain_drift.rs`
+  fails when any SDK's build-target Rust version differs from
+  `rust-toolchain.toml`.
+- **Supply-chain tests**: `sdk/python/tests/test_supply_chain.py` checks that
+  the registry covers every `Vorpal.lock` source and matches every SDK pin,
+  and checks `provenance.json` records for every mirrored file, not only
+  cpython and uv, including their inline digests against `Vorpal.lock`.
+  Seven files are exempt by exact key, each with a reason in
+  `registry.json`: five tag archives the mirror holds in another gzip
+  packing, and two UnZip patches BLFS prints no MD5 for.
+
 ## [0.5.0] - 2026-11-10
 
 ### Added
