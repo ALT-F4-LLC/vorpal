@@ -1,6 +1,7 @@
 ---
 name: upgrade-sources
 description: "Upgrade SDK artifact sources (tools, the Rust toolchain, linux-vorpal) to their latest stable versions across the Rust, Go, TypeScript, and Python SDKs, and stage verified sources for the sdk.vorpal.build/source mirror. Use on \"upgrade sources\", \"bump the tools\", \"update linux-vorpal to the new LFS book\", \"/upgrade-sources --group go\"."
+argument-hint: "[--kind tool|rust|linux-vorpal] [--not-kind KIND] [--group GROUP] [--name NAME] [--not-name NAME] [--target-version V]"
 ---
 
 # Upgrade sources
