@@ -8,7 +8,7 @@
     "start": "bun run src/main.ts"
   },
   "dependencies": {
-    "@altf4llc/vorpal-sdk": "0.5.0"
+    "@altf4llc/vorpal-sdk": "0.6.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
