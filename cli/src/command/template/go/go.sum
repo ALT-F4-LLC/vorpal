@@ -1,5 +1,5 @@
-github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261112004409-56d9bfe3f08b h1:YVOjm6guOM2MKlCyI6bs6v7uGXTjkNdfP4YuCtsvTN8=
-github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261112004409-56d9bfe3f08b/go.mod h1:eX2BvvlxMURTuqBeo2gFWlw8k346qR30nVPNDwNi3Zs=
+github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261114233111-8229862c6992 h1:3UmtkD+ZtEC/GlJdhyMbXZLNCWeK+SMuhokFhnZQfJw=
+github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261114233111-8229862c6992/go.mod h1:la77kSLu/On7bZIQ/nFagXXBLK7kLm/rYtAgpc1JM70=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=

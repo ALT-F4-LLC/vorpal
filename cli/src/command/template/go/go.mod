@@ -2,7 +2,7 @@ module github.com/example/example
 
 go 1.27.4
 
-require github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261112004409-56d9bfe3f08b
+require github.com/ALT-F4-LLC/vorpal/sdk/go v0.0.0-20261114233111-8229862c6992
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
