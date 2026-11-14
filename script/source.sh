@@ -504,12 +504,20 @@ latest_version() {
         python-build-standalone)
             # cpython tracks the LFS book's Python, exactly, from the newest
             # python-build-standalone release that ships it for every system.
-            local want repo tag sums missing
+            # The API times out listing 30 of these releases at once (their
+            # asset lists are large), so read the newest 30 in pages of 10.
+            local want repo tag sums missing page listing tags=""
             want=$(lfs_version Python)
             [ -n "$want" ] || return 1
             repo=$(jq -r '.latest.repo' <<<"$src")
-            for tag in $(gh_api "repos/${repo}/releases?per_page=30" |
-                jq -r '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name'); do
+            for page in 1 2 3; do
+                listing=$(gh_api "repos/${repo}/releases?per_page=10&page=${page}") || {
+                    echo "blocked:cannot list ${repo} releases (page ${page})" >&2
+                    return 1
+                }
+                tags+=" $(jq -r '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name' <<<"$listing")"
+            done
+            for tag in $tags; do
                 sums=$(fetch_cached "https://github.com/${repo}/releases/download/${tag}/SHA256SUMS") || continue
                 missing=$(jq -r '.systems | to_entries[] | .value' <<<"$src" | while read -r triple; do
                     grep -q " cpython-${want}+${tag}-${triple}-install_only.tar.gz$" "$sums" || echo "$triple"
