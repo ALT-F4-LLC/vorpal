@@ -17,8 +17,8 @@ const defaultUvVersion = "0.10.11"
 // pip-interface flag); the hashed-lock verification IS the enforcement surface.
 //
 // PROVENANCE — no inline WithDigest (ADR 0001 Part A). The canonical pin is the per-triple
-// Vorpal.lock entry captured via --unlock; until then the HTTP source is intentionally
-// unpinned and the C1 mint gate fails the build closed. See Cpython for the full
+// Vorpal.lock entry captured via --unlock (pinned for all four systems); a system
+// without an entry fails the C1 mint gate closed. See Cpython for the full
 // two-link provenance rationale.
 func Uv(context *config.ConfigContext) (*string, error) {
 	name := "uv"

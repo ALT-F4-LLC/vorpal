@@ -19,7 +19,7 @@ pub const DEFAULT_UV_VERSION: &str = "0.10.11";
 ///
 /// PROVENANCE — no inline `with_digest` (ADR 0001 Part A). The canonical pin is the
 /// per-triple `Vorpal.lock` entry captured via `--unlock`, mirroring bun/nodejs/cargo;
-/// until then the HTTP source is unpinned and the C1 mint gate fails the build closed. A
+/// a system without that entry fails the C1 mint gate closed. A
 /// placeholder digest is intentionally avoided: `agent.rs` returns an inline digest on a
 /// registry-cache hit without verifying content, so a predictable placeholder is a
 /// pre-seedable cache-poison key. uv's per-platform upstream SHA-256s (ADR 0001 link a) are

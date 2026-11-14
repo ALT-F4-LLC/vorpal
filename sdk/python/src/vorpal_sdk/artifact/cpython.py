@@ -7,8 +7,8 @@ owns a ``python`` source compiled from source, and sources key by (name, platfor
 so reusing ``python`` would collide (ADR 0001 / TDD §4, H1).
 
 PROVENANCE — no inline digest (ADR 0001 Part A). The canonical pin is the per-triple
-``Vorpal.lock`` entry captured via ``--unlock``; until that lands the HTTP source is
-intentionally unpinned (the C1 mint gate fails closed with "unpinned - use --unlock").
+``Vorpal.lock`` entry captured via ``--unlock``, pinned for all four systems; a system
+without an entry fails the C1 mint gate closed ("unpinned - use --unlock").
 A placeholder digest is intentionally avoided — the agent resolves an inline digest
 against the registry cache without verifying content, so a predictable placeholder is
 a pre-seedable cache-poison key.

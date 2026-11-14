@@ -42,8 +42,8 @@ export function cpythonTarget(system: ArtifactSystemInput): string {
  *
  * PROVENANCE — no inline `withDigest` (ADR 0001 Part A). The canonical pin is the
  * per-triple `Vorpal.lock` entry captured via `--unlock`, mirroring bun/nodejs/cargo.
- * Until that capture lands, the HTTP source is intentionally unpinned: the C1 mint gate
- * fails the build closed with "unpinned - use --unlock", which is the true state. We do
+ * `Vorpal.lock` pins it for all four systems; a system without an entry fails the C1
+ * mint gate closed with "unpinned - use --unlock". We do
  * NOT set a placeholder digest — `agent.rs` resolves an inline digest against the registry
  * cache (`check`) and returns it on a hit WITHOUT downloading or verifying content, so a
  * predictable placeholder would be a pre-seedable cache-poison key.

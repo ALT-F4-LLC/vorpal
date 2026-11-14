@@ -33,8 +33,8 @@ func CpythonTarget(system string) (string, error) {
 // "python" would collide (ADR 0001 / TDD §4, H1).
 //
 // PROVENANCE — no inline WithDigest (ADR 0001 Part A). The canonical pin is the per-triple
-// Vorpal.lock entry captured via --unlock; until then the HTTP source is intentionally
-// unpinned and the C1 mint gate fails the build closed. A placeholder digest is
+// Vorpal.lock entry captured via --unlock (pinned for all four systems); a system
+// without an entry fails the C1 mint gate closed. A placeholder digest is
 // intentionally avoided: agent.rs returns an inline digest on a registry-cache hit without
 // verifying content, so a predictable placeholder is a pre-seedable cache-poison key.
 func Cpython(context *config.ConfigContext) (*string, error) {
