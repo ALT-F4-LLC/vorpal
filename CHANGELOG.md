@@ -65,8 +65,11 @@ All notable changes to this project will be documented in this file.
 - **uv**: 0.10.11 -> 0.13.8.
 - **Lima VM**: `lima.yaml` moves from Debian 12 (bookworm, 20250316-2053)
   to Debian 13 (trixie, 20261111-2659), with trixie/latest as the fallback.
-- **Source keyrings**: `script/source/keys/` pins the bun, kernel.org
-  autosigner, Node.js (active releasers), rsync, and Rust signing keys.
+- **Source keyrings**: `script/source/registry.json` pins the sha256 and
+  fingerprints of the bun, kernel.org autosigner, Node.js (active
+  releasers), rsync, and Rust signing keys. The keyrings are not committed:
+  `script/source.sh stage` exits 4 until each is fetched into
+  `script/source/keys/` and matches its pin.
 
 ### Fixed
 
