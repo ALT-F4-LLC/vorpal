@@ -28,7 +28,8 @@ class Rsync:
             f' --disable-openssl'
             f' --disable-xxhash'
             f' --disable-zstd'
-            f' --disable-lz4\n'
+            f' --disable-lz4'
+            f' --disable-idn\n'
             f'make\n'
             f'make install'
         )

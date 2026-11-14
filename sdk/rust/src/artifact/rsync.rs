@@ -36,7 +36,8 @@ impl Rsync {
                 --disable-openssl \
                 --disable-xxhash \
                 --disable-zstd \
-                --disable-lz4
+                --disable-lz4 \
+                --disable-idn
             make
             make install",
         };
