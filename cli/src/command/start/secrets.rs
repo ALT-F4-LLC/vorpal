@@ -133,12 +133,30 @@ mod tests {
 
     #[test]
     fn longer_names_and_brace_suffixes_are_not_references() {
-        assert!(references("$NAMEX", "NAME").is_empty());
-        assert!(references("$NAME_1", "NAME").is_empty());
-        assert!(references("$NAME{", "NAME").is_empty());
-        assert!(references("$NAMEé", "NAME").is_empty());
-        assert!(references("${NAMEX}", "NAME").is_empty());
-        assert!(references("NAME", "NAME").is_empty());
+        assert_eq!(
+            references("$NAMEX", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
+        assert_eq!(
+            references("$NAME_1", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
+        assert_eq!(
+            references("$NAME{", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
+        assert_eq!(
+            references("$NAMEé", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
+        assert_eq!(
+            references("${NAMEX}", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
+        assert_eq!(
+            references("NAME", "NAME"),
+            [] as [std::ops::Range<usize>; 0]
+        );
     }
 }
 
@@ -179,7 +197,7 @@ mod abuse {
         let result = validate_names(["A", "B", "A"]);
         assert_eq!(result, Err(SecretNameError::Duplicate("A".to_string())));
 
-        let message = result.err().map(|err| err.to_string()).unwrap_or_default();
+        let message = result.err().map_or_default(|err| err.to_string());
         assert!(message.contains("\"A\""), "{message}");
     }
 
@@ -194,8 +212,7 @@ mod abuse {
         ] {
             let message = validate_names([name])
                 .err()
-                .map(|err| err.to_string())
-                .unwrap_or_default();
+                .map_or_default(|err| err.to_string());
             assert!(!message.is_empty(), "{name:?} was accepted");
             assert!(
                 !message.chars().any(char::is_control),

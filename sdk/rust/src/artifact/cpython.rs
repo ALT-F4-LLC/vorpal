@@ -11,12 +11,12 @@ use indoc::formatdoc;
 
 /// Canonical single source of truth for the build-target `CPython` interpreter pin.
 ///
-/// Operator rule: `CPython` 3.13, latest patch. Concrete pin: 3.13.14 from
-/// python-build-standalone release tag `20260623`, `install_only` (relocatable). Every
+/// Operator rule: `CPython` follows the LFS book's Python. Concrete pin: 3.14.7 from
+/// python-build-standalone release tag `20260929`, `install_only` (relocatable). Every
 /// other Python-version pin in the repo — the Go/TS builder constants, `sdk/python`'s
 /// `.python-version` and `requires-python` — is a conforming copy derived from THIS
 /// constant, never an independent pin (ADR 0001 Part B).
-pub const DEFAULT_PYTHON_VERSION: &str = "3.13.14";
+pub const DEFAULT_PYTHON_VERSION: &str = "3.14.7";
 
 /// Maps a Vorpal `ArtifactSystem` to the python-build-standalone target triple.
 ///
@@ -47,8 +47,8 @@ pub fn target(system: ArtifactSystem) -> Result<String> {
 ///
 /// PROVENANCE — no inline `with_digest` (ADR 0001 Part A). The canonical pin is the
 /// per-triple `Vorpal.lock` entry captured via `--unlock`, mirroring bun/nodejs/cargo.
-/// Until that capture lands, the HTTP source is intentionally unpinned: the C1 mint gate
-/// fails the build closed with "unpinned - use --unlock", which is the true state. We do
+/// `Vorpal.lock` pins it for all four systems; a system without an entry fails the C1
+/// mint gate closed with "unpinned - use --unlock". We do
 /// NOT set a placeholder digest — `agent.rs` resolves an inline digest against the registry
 /// cache (`check`) and returns it on a hit WITHOUT downloading or verifying content, so a
 /// predictable placeholder would be a pre-seedable cache-poison key. The capture is

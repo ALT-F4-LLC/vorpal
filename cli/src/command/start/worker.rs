@@ -1824,7 +1824,7 @@ mod tests {
                     assert!(!arg.contains(MARKER), "{entrypoint}: argument {arg:?}");
                 }
                 for (key, value) in command.as_std().get_envs() {
-                    let value = value.map(|v| v.to_string_lossy()).unwrap_or_default();
+                    let value = value.map_or_default(|v| v.to_string_lossy());
                     assert!(!value.contains(MARKER), "{entrypoint}: {key:?}={value:?}");
                 }
                 assert_eq!(

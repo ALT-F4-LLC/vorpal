@@ -56,7 +56,7 @@ pub fn libidn2(version: &str) -> api::artifact::ArtifactSource {
 
 pub fn libpsl(version: &str) -> api::artifact::ArtifactSource {
     let name = "libpsl";
-    let path = format!("https://sdk.vorpal.build/source/libpsl-{version}.tar.gz",);
+    let path = format!("https://sdk.vorpal.build/source/libpsl-{version}.tar.gz");
 
     ArtifactSource::new(name, path.as_str()).build()
 }

@@ -7,18 +7,18 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-const defaultUvVersion = "0.10.11"
+const defaultUvVersion = "0.13.8"
 
 // Uv builds the Astral uv toolchain (standalone release).
 //
-// HASH-ENFORCEMENT (C3 foundation): on "uv sync --frozen", uv-0.10.11 verifies each
+// HASH-ENFORCEMENT (C3 foundation): on "uv sync --frozen", uv-0.13.8 verifies each
 // package against the per-package hashes in uv.lock and rejects any content-hash
 // mismatch. There is no "uv sync --require-hashes" CLI flag (--require-hashes is uv's
 // pip-interface flag); the hashed-lock verification IS the enforcement surface.
 //
 // PROVENANCE — no inline WithDigest (ADR 0001 Part A). The canonical pin is the per-triple
-// Vorpal.lock entry captured via --unlock; until then the HTTP source is intentionally
-// unpinned and the C1 mint gate fails the build closed. See Cpython for the full
+// Vorpal.lock entry captured via --unlock (pinned for all four systems); a system
+// without an entry fails the C1 mint gate closed. See Cpython for the full
 // two-link provenance rationale.
 func Uv(context *config.ConfigContext) (*string, error) {
 	name := "uv"

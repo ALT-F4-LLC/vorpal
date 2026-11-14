@@ -1149,21 +1149,16 @@ async fn run_login(
     // oauth2 exposes the secret only by reference; `token_result` is read again below
     let access_token = token_result.access_token().secret().clone();
 
-    let expires_in = token_result
-        .expires_in()
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
+    let expires_in = token_result.expires_in().map_or_default(|d| d.as_secs());
 
     // oauth2 exposes the secret only by reference
     let refresh_token = token_result
         .refresh_token()
-        .map(|t| t.secret().clone())
-        .unwrap_or_default();
+        .map_or_default(|t| t.secret().clone());
 
     let scopes = token_result
         .scopes()
-        .map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>())
-        .unwrap_or_default();
+        .map_or_default(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>());
 
     // Prepare to store token
 
@@ -1317,16 +1312,14 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 // or " a , , b " never produce `""` entries in the allow-list.
                 // Silent-filter matches clap's ergonomic expectation for
                 // comma-delimited values and keeps config-by-env forgiving.
-                let issuer_service_client_ids = issuer_service_client_ids
-                    .as_deref()
-                    .map(|raw| {
+                let issuer_service_client_ids =
+                    issuer_service_client_ids.as_deref().map_or_default(|raw| {
                         raw.split(',')
                             .map(str::trim)
                             .filter(|s| !s.is_empty())
                             .map(str::to_string)
                             .collect::<Vec<String>>()
-                    })
-                    .unwrap_or_default();
+                    });
 
                 let run_args = start::RunArgs {
                     archive_cache_ttl,

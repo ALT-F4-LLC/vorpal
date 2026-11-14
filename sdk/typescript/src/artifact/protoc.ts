@@ -33,7 +33,7 @@ export class Protoc {
         throw new Error(`unsupported ${name} system: ${system}`);
     }
 
-    const sourceVersion = "34.0";
+    const sourceVersion = "36.2";
     const sourcePath = `https://sdk.vorpal.build/source/protoc-${sourceVersion}-${sourceTarget}.zip`;
 
     const source = new ArtifactSource(name, sourcePath).build();

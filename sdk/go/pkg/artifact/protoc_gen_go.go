@@ -26,7 +26,7 @@ func ProtocGenGo(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system)
 	}
 
-	sourceVersion := "1.36.11"
+	sourceVersion := "1.36.12"
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-gen-go.v%s.%s.tar.gz", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()

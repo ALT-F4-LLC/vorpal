@@ -25,7 +25,7 @@ impl Gopls {
         let name = "gopls";
 
         Go::new(name, system::SYSTEMS)
-            .with_alias(format!("{name}:0.42.0"))
+            .with_alias(format!("{name}:0.52.0"))
             .with_build_directory(name)
             .with_source(go::source_tools(name))
             .build(context)

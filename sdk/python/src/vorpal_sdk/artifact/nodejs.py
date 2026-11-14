@@ -34,7 +34,7 @@ class NodeJS:
         else:
             raise ValueError(f"unsupported {name} system: {system}")
 
-        source_version = "22.22.0"
+        source_version = "26.13.1"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"node-v{source_version}-{source_target}.tar.gz"

@@ -7,7 +7,7 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-const defaultBunVersion = "1.3.10"
+const defaultBunVersion = "1.4.4"
 
 func Bun(context *config.ConfigContext) (*string, error) {
 	name := "bun"

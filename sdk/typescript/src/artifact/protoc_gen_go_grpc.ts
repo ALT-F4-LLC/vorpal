@@ -13,7 +13,7 @@ export class ProtocGenGoGrpc {
   async build(context: ConfigContext): Promise<string> {
     const name = "protoc-gen-go-grpc";
 
-    const sourceVersion = "1.79.1";
+    const sourceVersion = "1.85.0";
     const sourcePath = `https://sdk.vorpal.build/source/protoc-gen-go-grpc-v${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();

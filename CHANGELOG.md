@@ -4,6 +4,79 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Source upgrades**: `script/source.sh` gains `check`, `stage`,
+  `mirror-check`, `upload-cmd`, `provenance`, `pins`, `set-version`,
+  `digest`, and `digest-fill`, driven by `script/source/registry.json` (every
+  SDK artifact source with its upstream, declared checksum or signature
+  authority, mirror key, and SDK pins) and `script/source/ledger.json` (the
+  tracked LFS/BLFS books and each deviation). Staging verifies each download
+  against its authority, fails closed, and writes a deterministic tree plus a
+  manifest; uploads use `aws s3api put-object --if-none-match '*'`.
+- **Book command tracking**: `script/source.sh book-diff` maps every block of
+  the linux-vorpal stage scripts, and the step sequence in `linux_vorpal.rs`,
+  to the LFS/BLFS sections it implements (`ledger.json` `book_sections`,
+  `book_skipped`, `stage_blocks`) and keeps the reviewed commands of each
+  mapped or skipped section under `script/source/book/` (extracted under the
+  books' MIT License). On a book move it diffs every mapped section's
+  commands beside its stage blocks and reports new, removed, moved, and
+  changed skipped sections. `--accept` marks the changed and moved sections
+  for review, and `--mark` records each review. `--check` and
+  `sdk/python/tests/test_book_map.py` fail when a stage block changes or
+  moves without review or the map is incomplete. The 45 mapped sections start
+  unaudited; the first book move reviews them all. Nothing runs these checks
+  automatically yet: `make test` and CI do not include them.
+- **Rust toolchain drift test**: `sdk/codegen/tests/rust_toolchain_drift.rs`
+  fails when any SDK's build-target Rust version differs from
+  `rust-toolchain.toml`.
+- **Supply-chain tests**: `sdk/python/tests/test_supply_chain.py` checks that
+  the registry covers every `Vorpal.lock` source and matches every SDK pin,
+  and checks `provenance.json` records for every mirrored file, not only
+  cpython and uv, including their inline digests against `Vorpal.lock`.
+  Two files are exempt by exact key, each with a reason in
+  `registry.json`: the two UnZip patches BLFS prints no MD5 for.
+
+### Changed
+
+- **Rust toolchain**: cargo, clippy, rust-analyzer, rust-std, rustc,
+  rustfmt, and rust-src 1.93.1 -> 1.100.0.
+- **bun**: 1.3.10 -> 1.4.4.
+- **cpython**: 3.13.14 -> 3.14.7 (python-build-standalone 20260929), the
+  LFS book's Python. The Python SDK and the Python project template now
+  require Python 3.14 (`requires-python = ">=3.14,<3.15"`); projects that
+  cap below 3.14 no longer resolve against the Vorpal interpreter.
+- **crane**: 0.21.1 -> 0.22.1.
+- **gh**: 2.87.3 -> 2.104.0.
+- **git**: 2.53.0 -> 2.56.1. The build passes `NO_RUST=1`, since git 2.55 and later build Rust code by default and the build has no Cargo.
+- **go**: 1.26.0 -> 1.27.4, with the `go` directive of the Go SDK and the
+  Go project template.
+- **go-tools**: 0.42.0 -> 0.52.0.
+- **grpcurl**: 1.9.3 -> 1.9.4.
+- **nodejs**: 22.22.0 -> 26.13.1 (LTS).
+- **pnpm**: 10.30.3 -> 12.21.0. pnpm 12 ships a `.tar.gz` holding the
+  executable and its `dist` tree, so the artifact now unpacks both into
+  `bin`, and its macOS targets are `darwin-arm64` and `darwin-x64`.
+- **protoc**: 34.0 -> 36.2.
+- **protoc-gen-go**: 1.36.11 -> 1.36.12.
+- **protoc-gen-go-grpc**: 1.79.1 -> 1.85.0.
+- **rsync**: 3.4.1 -> 3.5.2.
+- **staticcheck**: 2026.1 -> 2026.2.2.
+- **uv**: 0.10.11 -> 0.13.8.
+- **Lima VM**: `lima.yaml` moves from Debian 12 (bookworm, 20250316-2053)
+  to Debian 13 (trixie, 20261111-2659), with trixie/latest as the fallback.
+- **Source keyrings**: `script/source/registry.json` pins the sha256 and
+  fingerprints of the bun, kernel.org autosigner, Node.js (active
+  releasers), rsync, and Rust signing keys. The keyrings are not committed:
+  `script/source.sh stage` exits 4 until each is fetched into
+  `script/source/keys/` and matches its pin.
+
+### Fixed
+
+- `script/source.sh check` no longer reports cpython blocked when GitHub's
+  API times out listing python-build-standalone releases: it reads them in
+  pages of 10 and fails with the listing error instead.
+
 ## [0.5.0] - 2026-11-10
 
 ### Added

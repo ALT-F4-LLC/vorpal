@@ -13,7 +13,7 @@ export class Rsync {
   async build(context: ConfigContext): Promise<string> {
     const name = "rsync";
 
-    const version = "3.4.1";
+    const version = "3.5.2";
 
     const path = `https://sdk.vorpal.build/source/rsync-${version}.tar.gz`;
 

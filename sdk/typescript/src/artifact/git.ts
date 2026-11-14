@@ -13,7 +13,7 @@ export class Git {
   async build(context: ConfigContext): Promise<string> {
     const name = "git";
 
-    const sourceVersion = "2.53.0";
+    const sourceVersion = "2.56.1";
 
     const sourcePath = `https://sdk.vorpal.build/source/git-${sourceVersion}.tar.gz`;
 
@@ -25,8 +25,8 @@ pushd ./source/${name}/git-${sourceVersion}
 
 ./configure --prefix=$VORPAL_OUTPUT
 
-make
-make install`;
+make NO_RUST=1
+make NO_RUST=1 install`;
 
     const steps = [await shell(context, [], [], stepScript, [])];
 

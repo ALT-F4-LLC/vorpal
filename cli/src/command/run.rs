@@ -218,7 +218,7 @@ fn validate_binary_name(binary_name: &str) -> Result<()> {
     }
 
     if binary_name.starts_with('.') {
-        bail!("invalid binary name '{binary_name}': must not start with '.'",);
+        bail!("invalid binary name '{binary_name}': must not start with '.'");
     }
 
     Ok(())
@@ -425,5 +425,5 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
     let err = Command::new(&binary_path).args(args).exec();
 
     // exec() only returns on error
-    bail!("failed to execute {}: {}", binary_path.display(), err,);
+    bail!("failed to execute {}: {}", binary_path.display(), err);
 }

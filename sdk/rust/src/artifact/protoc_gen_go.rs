@@ -38,7 +38,7 @@ impl ProtocGenGo {
             UnknownSystem => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "1.36.11";
+        let source_version = "1.36.12";
         let source_path = format!("https://sdk.vorpal.build/source/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();

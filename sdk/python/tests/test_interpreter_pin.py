@@ -13,8 +13,8 @@ Two assertions:
     unexported and not importable, so a grep/extract is the only cross-language
     comparison available).
   * ``requires-python`` in ``sdk/python/pyproject.toml`` is exactly
-    ``">=3.13,<3.14"`` (the floor tracks the pinned 3.13.x; the ceiling excludes
-    the next minor so a 3.14 interpreter cannot silently satisfy the project).
+    ``">=3.14,<3.15"`` (the floor tracks the pinned 3.14.x; the ceiling excludes
+    the next minor so a 3.15 interpreter cannot silently satisfy the project).
 
 Fails CLOSED: a renamed/moved Rust const, a missing ``.python-version``, or a
 missing ``requires-python`` makes the relevant read return nothing and FAILS —
@@ -40,7 +40,7 @@ _CPYTHON_RS = _REPO / "sdk/rust/src/artifact/cpython.rs"
 _PYTHON_VERSION = _REPO / "sdk/python/.python-version"
 _PYPROJECT = _REPO / "sdk/python/pyproject.toml"
 
-_REQUIRES_PYTHON = ">=3.13,<3.14"
+_REQUIRES_PYTHON = ">=3.14,<3.15"
 
 
 def _canonical_python_version() -> str:
@@ -97,7 +97,7 @@ def test_requires_python_is_exact() -> None:
     requires = match.group(1)
     assert requires == _REQUIRES_PYTHON, (
         f"requires-python is {requires!r} but must be exactly "
-        f"{_REQUIRES_PYTHON!r} (floor tracks the pinned 3.13.x; ceiling excludes "
+        f"{_REQUIRES_PYTHON!r} (floor tracks the pinned 3.14.x; ceiling excludes "
         f"the next minor)"
     )
 

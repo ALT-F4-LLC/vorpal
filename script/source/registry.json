@@ -1,0 +1,3541 @@
+{
+  "schema": 1,
+  "mirror": "https://sdk.vorpal.build/source",
+  "systems": [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux"
+  ],
+  "authority_order": [
+    "gpg",
+    "sha256-list",
+    "sha256-sidecar",
+    "sha256-json",
+    "github-asset-digest",
+    "git-commit",
+    "book-md5"
+  ],
+  "keys": {
+    "gnu": {
+      "url": "https://ftp.gnu.org/gnu/gnu-keyring.gpg",
+      "sha256": null
+    },
+    "rust": {
+      "url": "https://static.rust-lang.org/rust-key.gpg.ascii",
+      "sha256": "97e694f136f8c106e8f94fdadf593d2fc10de3ff3f558536c41469aa5be7f635",
+      "fingerprints": [
+        "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE"
+      ]
+    },
+    "kernel": {
+      "url": "https://git.kernel.org/pub/scm/docs/kernel/pgpkeys.git/plain/keys/632D3A06589DA6B1.asc",
+      "sha256": "7082b8659516e21b40729e950c5e302228f09d841e9a8fcabbd6aab959f69f2c",
+      "fingerprints": [
+        "B8868C80BA62A1FFFAF5FDA9632D3A06589DA6B1"
+      ],
+      "stated_at": "kernel.org WKD for autosigner@kernel.org (https://www.kernel.org/signature.html)"
+    },
+    "nodejs": {
+      "url": "https://github.com/nodejs/release-keys/raw/main/gpg-only-active-keys/pubring.kbx",
+      "sha256": "eacb2c1a673150bdb3c28eec29b46490f4f09c779c34254f1262eef940f655ff"
+    },
+    "bun": {
+      "url": "https://github.com/robobun.gpg",
+      "sha256": "323fef77bc474daf35d7f3fd3d252efe1300fd7d8ed63a800c90725386471d88",
+      "fingerprints": [
+        "F3DCC08A8572C0749B3E18888EAB4D40A7B22B59"
+      ],
+      "fetched_from": [
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/F3DCC08A8572C0749B3E18888EAB4D40A7B22B59"
+      ],
+      "stated_at": "none: trust-on-first-use; the release workflow (https://github.com/oven-sh/bun/blob/main/.github/workflows/release.yml) imports it from a secret"
+    },
+    "curl": {
+      "url": "https://daniel.haxx.se/mykey.asc",
+      "sha256": null
+    },
+    "rsync": {
+      "url": "https://rsync.samba.org/download.html",
+      "sha256": "9ed27795b44dbc93edcb8dda64b0ac80cd7de55d8a06c51cc9ff821e33f4ba04",
+      "fingerprints": [
+        "C0E1054505704F757D925AB26A64E8AA2EFBCF5D",
+        "9FEF112DCE19A0DC7E882CB81BB24997A8535F6F"
+      ],
+      "fetched_from": [
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/C0E1054505704F757D925AB26A64E8AA2EFBCF5D",
+        "https://keys.openpgp.org/vks/v1/by-fingerprint/9FEF112DCE19A0DC7E882CB81BB24997A8535F6F"
+      ]
+    },
+    "ncurses": {
+      "url": "https://invisible-island.net/public/public.html",
+      "sha256": null
+    },
+    "openssl": {
+      "url": "https://openssl-library.org/source/",
+      "sha256": null
+    },
+    "file": {
+      "url": "https://astron.com/pub/file/",
+      "sha256": null
+    },
+    "xz": {
+      "url": "https://tukaani.org/misc/lasse_collin_pubkey.txt",
+      "sha256": null
+    },
+    "zlib": {
+      "url": "No publisher key page found. github.com/madler.gpg omits key 783FCD8E58BCAFBA (\"couldn't be exported\"). Confirm the signer fingerprint out of band (not from the .asc) before pinning.",
+      "sha256": null
+    }
+  },
+  "sources": [
+    {
+      "name": "bun",
+      "kind": "tool",
+      "groups": [
+        "typescript"
+      ],
+      "version": "1.4.4",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "oven-sh/bun",
+        "tag": "^bun-v([0-9.]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "darwin-aarch64",
+        "aarch64-linux": "linux-aarch64",
+        "x86_64-darwin": "darwin-x64",
+        "x86_64-linux": "linux-x64-baseline"
+      },
+      "upstream": "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-{target}.zip",
+      "mirror": "bun-{version}-{target}.zip",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://github.com/oven-sh/bun/releases/download/bun-v{version}/SHASUMS256.txt.asc",
+          "keyring": "bun",
+          "clearsigned": true
+        },
+        {
+          "method": "github-asset-digest",
+          "repo": "oven-sh/bun",
+          "tag": "bun-v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell",
+        "vorpal-website"
+      ],
+      "authority": "https://github.com/oven-sh/bun/releases/tag/bun-v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/bun.go",
+          "marker": "const defaultBunVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/bun.py",
+          "marker": "DEFAULT_BUN_VERSION = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/bun.rs",
+          "marker": "pub const DEFAULT_BUN_VERSION: &str = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/bun.ts",
+          "marker": "export const DEFAULT_BUN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "cpython",
+      "kind": "tool",
+      "groups": [
+        "python"
+      ],
+      "version": "3.14.7",
+      "track": "lfs:python",
+      "latest": {
+        "method": "python-build-standalone",
+        "repo": "astral-sh/python-build-standalone"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://github.com/astral-sh/python-build-standalone/releases/download/{release}/cpython-{version}+{release}-{target}-install_only.tar.gz",
+      "mirror": "cpython-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/{release}/SHA256SUMS"
+        },
+        {
+          "method": "github-asset-digest",
+          "repo": "astral-sh/python-build-standalone",
+          "tag": "{release}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/astral-sh/python-build-standalone/releases/tag/{release}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/cpython.go",
+          "marker": "const defaultPythonVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/cpython.py",
+          "marker": "DEFAULT_PYTHON_VERSION = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/cpython.rs",
+          "marker": "pub const DEFAULT_PYTHON_VERSION: &str = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/cpython.ts",
+          "marker": "export const DEFAULT_PYTHON_VERSION = \""
+        }
+      ],
+      "release": "20260929"
+    },
+    {
+      "name": "crane",
+      "kind": "tool",
+      "groups": [
+        "oci",
+        "go"
+      ],
+      "version": "0.22.1",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "google/go-containerregistry",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": null,
+      "upstream": "https://github.com/google/go-containerregistry",
+      "mirror": "crane-v{version}.tar.gz",
+      "verify": [
+        {
+          "method": "git-commit",
+          "ref": "github",
+          "repo": "google/go-containerregistry"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/google/go-containerregistry/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/crane.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/crane.py",
+          "marker": "version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/crane.rs",
+          "marker": "let version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact.ts",
+          "marker": "* When not set, crane is fetched from the registry alias \"crane:"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/crane.ts",
+          "marker": "const version = \""
+        }
+      ],
+      "archive": {
+        "repo": "https://github.com/google/go-containerregistry.git",
+        "tag": "v{version}",
+        "prefix": "go-containerregistry-{version}/",
+        "module": "github.com/google/go-containerregistry"
+      }
+    },
+    {
+      "name": "gh",
+      "kind": "tool",
+      "groups": [
+        "vcs"
+      ],
+      "version": "2.104.0",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "cli/cli",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "macOS_arm64.zip",
+        "aarch64-linux": "linux_arm64.tar.gz",
+        "x86_64-darwin": "macOS_amd64.zip",
+        "x86_64-linux": "linux_amd64.tar.gz"
+      },
+      "upstream": "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_{target}",
+      "mirror": "gh_{version}_{target}",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_checksums.txt"
+        },
+        {
+          "method": "github-asset-digest",
+          "repo": "cli/cli",
+          "tag": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/cli/cli/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/gh.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/gh.py",
+          "marker": "DEFAULT_GH_VERSION = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/gh.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/gh.ts",
+          "marker": "export const DEFAULT_GH_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "go",
+      "kind": "tool",
+      "groups": [
+        "go"
+      ],
+      "version": "1.27.4",
+      "track": "newest",
+      "latest": {
+        "method": "go-dl"
+      },
+      "systems": {
+        "aarch64-darwin": "darwin-arm64",
+        "aarch64-linux": "linux-arm64",
+        "x86_64-darwin": "darwin-amd64",
+        "x86_64-linux": "linux-amd64"
+      },
+      "upstream": "https://dl.google.com/go/go{version}.{target}.tar.gz",
+      "mirror": "go{version}.{target}.tar.gz",
+      "verify": [
+        {
+          "method": "sha256-json",
+          "url": "https://go.dev/dl/?mode=json&include=all",
+          "filter": ".[] | select(.version == \"go{version}\") | .files[] | select(.filename == \"{file}\") | .sha256"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://go.dev/dl/#go{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/gobin.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/go.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/go.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/go.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ]
+    },
+    {
+      "name": "go-tools",
+      "kind": "tool",
+      "groups": [
+        "go"
+      ],
+      "version": "0.52.0",
+      "track": "newest",
+      "latest": {
+        "method": "go-proxy",
+        "module": "golang.org/x/tools",
+        "tag": "^v([0-9]+\\.[0-9]+\\.[0-9]+)$"
+      },
+      "systems": null,
+      "upstream": "https://go.googlesource.com/tools",
+      "mirror": "go-tools-v{version}.tar.gz",
+      "verify": [
+        {
+          "method": "git-commit",
+          "ref": "go-proxy",
+          "module": "golang.org/x/tools",
+          "module_version": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://pkg.go.dev/golang.org/x/tools@v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/gobin.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/goimports.go",
+          "marker": "WithAliases([]string{fmt.Sprintf(\"%s:"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/gopls.go",
+          "marker": "WithAliases([]string{fmt.Sprintf(\"%s:"
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/go.py",
+          "marker": "version = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/goimports.py",
+          "marker": ".with_aliases([f\"{name}:"
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/gopls.py",
+          "marker": ".with_aliases([f\"{name}:"
+        },
+        {
+          "file": "sdk/rust/src/artifact/go.rs",
+          "marker": "let version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/goimports.rs",
+          "marker": ".with_alias(format!(\"{name}:"
+        },
+        {
+          "file": "sdk/rust/src/artifact/gopls.rs",
+          "marker": ".with_alias(format!(\"{name}:"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/go.ts",
+          "marker": "const version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/goimports.ts",
+          "marker": ".withAliases([`${name}:"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/gopls.ts",
+          "marker": ".withAliases([`${name}:"
+        }
+      ],
+      "archive": {
+        "repo": "https://go.googlesource.com/tools",
+        "tag": "v{version}",
+        "prefix": "",
+        "module": "golang.org/x/tools"
+      },
+      "aliases": [
+        "goimports",
+        "gopls"
+      ]
+    },
+    {
+      "name": "git",
+      "kind": "tool",
+      "groups": [
+        "vcs",
+        "go"
+      ],
+      "version": "2.56.1",
+      "track": "newest",
+      "latest": {
+        "method": "html-index",
+        "url": "https://www.kernel.org/pub/software/scm/git/",
+        "pattern": "git-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz"
+      },
+      "systems": null,
+      "upstream": "https://www.kernel.org/pub/software/scm/git/git-{version}.tar.gz",
+      "mirror": "git-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://www.kernel.org/pub/software/scm/git/sha256sums.asc",
+          "keyring": "kernel",
+          "clearsigned": true
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://www.kernel.org/pub/software/scm/git/",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/git.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/git.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/git.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/git.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ]
+    },
+    {
+      "name": "grpcurl",
+      "kind": "tool",
+      "groups": [
+        "go",
+        "protobuf"
+      ],
+      "version": "1.9.4",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "fullstorydev/grpcurl",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": null,
+      "upstream": "https://github.com/fullstorydev/grpcurl",
+      "mirror": "grpcurl-v{version}.tar.gz",
+      "verify": [
+        {
+          "method": "git-commit",
+          "ref": "go-proxy",
+          "module": "github.com/fullstorydev/grpcurl",
+          "module_version": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/fullstorydev/grpcurl/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/grpcurl.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/grpcurl.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/grpcurl.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/grpcurl.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ],
+      "archive": {
+        "repo": "https://github.com/fullstorydev/grpcurl.git",
+        "tag": "v{version}",
+        "prefix": "grpcurl-{version}/",
+        "module": "github.com/fullstorydev/grpcurl"
+      }
+    },
+    {
+      "name": "nodejs",
+      "kind": "tool",
+      "groups": [
+        "typescript"
+      ],
+      "version": "26.13.1",
+      "track": "lts",
+      "latest": {
+        "method": "nodejs"
+      },
+      "systems": {
+        "aarch64-darwin": "darwin-arm64",
+        "aarch64-linux": "linux-arm64",
+        "x86_64-darwin": "darwin-x64",
+        "x86_64-linux": "linux-x64"
+      },
+      "upstream": "https://nodejs.org/dist/v{version}/node-v{version}-{target}.tar.gz",
+      "mirror": "node-v{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://nodejs.org/dist/v{version}/SHASUMS256.txt",
+          "keyring": "nodejs",
+          "signature": "https://nodejs.org/dist/v{version}/SHASUMS256.txt.sig"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://nodejs.org/dist/v{version}/",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/nodejs.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/nodejs.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/nodejs.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/nodejs.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ]
+    },
+    {
+      "name": "pnpm",
+      "kind": "tool",
+      "groups": [
+        "typescript"
+      ],
+      "version": "12.21.0",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "pnpm/pnpm",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "darwin-arm64",
+        "aarch64-linux": "linux-arm64",
+        "x86_64-darwin": "darwin-x64",
+        "x86_64-linux": "linux-x64"
+      },
+      "upstream": "https://github.com/pnpm/pnpm/releases/download/v{version}/pnpm-{target}.tar.gz",
+      "mirror": "pnpm-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "github-asset-digest",
+          "repo": "pnpm/pnpm",
+          "tag": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/pnpm/pnpm/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/pnpm.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/pnpm.py",
+          "marker": "DEFAULT_PNPM_VERSION = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/pnpm.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/pnpm.ts",
+          "marker": "export const DEFAULT_PNPM_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "protoc",
+      "kind": "tool",
+      "groups": [
+        "protobuf",
+        "go",
+        "rust"
+      ],
+      "version": "36.2",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "protocolbuffers/protobuf",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "osx-aarch_64",
+        "aarch64-linux": "linux-aarch_64",
+        "x86_64-darwin": "osx-x86_64",
+        "x86_64-linux": "linux-x86_64"
+      },
+      "upstream": "https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{target}.zip",
+      "mirror": "protoc-{version}-{target}.zip",
+      "verify": [
+        {
+          "method": "github-asset-digest",
+          "repo": "protocolbuffers/protobuf",
+          "tag": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/protocolbuffers/protobuf/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/protoc.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/protoc.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/protoc.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/protoc.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ]
+    },
+    {
+      "name": "protoc-gen-go",
+      "kind": "tool",
+      "groups": [
+        "protobuf",
+        "go"
+      ],
+      "version": "1.36.12",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "protocolbuffers/protobuf-go",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "darwin.arm64",
+        "aarch64-linux": "linux.arm64",
+        "x86_64-darwin": "darwin.amd64",
+        "x86_64-linux": "linux.amd64"
+      },
+      "upstream": "https://github.com/protocolbuffers/protobuf-go/releases/download/v{version}/protoc-gen-go.v{version}.{target}.tar.gz",
+      "mirror": "protoc-gen-go.v{version}.{target}.tar.gz",
+      "verify": [
+        {
+          "method": "github-asset-digest",
+          "repo": "protocolbuffers/protobuf-go",
+          "tag": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/protocolbuffers/protobuf-go/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/protoc_gen_go.go",
+          "marker": "sourceVersion := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/protoc_gen_go.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/protoc_gen_go.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/protoc_gen_go.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ]
+    },
+    {
+      "name": "protoc-gen-go-grpc",
+      "kind": "tool",
+      "groups": [
+        "protobuf",
+        "go"
+      ],
+      "version": "1.85.0",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "grpc/grpc-go",
+        "tag": "^v([0-9.]+)$"
+      },
+      "systems": null,
+      "upstream": "https://github.com/grpc/grpc-go",
+      "mirror": "protoc-gen-go-grpc-v{version}.tar.gz",
+      "verify": [
+        {
+          "method": "git-commit",
+          "ref": "go-proxy",
+          "module": "google.golang.org/grpc",
+          "module_version": "v{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/grpc/grpc-go/releases/tag/v{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/protoc_gen_go_grpc.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/protoc_gen_go_grpc.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/protoc_gen_go_grpc.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/protoc_gen_go_grpc.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ],
+      "archive": {
+        "repo": "https://github.com/grpc/grpc-go.git",
+        "tag": "v{version}",
+        "prefix": "grpc-go-{version}/",
+        "module": "google.golang.org/grpc"
+      }
+    },
+    {
+      "name": "rsync",
+      "kind": "tool",
+      "groups": [
+        "system"
+      ],
+      "version": "3.5.2",
+      "track": "newest",
+      "latest": {
+        "method": "html-index",
+        "url": "https://download.samba.org/pub/rsync/src/",
+        "pattern": "rsync-([0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.gz"
+      },
+      "systems": null,
+      "upstream": "https://download.samba.org/pub/rsync/src/rsync-{version}.tar.gz",
+      "mirror": "rsync-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rsync"
+        }
+      ],
+      "parity": [
+        "vorpal-container-image",
+        "vorpal-shell"
+      ],
+      "authority": "https://download.samba.org/pub/rsync/src/",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/rsync.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rsync.py",
+          "marker": "version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/rsync.rs",
+          "marker": "let version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact.ts",
+          "marker": "* When not set, rsync is fetched from the registry alias \"rsync:"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rsync.ts",
+          "marker": "const version = \""
+        }
+      ]
+    },
+    {
+      "name": "staticcheck",
+      "kind": "tool",
+      "groups": [
+        "go"
+      ],
+      "version": "2026.2.2",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "dominikh/go-tools",
+        "tag": "^([0-9]{4}\\.[0-9]+(\\.[0-9]+)?)$"
+      },
+      "systems": null,
+      "upstream": "https://github.com/dominikh/go-tools",
+      "mirror": "staticcheck-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "git-commit",
+          "ref": "github",
+          "repo": "dominikh/go-tools"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/dominikh/go-tools/releases/tag/{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/staticcheck.go",
+          "marker": "version := \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/staticcheck.py",
+          "marker": "source_version = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/staticcheck.rs",
+          "marker": "let source_version = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/staticcheck.ts",
+          "marker": "const sourceVersion = \""
+        }
+      ],
+      "archive": {
+        "repo": "https://github.com/dominikh/go-tools.git",
+        "tag": "{version}",
+        "prefix": "go-tools-{version}/",
+        "module": "honnef.co/go/tools"
+      }
+    },
+    {
+      "name": "uv",
+      "kind": "tool",
+      "groups": [
+        "python"
+      ],
+      "version": "0.13.8",
+      "track": "newest",
+      "latest": {
+        "method": "github-release",
+        "repo": "astral-sh/uv",
+        "tag": "^([0-9]+\\.[0-9]+\\.[0-9]+)$"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://github.com/astral-sh/uv/releases/download/{version}/uv-{target}.tar.gz",
+      "mirror": "uv-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        },
+        {
+          "method": "github-asset-digest",
+          "repo": "astral-sh/uv",
+          "tag": "{version}"
+        }
+      ],
+      "parity": [
+        "vorpal-shell"
+      ],
+      "authority": "https://github.com/astral-sh/uv/releases/tag/{version}",
+      "pins": [
+        {
+          "file": "sdk/go/pkg/artifact/uv.go",
+          "marker": "const defaultUvVersion = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/uv.go",
+          "marker": "// HASH-ENFORCEMENT (C3 foundation): on \"uv sync --frozen\", uv-"
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/uv.py",
+          "marker": "DEFAULT_UV_VERSION = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/uv.rs",
+          "marker": "pub const DEFAULT_UV_VERSION: &str = \""
+        },
+        {
+          "file": "sdk/rust/src/artifact/uv.rs",
+          "marker": "/// HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/uv.ts",
+          "marker": "export const DEFAULT_UV_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/uv.ts",
+          "marker": "* HASH-ENFORCEMENT (C3 foundation): on `uv sync --frozen`, uv-"
+        }
+      ]
+    },
+    {
+      "name": "cargo",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/cargo-{version}-{target}.tar.gz",
+      "mirror": "cargo-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "clippy",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/clippy-{version}-{target}.tar.gz",
+      "mirror": "clippy-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "rust-analyzer",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/rust-analyzer-{version}-{target}.tar.gz",
+      "mirror": "rust-analyzer-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "rust-std",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/rust-std-{version}-{target}.tar.gz",
+      "mirror": "rust-std-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "rustc",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/rustc-{version}-{target}.tar.gz",
+      "mirror": "rustc-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "rustfmt",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": {
+        "aarch64-darwin": "aarch64-apple-darwin",
+        "aarch64-linux": "aarch64-unknown-linux-gnu",
+        "x86_64-darwin": "x86_64-apple-darwin",
+        "x86_64-linux": "x86_64-unknown-linux-gnu"
+      },
+      "upstream": "https://static.rust-lang.org/dist/rustfmt-{version}-{target}.tar.gz",
+      "mirror": "rustfmt-{version}-{target}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "rust-src",
+      "kind": "rust",
+      "groups": [
+        "rust"
+      ],
+      "version": "1.100.0",
+      "track": "rust-toolchain.toml",
+      "latest": {
+        "method": "rust-toolchain"
+      },
+      "systems": null,
+      "upstream": "https://static.rust-lang.org/dist/rust-src-{version}.tar.gz",
+      "mirror": "rust-src-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "rust"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal"
+      ],
+      "authority": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/rust_toolchain.rs",
+          "marker": "\"",
+          "after": "pub fn version() -> String {"
+        },
+        {
+          "file": "sdk/go/pkg/artifact/rust_toolchain.go",
+          "marker": "return \"",
+          "after": "func RustToolchainVersion() string {"
+        },
+        {
+          "file": "sdk/typescript/src/artifact/rust_toolchain.ts",
+          "marker": "export const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/language/rust.ts",
+          "marker": "const RUST_TOOLCHAIN_VERSION = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/rust_toolchain.py",
+          "marker": "RUST_TOOLCHAIN_VERSION = \""
+        }
+      ]
+    },
+    {
+      "name": "bash",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "5.3",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "bash"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/bash/bash-{version}.tar.gz",
+      "mirror": "bash-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let bash_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "bashVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const bashVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "bash_version = \""
+        }
+      ]
+    },
+    {
+      "name": "binutils",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "2.45",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "binutils"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/binutils/binutils-{version}.tar.gz",
+      "mirror": "binutils-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let binutils_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "binutilsVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const binutilsVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "binutils_version = \""
+        }
+      ]
+    },
+    {
+      "name": "bison",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "3.8.2",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "bison"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/bison/bison-{version}.tar.gz",
+      "mirror": "bison-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let bison_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "bisonVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const bisonVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "bison_version = \""
+        }
+      ]
+    },
+    {
+      "name": "coreutils",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "9.7",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "coreutils"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/coreutils/coreutils-{version}.tar.gz",
+      "mirror": "coreutils-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let coreutils_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "coreutilsVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const coreutilsVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "coreutils_version = \""
+        }
+      ]
+    },
+    {
+      "name": "curl",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "blfs",
+      "version": "8.15.0",
+      "track": "book",
+      "latest": {
+        "method": "blfs",
+        "page": "basicnet/curl.html"
+      },
+      "systems": null,
+      "upstream": "https://curl.se/download/curl-{version}.tar.xz",
+      "mirror": "curl-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "curl"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/stable-systemd/basicnet/curl.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let curl_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "curlVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const curlVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "curl_version = \""
+        }
+      ]
+    },
+    {
+      "name": "curl-cacert",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "upstream",
+      "version": "1776122862",
+      "track": "book",
+      "latest": {
+        "method": "curl-ca"
+      },
+      "systems": null,
+      "upstream": "https://curl.se/ca/cacert-{date}.pem",
+      "mirror": "cacert-{version}.pem",
+      "verify": [
+        {
+          "method": "sha256-sidecar",
+          "url": "https://curl.se/ca/cacert-{date}.pem.sha256"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://curl.se/docs/caextract.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let curl_cacert_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "curlCacertVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const curlCacertVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "curl_cacert_version = \""
+        }
+      ]
+    },
+    {
+      "name": "diffutils",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "3.12",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "diffutils"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/diffutils/diffutils-{version}.tar.xz",
+      "mirror": "diffutils-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let diffutils_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "diffutilsVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const diffutilsVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "diffutils_version = \""
+        }
+      ]
+    },
+    {
+      "name": "file",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "5.46",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "file"
+      },
+      "systems": null,
+      "upstream": "https://astron.com/pub/file/file-{version}.tar.gz",
+      "mirror": "file-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "file"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let file_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "fileVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const fileVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "file_version = \""
+        }
+      ]
+    },
+    {
+      "name": "findutils",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "4.10.0",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "findutils"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/findutils/findutils-{version}.tar.xz",
+      "mirror": "findutils-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let findutils_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "findutilsVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const findutilsVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "findutils_version = \""
+        }
+      ]
+    },
+    {
+      "name": "gawk",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "5.3.2",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "gawk"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/gawk/gawk-{version}.tar.gz",
+      "mirror": "gawk-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let gawk_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "gawkVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const gawkVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "gawk_version = \""
+        }
+      ]
+    },
+    {
+      "name": "gcc",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "15.2.0",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "gcc"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/gcc/gcc-{version}/gcc-{version}.tar.xz",
+      "mirror": "gcc-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let gcc_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "gccVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const gccVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "gcc_version = \""
+        }
+      ]
+    },
+    {
+      "name": "gettext",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "0.26",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "gettext"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/gettext/gettext-{version}.tar.gz",
+      "mirror": "gettext-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let gettext_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "gettextVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const gettextVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "gettext_version = \""
+        }
+      ]
+    },
+    {
+      "name": "glibc",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "2.42",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "glibc"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/glibc/glibc-{version}.tar.gz",
+      "mirror": "glibc-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let glibc_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "glibcVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const glibcVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "glibc_version = \""
+        }
+      ]
+    },
+    {
+      "name": "glibc-patch",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "2.42",
+      "track": "book",
+      "latest": {
+        "method": "lfs-patch",
+        "package": "glibc",
+        "patch": "fhs"
+      },
+      "systems": null,
+      "upstream": "https://www.linuxfromscratch.org/patches/lfs/{book}/glibc-{version}-fhs-1.patch",
+      "mirror": "glibc-{version}-fhs-1.patch",
+      "verify": [
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/patches.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let glibc_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "glibcVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const glibcVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "glibc_version = \""
+        }
+      ]
+    },
+    {
+      "name": "gmp",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "6.3.0",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "gmp"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/gmp/gmp-{version}.tar.gz",
+      "mirror": "gmp-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let gmp_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "gmpVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const gmpVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "gmp_version = \""
+        }
+      ]
+    },
+    {
+      "name": "grep",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "3.12",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "grep"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/grep/grep-{version}.tar.gz",
+      "mirror": "grep-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let grep_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "grepVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const grepVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "grep_version = \""
+        }
+      ]
+    },
+    {
+      "name": "gzip",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "1.14",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "gzip"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/gzip/gzip-{version}.tar.gz",
+      "mirror": "gzip-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let gzip_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "gzipVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const gzipVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "gzip_version = \""
+        }
+      ]
+    },
+    {
+      "name": "libidn2",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "blfs",
+      "version": "2.3.8",
+      "track": "book",
+      "latest": {
+        "method": "blfs",
+        "page": "general/libidn2.html"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/libidn/libidn2-{version}.tar.gz",
+      "mirror": "libidn2-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/stable-systemd/general/libidn2.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let libidn2_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "libidn2Version := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const libidn2Version = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "libidn2_version = \""
+        }
+      ]
+    },
+    {
+      "name": "libpsl",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "blfs",
+      "version": "0.21.5",
+      "track": "book",
+      "latest": {
+        "method": "blfs",
+        "page": "basicnet/libpsl.html"
+      },
+      "systems": null,
+      "upstream": "https://github.com/rockdaboot/libpsl/releases/download/{version}/libpsl-{version}.tar.gz",
+      "mirror": "libpsl-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "github-asset-digest",
+          "repo": "rockdaboot/libpsl",
+          "tag": "{version}"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/stable-systemd/basicnet/libpsl.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let libpsl_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "libpslVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const libpslVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "libpsl_version = \""
+        }
+      ]
+    },
+    {
+      "name": "libunistring",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "blfs",
+      "version": "1.3",
+      "track": "book",
+      "latest": {
+        "method": "blfs",
+        "page": "general/libunistring.html"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/libunistring/libunistring-{version}.tar.gz",
+      "mirror": "libunistring-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/stable-systemd/general/libunistring.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let libunistring_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "libunistringVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const libunistringVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "libunistring_version = \""
+        }
+      ]
+    },
+    {
+      "name": "linux",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "6.16.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "linux"
+      },
+      "systems": null,
+      "upstream": "https://www.kernel.org/pub/linux/kernel/v{major}.x/linux-{version}.tar.xz",
+      "mirror": "linux-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://www.kernel.org/pub/linux/kernel/v{major}.x/sha256sums.asc",
+          "keyring": "kernel",
+          "clearsigned": true
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let linux_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "linuxVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const linuxVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "linux_version = \""
+        }
+      ]
+    },
+    {
+      "name": "m4",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "1.4.20",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "m4"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/m4/m4-{version}.tar.gz",
+      "mirror": "m4-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let m4_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "m4Version := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const m4Version = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "m4_version = \""
+        }
+      ]
+    },
+    {
+      "name": "make",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "4.4.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "make"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/make/make-{version}.tar.gz",
+      "mirror": "make-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let make_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "makeVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const makeVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "make_version = \""
+        }
+      ]
+    },
+    {
+      "name": "mpc",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "1.3.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "mpc"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/mpc/mpc-{version}.tar.gz",
+      "mirror": "mpc-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let mpc_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "mpcVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const mpcVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "mpc_version = \""
+        }
+      ]
+    },
+    {
+      "name": "mpfr",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "4.2.2",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "mpfr"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/mpfr/mpfr-{version}.tar.xz",
+      "mirror": "mpfr-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let mpfr_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "mpfrVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const mpfrVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "mpfr_version = \""
+        }
+      ]
+    },
+    {
+      "name": "ncurses",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "6.5-20250809",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "ncurses"
+      },
+      "systems": null,
+      "upstream": "https://invisible-mirror.net/archives/ncurses/current/ncurses-{version}.tgz",
+      "mirror": "ncurses-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "ncurses"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let ncurses_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "ncursesVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const ncursesVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "ncurses_version = \""
+        }
+      ]
+    },
+    {
+      "name": "openssl",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "3.5.2",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "openssl"
+      },
+      "systems": null,
+      "upstream": "https://github.com/openssl/openssl/releases/download/openssl-{version}/openssl-{version}.tar.gz",
+      "mirror": "openssl-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.asc",
+          "keyring": "openssl"
+        },
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let openssl_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "opensslVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const opensslVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "openssl_version = \""
+        }
+      ]
+    },
+    {
+      "name": "patch",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "2.8",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "patch"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/patch/patch-{version}.tar.gz",
+      "mirror": "patch-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let patch_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "patchVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const patchVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "patch_version = \""
+        }
+      ]
+    },
+    {
+      "name": "perl",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "5.42.0",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "perl"
+      },
+      "systems": null,
+      "upstream": "https://www.cpan.org/src/5.0/perl-{version}.tar.xz",
+      "mirror": "perl-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "sha256-sidecar",
+          "url": "{upstream}.sha256.txt"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let perl_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "perlVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const perlVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "perl_version = \""
+        }
+      ]
+    },
+    {
+      "name": "python",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "3.13.7",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "Python"
+      },
+      "systems": null,
+      "upstream": "https://www.python.org/ftp/python/{version}/Python-{version}.tar.xz",
+      "mirror": "Python-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "sha256-json",
+          "url": "{upstream}.spdx.json",
+          "filter": ".packages[] | select(.packageFileName == \"{file}\") | .checksums[] | select(.algorithm == \"SHA256\") | .checksumValue"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let python_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "pythonVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const pythonVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "python_version = \""
+        }
+      ]
+    },
+    {
+      "name": "sed",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "4.9",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "sed"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/sed/sed-{version}.tar.gz",
+      "mirror": "sed-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let sed_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "sedVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const sedVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "sed_version = \""
+        }
+      ]
+    },
+    {
+      "name": "tar",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "1.35",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "tar"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/tar/tar-{version}.tar.gz",
+      "mirror": "tar-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let tar_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "tarVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const tarVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "tar_version = \""
+        }
+      ]
+    },
+    {
+      "name": "texinfo",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "7.2",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "texinfo"
+      },
+      "systems": null,
+      "upstream": "https://ftp.gnu.org/gnu/texinfo/texinfo-{version}.tar.gz",
+      "mirror": "texinfo-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "gnu"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let texinfo_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "texinfoVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const texinfoVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "texinfo_version = \""
+        }
+      ]
+    },
+    {
+      "name": "unzip",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "upstream",
+      "version": "6.0",
+      "track": "book",
+      "latest": {
+        "method": "pinned",
+        "reason": "Info-ZIP UnZip 6.0 is the final release and BLFS no longer carries it; see ledger.json."
+      },
+      "systems": null,
+      "upstream": "https://downloads.sourceforge.net/infozip/unzip{nodot}.tar.gz",
+      "mirror": "unzip{nodot}.tar.gz",
+      "verify": [
+        {
+          "method": "book-md5",
+          "book": "https://www.linuxfromscratch.org/blfs/view/12.2-systemd/general/unzip.html"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://infozip.sourceforge.net/UnZip.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let unzip_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "unzipVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const unzipVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "unzip_version = \""
+        }
+      ]
+    },
+    {
+      "name": "unzip-patch-fixes",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "upstream",
+      "version": "6.0",
+      "track": "book",
+      "latest": {
+        "method": "pinned",
+        "reason": "Follows unzip; open ledger deviation."
+      },
+      "systems": null,
+      "upstream": "https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-consolidated_fixes-1.patch",
+      "mirror": "unzip-{version}-consolidated_fixes-1.patch",
+      "verify": [
+        {
+          "method": "book-md5",
+          "book": "https://www.linuxfromscratch.org/blfs/view/12.2-systemd/general/unzip.html"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/12.2-systemd/general/unzip.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let unzip_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "unzipVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const unzipVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "unzip_version = \""
+        }
+      ]
+    },
+    {
+      "name": "unzip-patch-gcc14",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "upstream",
+      "version": "6.0",
+      "track": "book",
+      "latest": {
+        "method": "pinned",
+        "reason": "Follows unzip; open ledger deviation."
+      },
+      "systems": null,
+      "upstream": "https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-gcc14-1.patch",
+      "mirror": "unzip-{version}-gcc14-1.patch",
+      "verify": [
+        {
+          "method": "book-md5",
+          "book": "https://www.linuxfromscratch.org/blfs/view/12.2-systemd/general/unzip.html"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/blfs/view/12.2-systemd/general/unzip.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let unzip_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "unzipVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const unzipVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "unzip_version = \""
+        }
+      ]
+    },
+    {
+      "name": "util-linux",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "2.41.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "util-linux"
+      },
+      "systems": null,
+      "upstream": "https://www.kernel.org/pub/linux/utils/util-linux/v{minor}/util-linux-{version}.tar.xz",
+      "mirror": "util-linux-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "sha256-list",
+          "url": "https://www.kernel.org/pub/linux/utils/util-linux/v{minor}/sha256sums.asc",
+          "keyring": "kernel",
+          "clearsigned": true
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let util_linux_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "utilLinuxVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const utilLinuxVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "util_linux_version = \""
+        }
+      ]
+    },
+    {
+      "name": "xz",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "5.8.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "xz"
+      },
+      "systems": null,
+      "upstream": "https://github.com/tukaani-project/xz/releases/download/v{version}/xz-{version}.tar.xz",
+      "mirror": "xz-{version}.tar.xz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "{upstream}.sig",
+          "keyring": "xz"
+        },
+        {
+          "method": "github-asset-digest",
+          "repo": "tukaani-project/xz",
+          "tag": "v{version}"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let xz_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "xzVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const xzVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "xz_version = \""
+        }
+      ]
+    },
+    {
+      "name": "zlib",
+      "kind": "linux-vorpal",
+      "groups": [
+        "system"
+      ],
+      "book": "lfs",
+      "version": "1.3.1",
+      "track": "book",
+      "latest": {
+        "method": "lfs",
+        "package": "zlib"
+      },
+      "systems": null,
+      "upstream": "https://zlib.net/fossils/zlib-{version}.tar.gz",
+      "mirror": "zlib-{version}.tar.gz",
+      "verify": [
+        {
+          "method": "gpg",
+          "signature": "https://github.com/madler/zlib/releases/download/v{version}/zlib-{version}.tar.gz.asc",
+          "keyring": "zlib"
+        },
+        {
+          "method": "book-md5"
+        }
+      ],
+      "parity": [
+        "vorpal",
+        "vorpal-container-image",
+        "vorpal-job",
+        "vorpal-process",
+        "vorpal-shell",
+        "vorpal-user",
+        "vorpal-website"
+      ],
+      "authority": "https://www.linuxfromscratch.org/lfs/view/stable-systemd/chapter03/packages.html",
+      "pins": [
+        {
+          "file": "sdk/rust/src/artifact/linux_vorpal.rs",
+          "marker": "let zlib_version = \""
+        },
+        {
+          "file": "sdk/go/pkg/artifact/linux_vorpal_build.go",
+          "marker": "zlibVersion := \""
+        },
+        {
+          "file": "sdk/typescript/src/artifact/linux_vorpal/linux_vorpal.ts",
+          "marker": "const zlibVersion = \""
+        },
+        {
+          "file": "sdk/python/src/vorpal_sdk/artifact/linux_vorpal/linux_vorpal.py",
+          "marker": "zlib_version = \""
+        }
+      ]
+    }
+  ],
+  "provenance_exemptions": [
+    {
+      "key": "unzip-6.0-consolidated_fixes-1.patch",
+      "reason": "BLFS prints no MD5 for this patch, so its authority cannot verify. Ends when the open UnZip deviation closes."
+    },
+    {
+      "key": "unzip-6.0-gcc14-1.patch",
+      "reason": "BLFS prints no MD5 for this patch, so its authority cannot verify. Ends when the open UnZip deviation closes."
+    }
+  ]
+}

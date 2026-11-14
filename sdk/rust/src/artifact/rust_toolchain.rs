@@ -32,7 +32,7 @@ pub fn target(system: ArtifactSystem) -> Result<String> {
 /// Canonical pin for the build-target Rust toolchain version.
 #[must_use]
 pub fn version() -> String {
-    "1.93.1".to_string()
+    "1.100.0".to_string()
 }
 
 /// Assembles the build-target Rust toolchain (`cargo`, `clippy`, `rust-analyzer`, `rust-src`,

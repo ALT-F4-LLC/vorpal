@@ -14,7 +14,7 @@ from vorpal_sdk.system import SYSTEMS, get_system_str
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
 
-DEFAULT_BUN_VERSION = "1.3.10"
+DEFAULT_BUN_VERSION = "1.4.4"
 
 
 class Bun:

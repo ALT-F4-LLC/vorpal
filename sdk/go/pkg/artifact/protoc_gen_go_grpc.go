@@ -9,7 +9,7 @@ import (
 
 func ProtocGenGoGRPC(context *config.ConfigContext) (*string, error) {
 	name := "protoc-gen-go-grpc"
-	version := "1.79.1"
+	version := "1.85.0"
 
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-gen-go-grpc-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()

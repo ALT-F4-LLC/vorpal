@@ -14,7 +14,7 @@ from vorpal_sdk.system import SYSTEMS, get_system_str
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
 
-DEFAULT_GH_VERSION = "2.87.3"
+DEFAULT_GH_VERSION = "2.104.0"
 
 
 class Gh:

@@ -33,7 +33,7 @@ export class NodeJS {
         throw new Error(`unsupported ${name} system: ${system}`);
     }
 
-    const sourceVersion = "22.22.0";
+    const sourceVersion = "26.13.1";
     const sourcePath = `https://sdk.vorpal.build/source/node-v${sourceVersion}-${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();

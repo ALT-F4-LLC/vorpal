@@ -23,7 +23,7 @@ impl Rsync {
     /// Returns an error if registering the source or artifact with the build context fails.
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "rsync";
-        let version = "3.4.1";
+        let version = "3.5.2";
 
         let path = format!("https://sdk.vorpal.build/source/rsync-{version}.tar.gz");
         let source = ArtifactSource::new(name, &path).build();

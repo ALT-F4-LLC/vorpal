@@ -8,7 +8,7 @@ readonly SCRIPT_PATH="${PWD}/script"
 scripts=("rustup" "protoc")
 
 if [[ "${CI:-}" != "true" ]]; then
-    scripts=("xz" "amber" "${scripts[@]}" "lima" "terraform")
+    scripts=("xz" "${scripts[@]}" "lima" "terraform")
 fi
 
 if [[ "$(uname -s)" == "Linux" ]]; then

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 # Canonical conforming copy of the build-target uv toolchain pin (Astral release).
 # Byte-equal to the Rust canonical (ADR 0001 Part B).
-DEFAULT_UV_VERSION = "0.10.11"
+DEFAULT_UV_VERSION = "0.13.8"
 
 
 class Uv:

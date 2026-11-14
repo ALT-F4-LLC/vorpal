@@ -22,7 +22,7 @@ class ProtocGenGoGrpc:
         from vorpal_sdk.artifact.language.go import Go
 
         name = "protoc-gen-go-grpc"
-        source_version = "1.79.1"
+        source_version = "1.85.0"
         source_path = (
             f"https://sdk.vorpal.build/source/"
             f"protoc-gen-go-grpc-v{source_version}.tar.gz"
