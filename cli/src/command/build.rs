@@ -896,13 +896,12 @@ pub async fn run(
         load_lock(&lock_path)
             .await
             .unwrap_or(None)
-            .map(|lock| {
+            .map_or_default(|lock| {
                 lock.sources
                     .into_iter()
                     .map(|s| ((s.name, s.platform), s.digest))
                     .collect()
             })
-            .unwrap_or_default()
     } else {
         HashMap::new()
     };
