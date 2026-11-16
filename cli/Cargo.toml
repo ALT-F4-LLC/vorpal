@@ -22,7 +22,7 @@ clap = { version = "4.5.57", features = ["derive", "env"] }
 filetime = { version = "0.2.27" }
 fs4 = { version = "0.13.1" }
 futures-lite = { version = "2.6.1" }
-infer = { version = "0.19.0" }
+infer = { version = "0.22.0" }
 inquire = { version = "0.9.2" }
 jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
 liblzma = { version = "0.4.6", features = ["static"] }
