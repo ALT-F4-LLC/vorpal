@@ -4181,7 +4181,7 @@ dependencies = [
  "aws-config",
  "aws-lc-rs",
  "aws-sdk-s3",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "clap",
  "filetime",
@@ -4237,7 +4237,7 @@ name = "vorpal-sdk"
 version = "0.6.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "http 1.5.0",
  "hyper-util",
