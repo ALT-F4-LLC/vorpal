@@ -1,15 +1,27 @@
+/*
+ * Digest theme. Graphite neutrals with the Vorpal violet as the one signal
+ * color, plus a cyan for "data in motion" in diagrams. Geist for prose,
+ * Geist Mono for everything a machine produced.
+ */
 :root {
-	--sl-color-accent-low: #1a1a2e;
-	--sl-color-accent: #6c63ff;
-	--sl-color-accent-high: #b8b5ff;
-	--sl-color-white: #ffffff;
-	--sl-color-gray-1: #eceef2;
-	--sl-color-gray-2: #c0c2c7;
-	--sl-color-gray-3: #888b96;
-	--sl-color-gray-4: #545861;
-	--sl-color-gray-5: #353841;
-	--sl-color-gray-6: #24272f;
-	--sl-color-black: #17181c;
+	--sl-font: 'Geist Variable', 'Inter', system-ui, sans-serif;
+	--sl-font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+	--sl-color-accent-low: #1d1a3d;
+	--sl-color-accent: #8b80ff;
+	--sl-color-accent-high: #c4beff;
+	--sl-color-white: #f2f3f7;
+	--sl-color-gray-1: #e1e4ea;
+	--sl-color-gray-2: #b9bfcc;
+	--sl-color-gray-3: #8a91a3;
+	--sl-color-gray-4: #4a5163;
+	--sl-color-gray-5: #242a36;
+	--sl-color-gray-6: #141821;
+	--sl-color-black: #0d0f14;
+
+	--vp-panel: #141821;
+	--vp-line: #242a36;
+	--vp-signal-2: #5ee0ff;
 }
 
 @media (min-width: 50rem) {
@@ -26,10 +38,6 @@
 		max-width: 100%;
 		width: 100%;
 	}
-}
-
-.hero {
-	padding-block: 5rem !important;
 }
 
 [data-page-type='splash'] .sl-markdown-content {
@@ -246,15 +254,93 @@
 }
 
 :root[data-theme='light'] {
-	--sl-color-accent-low: #e8e7ff;
-	--sl-color-accent: #6c63ff;
-	--sl-color-accent-high: #2d2680;
-	--sl-color-white: #17181c;
-	--sl-color-gray-1: #24272f;
-	--sl-color-gray-2: #353841;
-	--sl-color-gray-3: #545861;
-	--sl-color-gray-4: #888b96;
-	--sl-color-gray-5: #c0c2c7;
-	--sl-color-gray-6: #eceef2;
-	--sl-color-black: #ffffff;
+	--sl-color-accent-low: #e8e6ff;
+	--sl-color-accent: #5a4ff0;
+	--sl-color-accent-high: #3a2fc4;
+	--sl-color-white: #0d0f14;
+	--sl-color-gray-1: #232733;
+	--sl-color-gray-2: #3a3f4d;
+	--sl-color-gray-3: #5f6576;
+	--sl-color-gray-4: #a3a8b6;
+	--sl-color-gray-5: #dfe1e8;
+	--sl-color-gray-6: #f1f2f6;
+	--sl-color-black: #fbfbfd;
+
+	--vp-panel: #f4f5f8;
+	--vp-line: #dfe1e8;
+	--vp-signal-2: #0891b2;
+}
+
+/* Digest chrome */
+
+.header {
+	border-bottom: 1px solid var(--vp-line);
+	background-color: var(--sl-color-black);
+}
+
+.site-title {
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	color: var(--sl-color-white);
+}
+
+site-search button[data-open-modal] {
+	font-family: var(--sl-font-mono);
+	font-size: var(--sl-text-xs);
+	background-color: var(--vp-panel);
+	border-color: var(--vp-line);
+	border-radius: 8px;
+}
+
+.sidebar-pane {
+	border-inline-end: 1px solid var(--vp-line);
+}
+
+.sidebar-content .group-label .large {
+	font-family: var(--sl-font-mono);
+	font-size: 0.7rem;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--sl-color-gray-3);
+}
+
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+	background-color: transparent;
+	color: var(--sl-color-white);
+	font-weight: 600;
+	box-shadow: inset 2px 0 0 var(--sl-color-accent);
+}
+
+.content-panel + .content-panel {
+	border-top-color: var(--vp-line);
+}
+
+.sl-markdown-content :is(h2, h3) {
+	letter-spacing: -0.02em;
+}
+
+.sl-markdown-content :not(pre) > code {
+	background-color: var(--vp-panel);
+	border: 1px solid var(--vp-line);
+	border-radius: 4px;
+}
+
+.sl-link-button.primary {
+	background-color: var(--sl-color-white);
+	border-color: var(--sl-color-white);
+	color: var(--sl-color-black);
+	border-radius: 8px;
+}
+
+.sl-link-button.minimal {
+	border-radius: 8px;
+}
+
+.card {
+	border-color: var(--vp-line);
+	border-radius: 12px;
+	background-color: var(--vp-panel);
 }

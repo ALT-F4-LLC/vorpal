@@ -1,0 +1,61 @@
+---
+/**
+ * Page title with a content sigil. The sigil and short digest are derived
+ * from the SHA-256 of the page's source, so they change whenever the page
+ * changes, the same way an artifact's digest follows its inputs.
+ */
+import Sigil from '../Sigil.astro';
+import { sha256 } from '../../lib/sigil';
+
+// Starlight's internal PAGE_TITLE_ID, which its skip link targets.
+const PAGE_TITLE_ID = '_top';
+
+const { entry, headings } = Astro.locals.starlightRoute;
+const digest = sha256(`${entry.id}\n${entry.body ?? ''}`);
+const short = `${digest.slice(0, 8)}…${digest.slice(-4)}`;
+const sections = headings.filter((h) => h.depth === 2).length;
+---
+
+<div class="vp-title">
+	<Sigil digest={digest} size={48} />
+	<h1 id={PAGE_TITLE_ID}>{entry.data.title}</h1>
+</div>
+<div class="vp-meta" aria-label="Page details">
+	<span title={`sha256:${digest}`}>page <b>sha256:{short}</b></span>
+	{sections > 0 && <span>sections <b>{sections}</b></span>}
+</div>
+
+<style>
+	.vp-title {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 1rem;
+	}
+	h1 {
+		font-size: var(--sl-text-h1);
+		line-height: var(--sl-line-height-headings);
+		font-weight: 650;
+		letter-spacing: -0.025em;
+		color: var(--sl-color-white);
+		margin: 0;
+	}
+	.vp-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-top: 0.9rem;
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+	}
+	.vp-meta span {
+		border: 1px solid var(--vp-line);
+		border-radius: 5px;
+		padding: 0.1rem 0.45rem;
+		color: var(--sl-color-gray-3);
+	}
+	.vp-meta b {
+		color: var(--sl-color-white);
+		font-weight: 500;
+	}
+</style>

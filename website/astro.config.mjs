@@ -78,7 +78,7 @@ export default defineConfig({
 					tag: 'script',
 					attrs: { type: 'module' },
 					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+mermaid.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === 'light' ? 'neutral' : 'dark' });
 document.querySelectorAll('pre[data-language="mermaid"]').forEach((pre) => {
   const ec = pre.closest('.expressive-code');
   const lines = pre.querySelectorAll('.ec-line');
@@ -98,7 +98,15 @@ await mermaid.run({ querySelector: '.mermaid' });`,
 					href: 'https://github.com/ALT-F4-LLC/vorpal',
 				},
 			],
-			customCss: ['./src/styles/custom.css'],
+			customCss: [
+				'@fontsource-variable/geist',
+				'@fontsource-variable/geist-mono',
+				'./src/styles/custom.css',
+			],
+			components: {
+				Hero: './src/components/overrides/Hero.astro',
+				PageTitle: './src/components/overrides/PageTitle.astro',
+			},
 			sidebar: [
 				{
 					label: 'Getting Started',

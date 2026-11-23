@@ -1,0 +1,176 @@
+---
+/**
+ * Live architecture graph: your config, the CLI and the three services, with
+ * requests pulsing along the edges. It is plain SVG, so it renders and themes
+ * without JavaScript; the pulses use SMIL and are hidden under reduced motion.
+ * Hovering or focusing a node highlights it and its edges.
+ */
+type Node = { id: string; label: string; note: string; x: number; y: number };
+
+const nodes: Node[] = [
+	{ id: 'config', label: 'Your config', note: 'Go, Python, Rust, TS', x: 92, y: 150 },
+	{ id: 'cli', label: 'Vorpal CLI', note: 'compiles, orchestrates', x: 318, y: 150 },
+	{ id: 'agent', label: 'Agent', note: 'hashes sources', x: 520, y: 50 },
+	{ id: 'worker', label: 'Worker', note: 'runs build steps', x: 520, y: 250 },
+	{ id: 'registry', label: 'Registry', note: 'archives, artifacts', x: 712, y: 150 },
+];
+
+// Edges follow the Services section: the CLI drives all three services, the
+// Agent pushes source archives to the Registry, and the Worker pulls from and
+// pushes to it.
+const edges: [string, string, string][] = [
+	['config', 'cli', ''],
+	['cli', 'agent', ''],
+	['cli', 'worker', ''],
+	['cli', 'registry', ''],
+	['agent', 'registry', 'push sources'],
+	['worker', 'registry', 'pull · push'],
+];
+
+const N = Object.fromEntries(nodes.map((n) => [n.id, n]));
+const path = (a: string, b: string) => `M${N[a].x} ${N[a].y} L${N[b].x} ${N[b].y}`;
+// Pulse timing per edge so the flow reads config → cli → services → registry.
+const timing: Record<string, string> = {
+	'config-cli': '0s',
+	'cli-agent': '0.9s',
+	'cli-worker': '1.4s',
+	'cli-registry': '1.1s',
+	'agent-registry': '1.9s',
+	'worker-registry': '2.4s',
+};
+---
+
+<figure class="vp-graph" aria-label="Vorpal architecture: your config talks to the Vorpal CLI over gRPC through the SDK. The CLI drives the Agent, Worker and Registry services. The Agent pushes sources to the Registry, and the Worker pulls from and pushes to the Registry.">
+	<div class="scroll">
+		<svg viewBox="0 0 800 300" role="img" aria-hidden="true">
+			<defs>
+				<radialGradient id="vp-pulse">
+					<stop offset="0" stop-color="var(--vp-signal-2)" stop-opacity="1"></stop>
+					<stop offset="1" stop-color="var(--vp-signal-2)" stop-opacity="0"></stop>
+				</radialGradient>
+			</defs>
+			{
+				edges.map(([a, b, label]) => (
+					<g class="edge" data-a={a} data-b={b}>
+						<path id={`vp-e-${a}-${b}`} d={path(a, b)} />
+						{label && (
+							<text x={(N[a].x + N[b].x) / 2} y={(N[a].y + N[b].y) / 2 - 8} text-anchor="middle">
+								{label}
+							</text>
+						)}
+					</g>
+				))
+			}
+			<g class="pulses">
+				{
+					edges.map(([a, b]) => (
+						<circle r="9" fill="url(#vp-pulse)">
+							<animateMotion dur="1.2s" begin={timing[`${a}-${b}`]} repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+								<mpath href={`#vp-e-${a}-${b}`} />
+							</animateMotion>
+						</circle>
+					))
+				}
+			</g>
+			{
+				nodes.map((n) => (
+					<g class="node" data-id={n.id} tabindex="0" transform={`translate(${n.x} ${n.y})`}>
+						<rect x="-80" y="-25" width="160" height="50" rx="12" />
+						<text class="label" y="-2" text-anchor="middle">{n.label}</text>
+						<text class="note" y="14" text-anchor="middle">{n.note}</text>
+					</g>
+				))
+			}
+		</svg>
+	</div>
+	<figcaption>Your config reaches the CLI through the SDK. Every hop is gRPC, and the three services run in one <code>vorpal</code> process.</figcaption>
+</figure>
+
+<script>
+	for (const fig of document.querySelectorAll<HTMLElement>('.vp-graph')) {
+		const edges = [...fig.querySelectorAll<SVGGElement>('.edge')];
+		const set = (id: string | null) => {
+			fig.classList.toggle('has-focus', Boolean(id));
+			for (const e of edges) e.classList.toggle('on', id !== null && (e.dataset.a === id || e.dataset.b === id));
+			for (const n of fig.querySelectorAll<SVGGElement>('.node')) n.classList.toggle('on', n.dataset.id === id);
+		};
+		for (const n of fig.querySelectorAll<SVGGElement>('.node')) {
+			n.addEventListener('mouseenter', () => set(n.dataset.id ?? null));
+			n.addEventListener('focus', () => set(n.dataset.id ?? null));
+			n.addEventListener('mouseleave', () => set(null));
+			n.addEventListener('blur', () => set(null));
+		}
+	}
+</script>
+
+<style>
+	.vp-graph {
+		margin-block: 1.5rem;
+		border: 1px solid var(--vp-line);
+		border-radius: 14px;
+		background:
+			radial-gradient(600px 220px at 70% 0%, color-mix(in oklab, var(--sl-color-accent) 18%, transparent), transparent 70%),
+			var(--vp-panel);
+		overflow: hidden;
+	}
+	.scroll {
+		overflow-x: auto;
+	}
+	svg {
+		display: block;
+		width: 100%;
+		min-width: 560px;
+		height: auto;
+		padding: 0.75rem;
+	}
+	.edge path {
+		fill: none;
+		stroke: var(--sl-color-gray-4);
+		stroke-width: 1.4;
+		transition: stroke 0.2s, opacity 0.2s;
+	}
+	.edge text {
+		font: 500 11px var(--sl-font-mono);
+		fill: var(--sl-color-gray-3);
+	}
+	.node {
+		cursor: default;
+		outline: none;
+	}
+	.node rect {
+		fill: var(--sl-color-black);
+		stroke: var(--sl-color-gray-4);
+		stroke-width: 1.2;
+		transition: stroke 0.2s, fill 0.2s;
+	}
+	.node .label {
+		font: 600 14px var(--sl-font);
+		fill: var(--sl-color-white);
+	}
+	.node .note {
+		font: 400 10px var(--sl-font-mono);
+		fill: var(--sl-color-gray-3);
+	}
+	.node.on rect,
+	.node:focus-visible rect {
+		stroke: var(--vp-signal-2);
+		stroke-width: 2;
+	}
+	.has-focus .edge:not(.on) path {
+		opacity: 0.3;
+	}
+	.edge.on path {
+		stroke: var(--vp-signal-2);
+	}
+	figcaption {
+		padding: 0.6rem 1rem;
+		border-top: 1px solid var(--vp-line);
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.pulses {
+			display: none;
+		}
+	}
+</style>
