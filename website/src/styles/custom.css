@@ -177,72 +177,27 @@
 	outline-offset: 2px;
 }
 
-.sdk-carousel-panels {
-	position: relative;
+.sdk-carousel-panel[hidden] {
+	display: none;
 }
 
-.sdk-carousel-panel {
-	opacity: 1;
-	position: relative;
+@media (prefers-reduced-motion: no-preference) {
+	.sdk-carousel--active .sdk-carousel-panel.active {
+		animation: sdk-carousel-fade-in 200ms ease;
+	}
 }
 
-.sdk-carousel--active .sdk-carousel-panel {
-	opacity: 0;
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	pointer-events: none;
-	transition: opacity 200ms ease;
-}
-
-.sdk-carousel--active .sdk-carousel-panel.active {
-	opacity: 1;
-	position: relative;
-	pointer-events: auto;
-	z-index: 1;
-}
-
-.sdk-carousel--active .sdk-carousel-panel--exiting {
-	opacity: 0;
-}
-
-.sdk-carousel-dots {
-	display: flex;
-	justify-content: center;
-	gap: 8px;
-	margin-top: 1.5rem;
-}
-
-.sdk-carousel-dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	border: 2px solid var(--sl-color-gray-4);
-	background: transparent;
-	padding: 0;
-	cursor: default;
-}
-
-.sdk-carousel-dot.active {
-	background: var(--sl-color-accent);
-	border-color: var(--sl-color-accent);
+@keyframes sdk-carousel-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 .sdk-carousel:not(.sdk-carousel--active) .sdk-carousel-tabs {
 	display: none;
-}
-
-.sdk-carousel:not(.sdk-carousel--active) .sdk-carousel-dots {
-	display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.sdk-carousel,
-	.sdk-carousel *,
-	.sdk-carousel--active .sdk-carousel-panel {
-		transition-duration: 0ms !important;
-	}
 }
 
 :root[data-theme='light'] {
