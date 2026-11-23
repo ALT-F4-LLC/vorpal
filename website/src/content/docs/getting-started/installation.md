@@ -3,7 +3,7 @@ title: Installation
 description: Install Vorpal on macOS or Linux and get the background services running.
 ---
 
-Vorpal provides a single install script that downloads the latest release, generates TLS keys for secure communication between components, and starts the background services.
+Vorpal provides a single install script that downloads a Vorpal release (`0.6.0` unless you choose another version), generates TLS keys for secure communication between components, and starts the background services.
 
 ## Requirements
 
@@ -41,12 +41,16 @@ The installer accepts the following flags. When piping through `curl`, pass flag
 | Flag | Description |
 |------|-------------|
 | `-y`, `--yes` | Run in non-interactive mode (skip prompts) |
-| `-v`, `--version <ver>` | Version to install (default: `nightly`) |
+| `-v`, `--version <ver>` | Version to install (default: `0.6.0`) |
 | `--services <list>` | Comma-separated services to install (default: `agent,registry,worker`) |
 | `--no-service` | Skip service installation |
 | `--no-path` | Skip PATH configuration |
 | `--dry-run` | Show what would be done without making changes |
 | `--uninstall` | Uninstall Vorpal |
+| `--issuer <url>` | OIDC issuer URL, passed to the services as `--issuer` |
+| `--issuer-audience <value>` | OIDC issuer audience, passed to the services as `--issuer-audience` |
+| `--issuer-client-id <value>` | OIDC client ID, passed to the services as `--issuer-client-id` |
+| `--issuer-client-secret <value>` | OIDC client secret for the services (see below) |
 | `-h`, `--help` | Show the help message |
 
 For example, to install only the agent and worker services:
@@ -58,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/insta
 To install a specific version without starting any services:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version v0.6.0 --no-service
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version 0.6.0 --no-service
 ```
 
 #### Environment variables
@@ -74,9 +78,15 @@ As an alternative, the installer also accepts environment variables. These are u
 | `VORPAL_NO_SERVICE=1` | Skip service installation |
 | `VORPAL_NO_PATH=1` | Skip PATH configuration |
 | `VORPAL_DRY_RUN=1` | Show what would be done without making changes |
+| `VORPAL_ISSUER=<url>` | OIDC issuer URL |
+| `VORPAL_ISSUER_AUDIENCE=<value>` | OIDC issuer audience |
+| `VORPAL_ISSUER_CLIENT_ID=<value>` | OIDC client ID |
+| `VORPAL_ISSUER_CLIENT_SECRET=<value>` | OIDC client secret |
 | `NO_COLOR=1` | Disable color output |
 
 Note that `CI` and `NO_COLOR` are environment-variable-only options with no flag equivalents. Conversely, `--uninstall` and `--help` are flag-only with no environment variable equivalents.
+
+The installer adds each issuer option you set to the service definition it writes (the LaunchAgent on macOS, the systemd unit on Linux). If the installed binary supports `--issuer-client-secret-file`, the installer writes the client secret to `/var/lib/vorpal/key/issuer-client-secret` (mode `0600`) and passes the file path, so the service definition does not contain the secret. Older binaries receive the secret value on the service command line. See [`vorpal system services start`](/reference/cli/#vorpal-system-services-start) for what each option does.
 
 For example, using environment variables:
 

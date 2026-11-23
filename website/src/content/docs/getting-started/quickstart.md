@@ -18,10 +18,10 @@ The `init` command prompts you to choose a language for your build configuration
 
 ## 2. Develop your project
 
-All `vorpal init` projects include a language-specific development environment with the relevant toolchain pinned and ready. Activate it:
+All `vorpal init` projects include a language-specific development environment with the relevant toolchain pinned and ready. `init` names it after your project with a `-dev` suffix, so here it is `hello-world-dev`. Activate it:
 
 ```bash
-source $(vorpal build --path hello-world-shell)/bin/activate
+source "$(vorpal build --path hello-world-dev)/bin/activate"
 ```
 
 This drops you into a shell with your project's dependencies available -- consistent across machines and teammates. To exit the environment, run `deactivate` or close the shell.
@@ -65,6 +65,20 @@ The Vorpal store is immutable. Do not modify, add, or remove files in the artifa
 :::
 
 This is useful for inspecting build output, copying files into a deployment pipeline, or verifying that your artifact contains the expected structure.
+
+## 5. Run your program
+
+The artifact's executable is in its `bin` directory, named after your project. Run it:
+
+```bash
+$(vorpal build --path hello-world)/bin/hello-world
+```
+
+The sample program from `vorpal init` prints:
+
+```text
+Hello, world!
+```
 
 ## Next steps
 

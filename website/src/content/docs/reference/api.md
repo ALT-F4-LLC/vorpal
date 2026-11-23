@@ -3,7 +3,7 @@ title: API Reference
 description: Vorpal gRPC/Protobuf API reference for SDK authors and service integrators.
 ---
 
-Vorpal services communicate via gRPC using Protocol Buffers. This reference documents the five service definitions that compose the Vorpal API. SDK authors use these definitions to generate client and server code in Rust, Go, and TypeScript.
+Vorpal services communicate via gRPC using Protocol Buffers. This reference documents the five service definitions that compose the Vorpal API. SDK authors use these definitions to generate client and server code in Rust, Go, Python, and TypeScript.
 
 Proto source files are located at `sdk/rust/api/` in the repository.
 
@@ -14,6 +14,7 @@ Proto source files are located at `sdk/rust/api/` in the repository.
 | Rust | `tonic-prost-build` via `sdk/rust/build.rs` | Inline (generated at build time) |
 | Go | `protoc` + `protoc-gen-go` / `protoc-gen-go-grpc` | `sdk/go/pkg/api/` |
 | TypeScript | `ts-proto` | `sdk/typescript/src/api/` |
+| Python | `grpcio-tools` (`python -m grpc_tools.protoc`) | `sdk/python/src/vorpal_sdk/api/` |
 
 Regenerate all generated code with `make generate`.
 

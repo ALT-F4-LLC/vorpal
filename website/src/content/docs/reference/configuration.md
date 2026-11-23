@@ -3,7 +3,7 @@ title: Configuration
 description: Complete reference for Vorpal configuration files, keys, and resolution.
 ---
 
-Vorpal uses a layered configuration system. Settings are resolved from three sources in order of precedence (highest to lowest):
+Vorpal uses a layered configuration system. Settings are resolved from four sources in order of precedence (highest to lowest):
 
 1. **CLI flags** -- Explicit flags on the command line
 2. **Project config** -- `Vorpal.toml` in the project root
@@ -20,7 +20,7 @@ These keys control how the CLI connects to services and resolves builds.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `language` | string | `"rust"` | Build configuration language (`rust`, `go`, or `typescript`) |
+| `language` | string | `"rust"` | Build configuration language (`rust`, `go`, `python`, or `typescript`) |
 | `name` | string | `"vorpal"` | Name of the configuration binary to build |
 | `namespace` | string | `"library"` | Artifact namespace for storage and isolation |
 | `registry` | string | `"unix:///var/lib/vorpal/vorpal.sock"` | Registry service address |
@@ -62,6 +62,15 @@ TypeScript-specific source configuration.
 | `entrypoint` | string | TypeScript entrypoint file (default: `src/<name>.ts`) |
 | `directory` | string | Working directory for the TypeScript build |
 
+### `[source.python]` Section
+
+Python-specific source configuration.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `entrypoint` | string | Python entrypoint file (default: `src/<name>.py`) |
+| `directory` | string | Working directory for the Python build |
+
 ### `environments` Key
 
 | Key | Type | Description |
@@ -99,6 +108,24 @@ includes = ["sdk/go"]
 
 [source.go]
 directory = "sdk/go/cmd/vorpal"
+```
+
+#### Python Configuration
+
+```toml
+language = "python"
+
+[source]
+includes = [
+    "sdk/python/src",
+    "sdk/python/pyproject.toml",
+    "sdk/python/uv.lock",
+    "sdk/python/README.md"
+]
+
+[source.python]
+directory = "sdk/python"
+entrypoint = "src/vorpal_sdk/vorpal.py"
 ```
 
 #### TypeScript Configuration
