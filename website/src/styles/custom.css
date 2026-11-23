@@ -1,6 +1,9 @@
 :root {
 	--sl-color-accent-low: #1a1a2e;
-	--sl-color-accent: #6c63ff;
+	/* Dark accent: white text on it is 4.88:1, and as a border or focus ring
+	   it is 3.64:1 on --sl-color-black. Text on dark backgrounds uses
+	   --sl-color-text-accent (accent-high), not this value. */
+	--sl-color-accent: #6057ff;
 	--sl-color-accent-high: #b8b5ff;
 	--sl-color-white: #ffffff;
 	--sl-color-gray-1: #eceef2;
@@ -140,7 +143,7 @@
 }
 
 .cta-actions .minimal {
-	color: var(--sl-color-accent);
+	color: var(--sl-color-text-accent);
 	padding: 0.75rem 1.5rem;
 	font-weight: 600;
 }
@@ -247,7 +250,9 @@
 
 :root[data-theme='light'] {
 	--sl-color-accent-low: #e8e7ff;
-	--sl-color-accent: #6c63ff;
+	/* Light accent: 5.93:1 on white (links, focus rings) and white on it
+	   (sidebar current page, primary buttons, 4.96:1 at 90% hover opacity). */
+	--sl-color-accent: #4d42ff;
 	--sl-color-accent-high: #2d2680;
 	--sl-color-white: #17181c;
 	--sl-color-gray-1: #24272f;
