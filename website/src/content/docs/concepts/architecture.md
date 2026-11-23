@@ -11,6 +11,8 @@ Vorpal consists of three layers that work together to turn your build configurat
 
 ```mermaid
 flowchart TD
+    accTitle: Vorpal architecture
+    accDescr: Your config, written as Rust, Go, Python or TypeScript code, reaches the Vorpal CLI through the SDK. The CLI connects to three services: the Agent, the Worker and the Registry.
     Config["Your Config\n(Rust / Go / Python / TS code)"]
     Config -->|SDK| CLI["Vorpal CLI"]
     CLI --> Agent["Agent Service"]

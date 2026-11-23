@@ -78,20 +78,63 @@ export default defineConfig({
 					});`,
 				},
 				{
+					// Render ```mermaid code blocks as diagrams in the browser.
+					// - Exact version: a floating `mermaid@11` could change rendering
+					//   under us. Bump deliberately after checking the diagrams.
+					// - Theme follows Starlight's resolved theme
+					//   (`<html data-theme="light|dark">`) and re-renders on toggle.
+					// - Text equivalent: each diagram's source sets `accTitle` and
+					//   `accDescr`, which Mermaid writes into the SVG as <title> and
+					//   <desc>, referenced by aria-labelledby/aria-describedby.
+					// - If Mermaid fails to load or a diagram fails to parse, the code
+					//   block stays visible, so the source remains readable.
 					tag: 'script',
 					attrs: { type: 'module' },
-					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-mermaid.initialize({ startOnLoad: false, theme: 'dark' });
-document.querySelectorAll('pre[data-language="mermaid"]').forEach((pre) => {
-  const ec = pre.closest('.expressive-code');
-  const lines = pre.querySelectorAll('.ec-line');
-  const text = Array.from(lines).map((l) => l.textContent).join('\\n');
+					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
+const theme = () => (document.documentElement.dataset.theme === 'light' ? 'default' : 'dark');
+const diagrams = Array.from(document.querySelectorAll('pre[data-language="mermaid"]'), (pre) => {
+  const block = pre.closest('.expressive-code') ?? pre;
+  const source = Array.from(pre.querySelectorAll('.ec-line'), (l) => l.textContent).join('\\n');
   const div = document.createElement('div');
-  div.classList.add('mermaid');
-  div.textContent = text;
-  if (ec) { ec.after(div); ec.style.display = 'none'; } else { pre.after(div); pre.style.display = 'none'; }
+  div.className = 'mermaid';
+  div.hidden = true;
+  block.after(div);
+  return { block, div, source };
 });
-await mermaid.run({ querySelector: '.mermaid' });`,
+let rendered = '';
+let count = 0;
+async function render() {
+  const next = theme();
+  if (next === rendered) return;
+  rendered = next;
+  // The dark theme's edge-label background leaves its #ccc text at 4.43:1;
+  // the page background brings it above 4.5:1.
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: next,
+    themeVariables: next === 'dark' ? { edgeLabelBackground: '#17181c' } : {},
+  });
+  for (const d of diagrams) {
+    try {
+      const { svg, bindFunctions } = await mermaid.render('vorpal-mermaid-' + count++, d.source);
+      d.div.innerHTML = svg;
+      bindFunctions?.(d.div);
+      d.div.hidden = false;
+      d.block.style.display = 'none';
+    } catch (error) {
+      console.error('Mermaid could not render a diagram; showing its source.', error);
+    }
+  }
+}
+let queue = Promise.resolve();
+const schedule = () => (queue = queue.then(render));
+if (diagrams.length) {
+  schedule();
+  new MutationObserver(schedule).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
+}`,
 				},
 			],
 			social: [
