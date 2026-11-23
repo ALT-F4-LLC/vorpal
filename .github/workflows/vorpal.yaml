@@ -917,7 +917,7 @@ jobs:
     environment:
       name: prod
       url: https://docs.vorpal.build
-    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs:
       - test-artifact-secrets
       - release-gate-check
