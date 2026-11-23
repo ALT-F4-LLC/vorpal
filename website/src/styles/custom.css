@@ -94,22 +94,24 @@
 	padding: 0;
 }
 
+/* minmax(0, 1fr): a plain 1fr column cannot shrink below a card's
+   min-content width (its code block), which overflowed the page at 320px. */
 .landing-section .card-grid {
-	grid-template-columns: 1fr !important;
+	grid-template-columns: minmax(0, 1fr) !important;
 }
 
 @media (min-width: 40rem) {
 	.landing-section .card-grid {
-		grid-template-columns: repeat(2, 1fr) !important;
+		grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 	}
 }
 
 @media (min-width: 60rem) {
 	.landing-section-wide .card-grid {
-		grid-template-columns: repeat(3, 1fr) !important;
+		grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 	}
 	.landing-section:not(.landing-section-wide) .card-grid {
-		grid-template-columns: repeat(2, 1fr) !important;
+		grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 	}
 }
 
@@ -262,4 +264,19 @@
 	--sl-color-gray-5: #c0c2c7;
 	--sl-color-gray-6: #eceef2;
 	--sl-color-black: #ffffff;
+}
+
+/* Table scroll regions (src/plugins/rehype-table-region.mjs). The wrapper
+   scrolls instead of the table, so keyboard focus can reach hidden columns. */
+.sl-markdown-content .table-region {
+	overflow-x: auto;
+}
+
+.sl-markdown-content .table-region > table {
+	overflow: visible;
+}
+
+.sl-markdown-content .table-region:focus-visible {
+	outline: 2px solid var(--sl-color-accent);
+	outline-offset: 2px;
 }

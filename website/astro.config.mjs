@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import rehypeTableRegion from './src/plugins/rehype-table-region.mjs';
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -59,6 +60,8 @@ export default defineConfig({
 		// build's `markdown.gfm` deprecation warning is expected; when upgrading
 		// Astro, switch to an explicit `mdx({ gfm: true })` integration instead.
 		gfm: true,
+		// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
+		rehypePlugins: [rehypeTableRegion],
 	},
 	integrations: [
 		prefixBaseLinks(),
