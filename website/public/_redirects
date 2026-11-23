@@ -1,0 +1,6 @@
+# Old relative links on the concept pages produced URLs one level too deep.
+# Search engines still send readers to them, so send those readers to the real page.
+/concepts/getting-started/* /getting-started/:splat 301
+/concepts/guides/* /guides/:splat 301
+/concepts/reference/* /reference/:splat 301
+/concepts/:page/:target /concepts/:target/ 301
