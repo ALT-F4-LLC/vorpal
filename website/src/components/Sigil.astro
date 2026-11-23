@@ -1,0 +1,49 @@
+---
+import { sigilPaths } from '../lib/sigil';
+
+interface Props {
+	digest: string;
+	size?: number;
+	label?: string;
+}
+
+const { digest, size = 44, label } = Astro.props;
+---
+
+<svg
+	class="vp-sigil"
+	viewBox="-50 -50 100 100"
+	width={size}
+	height={size}
+	role={label ? 'img' : undefined}
+	aria-label={label}
+	aria-hidden={label ? undefined : 'true'}
+	data-digest={digest}
+>
+	<rect x="-50" y="-50" width="100" height="100" rx="16" class="bg"></rect>
+	<Fragment set:html={sigilPaths(digest)} />
+</svg>
+
+<style>
+	.vp-sigil {
+		flex: none;
+		display: block;
+	}
+	.vp-sigil :global(.bg) {
+		fill: var(--vp-panel);
+		stroke: var(--vp-line);
+		stroke-width: 1;
+	}
+	.vp-sigil :global(.s0) {
+		fill: var(--sl-color-accent);
+	}
+	.vp-sigil :global(.s1) {
+		fill: var(--sl-color-accent-high);
+	}
+	.vp-sigil :global(.s2) {
+		fill: var(--vp-signal-2);
+	}
+	.vp-sigil :global(.core) {
+		fill: var(--sl-color-white);
+	}
+</style>

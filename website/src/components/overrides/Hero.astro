@@ -1,0 +1,189 @@
+---
+/**
+ * Homepage hero: copy on the left, a `vorpal build` streaming in on the right
+ * and resolving to the artifact's digest and sigil. The log lines use the
+ * CLI's `service |> action: digest` format. All lines are in the HTML, so the
+ * hero is complete without JavaScript; the reveal is CSS only and is skipped
+ * under reduced motion.
+ */
+import { LinkButton } from '@astrojs/starlight/components';
+import Sigil from '../Sigil.astro';
+import { sha256 } from '../../lib/sigil';
+
+const PAGE_TITLE_ID = '_top';
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+
+// Example digests, derived from the example inputs so they are stable.
+const artifact = sha256('my-app|go|aarch64-darwin|cmd,go.mod,go.sum');
+const source = sha256('my-app|source|cmd,go.mod,go.sum');
+const s = (d: string) => `${d.slice(0, 16)}…`;
+
+const lines: [string, string][] = [
+	['cmd', '$ vorpal build my-app'],
+	['', `registry |> archive check: ${s(artifact)}`],
+	['', `worker |> pull source: ${s(source)}`],
+	['', `worker |> build artifact: ${s(artifact)}`],
+	['', `registry |> archive push (single put): ${s(artifact)}`],
+	['', `artifact |> store: ${s(artifact)}`],
+	['out', `✓ sha256:${artifact.slice(0, 40)}…`],
+];
+---
+
+<div class="vp-hero">
+	<div class="copy">
+		<h1 id={PAGE_TITLE_ID} data-page-title set:html={title} />
+		{tagline && <div class="tagline" set:html={tagline} />}
+		{
+			actions.length > 0 && (
+				<div class="actions">
+					{actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+						<LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+							{text}
+							{icon?.html && <Fragment set:html={icon.html} />}
+						</LinkButton>
+					))}
+					<code class="init">$ vorpal init my-project</code>
+				</div>
+			)
+		}
+	</div>
+
+	<figure class="term" aria-label="Example output of vorpal build">
+		<figcaption><span>~/my-app</span><span>example</span></figcaption>
+		<pre>{lines.map(([cls, text], i) => <span class={cls} style={`--i:${i}`}>{text}</span>)}</pre>
+		<div class="result" style={`--i:${lines.length}`}>
+			<Sigil digest={artifact} size={52} label="Sigil for the my-app artifact digest" />
+			<div>
+				<b>my-app · aarch64-darwin</b>
+				<span>sha256:{artifact}</span>
+			</div>
+		</div>
+	</figure>
+</div>
+
+<style>
+	.vp-hero {
+		display: grid;
+		gap: 2.5rem;
+		align-items: center;
+		padding-block: 3rem 2rem;
+	}
+	@media (min-width: 60rem) {
+		.vp-hero {
+			grid-template-columns: 1.2fr 1fr;
+			padding-block: 5rem 3rem;
+		}
+	}
+	.copy {
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+		min-width: 0;
+	}
+	h1 {
+		font-size: clamp(2.4rem, 1rem + 3.6vw, 3.6rem);
+		line-height: 1.02;
+		letter-spacing: -0.035em;
+		font-weight: 650;
+		color: var(--sl-color-white);
+		text-wrap: balance;
+		margin: 0;
+	}
+	h1 :global(em) {
+		font-style: normal;
+		color: var(--sl-color-accent-high);
+	}
+	.tagline {
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-lg);
+		max-width: 34rem;
+	}
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem 1rem;
+		align-items: center;
+		margin-top: 0.5rem;
+	}
+	.init {
+		font-family: var(--sl-font-mono);
+		font-size: 0.82rem;
+		color: var(--sl-color-gray-3);
+		border: 1px dashed var(--vp-line);
+		border-radius: 8px;
+		padding: 0.55rem 0.8rem;
+		background: transparent;
+	}
+	.term {
+		margin: 0;
+		min-width: 0;
+		background: var(--vp-panel);
+		border: 1px solid var(--vp-line);
+		border-radius: 12px;
+		overflow: hidden;
+		font-family: var(--sl-font-mono);
+		font-size: 0.78rem;
+		box-shadow: 0 40px 80px -40px rgb(0 0 0 / 0.45);
+	}
+	figcaption {
+		display: flex;
+		justify-content: space-between;
+		padding: 0.55rem 0.9rem;
+		border-bottom: 1px solid var(--vp-line);
+		color: var(--sl-color-gray-3);
+		font-size: 0.72rem;
+	}
+	pre {
+		margin: 0;
+		padding: 0.9rem;
+		line-height: 1.8;
+		color: var(--sl-color-gray-3);
+		overflow-x: auto;
+		background: transparent;
+		border: 0;
+	}
+	pre .cmd {
+		color: var(--sl-color-white);
+	}
+	pre .out {
+		color: var(--sl-color-accent-high);
+	}
+	.result {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		border-top: 1px solid var(--vp-line);
+		padding: 0.85rem 0.9rem;
+	}
+	.result div {
+		display: grid;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+	.result b {
+		color: var(--sl-color-white);
+		font-weight: 500;
+	}
+	.result span {
+		color: var(--sl-color-gray-3);
+		font-size: 0.7rem;
+		overflow-wrap: anywhere;
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		pre span,
+		.result {
+			animation: vp-line-in 0.35s ease-out both;
+			animation-delay: calc(var(--i) * 320ms + 200ms);
+		}
+	}
+	@keyframes vp-line-in {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
+	}
+	pre span {
+		display: block;
+	}
+</style>
