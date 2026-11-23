@@ -124,49 +124,53 @@ Not all built-in artifacts are available in every SDK. The tables below indicate
 
 ### Tools
 
-| Artifact | Description | Rust | Go | TypeScript |
-|----------|-------------|:----:|:--:|:----------:|
-| `Bun` | JavaScript/TypeScript runtime and package manager | ✅ | ✅ | ✅ |
-| `Cargo` | Rust package manager | ✅ | ✅ | ✅ |
-| `Clippy` | Rust linter | ✅ | ✅ | ✅ |
-| `Crane` | Container image tool | ✅ | ✅ | ✅ |
-| `Gh` | GitHub CLI | ✅ | ✅ | ✅ |
-| `Git` | Version control | ✅ | ✅ | ✅ |
-| `Go` / `GoBin` | Go compiler and tools | ✅ | ✅ | ✅ |
-| `Goimports` | Go import formatter | ✅ | ✅ | ✅ |
-| `Gopls` | Go language server | ✅ | ✅ | ✅ |
-| `Grpcurl` | gRPC command-line client | ✅ | ✅ | ✅ |
-| `NodeJS` | Node.js runtime | ✅ | ✅ | ✅ |
-| `Pnpm` | Node.js package manager | ✅ | ✅ | ✅ |
-| `Protoc` | Protocol Buffers compiler | ✅ | ✅ | ✅ |
-| `ProtocGenGo` | Protobuf Go code generator | ✅ | ✅ | ✅ |
-| `ProtocGenGoGrpc` | Protobuf Go gRPC code generator | ✅ | ✅ | ✅ |
-| `Rsync` | File synchronization tool | ✅ | ✅ | ✅ |
-| `RustAnalyzer` | Rust language server | ✅ | ✅ | ✅ |
-| `Rustc` | Rust compiler | ✅ | ✅ | ✅ |
-| `Rustfmt` | Rust formatter | ✅ | ✅ | ✅ |
-| `Staticcheck` | Go static analysis tool | ✅ | ✅ | ✅ |
+| Artifact | Description | Rust | Go | Python | TypeScript |
+|----------|-------------|:----:|:--:|:------:|:----------:|
+| `Bun` | JavaScript/TypeScript runtime and package manager | ✅ | ✅ | ✅ | ✅ |
+| `Cargo` | Rust package manager | ✅ | ✅ | ✅ | ✅ |
+| `Clippy` | Rust linter | ✅ | ✅ | ✅ | ✅ |
+| `Cpython` | Python interpreter | ✅ | ✅ | ✅ | ✅ |
+| `Crane` | Container image tool | ✅ | ✅ | ✅ | ✅ |
+| `Gh` | GitHub CLI | ✅ | ✅ | ✅ | ✅ |
+| `Git` | Version control | ✅ | ✅ | ✅ | ✅ |
+| `Go` / `GoBin` | Go compiler and tools | ✅ | ✅ | ✅ | ✅ |
+| `Goimports` | Go import formatter | ✅ | ✅ | ✅ | ✅ |
+| `Gopls` | Go language server | ✅ | ✅ | ✅ | ✅ |
+| `Grpcurl` | gRPC command-line client | ✅ | ✅ | ✅ | ✅ |
+| `NodeJS` | Node.js runtime | ✅ | ✅ | ✅ | ✅ |
+| `Pnpm` | Node.js package manager | ✅ | ✅ | ✅ | ✅ |
+| `Protoc` | Protocol Buffers compiler | ✅ | ✅ | ✅ | ✅ |
+| `ProtocGenGo` | Protobuf Go code generator | ✅ | ✅ | ✅ | ✅ |
+| `ProtocGenGoGrpc` | Protobuf Go gRPC code generator | ✅ | ✅ | ✅ | ✅ |
+| `Rsync` | File synchronization tool | ✅ | ✅ | ✅ | ✅ |
+| `RustAnalyzer` | Rust language server | ✅ | ✅ | ✅ | ✅ |
+| `Rustc` | Rust compiler | ✅ | ✅ | ✅ | ✅ |
+| `Rustfmt` | Rust formatter | ✅ | ✅ | ✅ | ✅ |
+| `Staticcheck` | Go static analysis tool | ✅ | ✅ | ✅ | ✅ |
+| `Uv` | Python package manager | ✅ | ✅ | ✅ | ✅ |
 
-> **Note:** The Go SDK names the Go compiler artifact `GoBin` instead of `Go`. The TypeScript SDK exports it as `GoBin` from `artifact/go.ts`.
+> **Note:** The Go SDK names the Go compiler artifact `GoBin` instead of `Go`. The TypeScript SDK exports it as `GoBin` from `artifact/go.ts`, and the Python SDK exports it as `GoBin` from `vorpal_sdk`.
 
 ### Rust toolchain
 
-| Artifact | Description | Rust | Go | TypeScript |
-|----------|-------------|:----:|:--:|:----------:|
-| `RustSrc` | Rust source code (for rust-analyzer) | ✅ | ✅ | ✅ |
-| `RustStd` | Rust standard library | ✅ | ✅ | ✅ |
-| `RustToolchain` | Complete Rust toolchain bundle | ✅ | ✅ | ✅ |
+| Artifact | Description | Rust | Go | Python | TypeScript |
+|----------|-------------|:----:|:--:|:------:|:----------:|
+| `RustSrc` | Rust source code (for rust-analyzer) | ✅ | ✅ | ✅ | ✅ |
+| `RustStd` | Rust standard library | ✅ | ✅ | ✅ | ✅ |
+| `RustToolchain` | Complete Rust toolchain bundle | ✅ | ✅ | ✅ | ✅ |
 
 ### Linux images
 
-| Artifact | Description | Rust | Go | TypeScript |
-|----------|-------------|:----:|:--:|:----------:|
-| `LinuxDebian` | Debian-based Linux base image | ✅ | ✅ | ✅ |
-| `LinuxVorpal` | Vorpal Linux base image | ✅ | ✅ | ✅ |
-| `LinuxVorpalSlim` | Minimal Vorpal Linux image | ✅ | ✅ | ✅ |
+| Artifact | Description | Rust | Go | Python | TypeScript |
+|----------|-------------|:----:|:--:|:------:|:----------:|
+| `LinuxDebian` | Debian-based Linux base image | ✅ | ✅ | ✅ | ✅ |
+| `LinuxVorpal` | Vorpal Linux base image | ✅ | ✅ | ✅ | ✅ |
+| `LinuxVorpalSlim` | Minimal Vorpal Linux image | ✅ | ✅ | — | ✅ |
+
+> **Note:** The Python SDK provides `LinuxVorpal` as the `linux_vorpal()` function in `vorpal_sdk.artifact.linux_vorpal`.
 
 ### Container images
 
-| Artifact | Description | Rust | Go | TypeScript |
-|----------|-------------|:----:|:--:|:----------:|
-| `OciImage` | OCI container image builder | ✅ | ✅ | ✅ |
+| Artifact | Description | Rust | Go | Python | TypeScript |
+|----------|-------------|:----:|:--:|:------:|:----------:|
+| `OciImage` | OCI container image builder | ✅ | ✅ | ✅ | ✅ |

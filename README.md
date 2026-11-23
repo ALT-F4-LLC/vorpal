@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml/badge.svg)](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml) [![Release](https://img.shields.io/github/v/release/ALT-F4-LLC/vorpal?include_prereleases)](https://github.com/ALT-F4-LLC/vorpal/releases) [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@altf4llc/vorpal-sdk)](https://www.npmjs.com/package/@altf4llc/vorpal-sdk)
 
-Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
+Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, Python, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
 
 ## Contents
 
@@ -36,7 +36,7 @@ mkdir hello-world && cd hello-world
 vorpal init hello-world
 ```
 
-Choose your language (Go, Rust, or TypeScript) when prompted. Vorpal scaffolds a working project with a `Vorpal.toml` and sample build config.
+Choose your language (Go, Python, Rust, or TypeScript) when prompted. Vorpal scaffolds a working project with a `Vorpal.toml` and sample build config.
 
 ### 2. Build it
 
@@ -56,7 +56,7 @@ That is it. Your artifact is built, cached, and runnable.
 
 ## SDK Examples
 
-Vorpal build configs are real programs. Write them in the language your project already uses. See the full SDK guides for [Rust](https://docs.vorpal.build/guides/rust/), [Go](https://docs.vorpal.build/guides/go/), and [TypeScript](https://docs.vorpal.build/guides/typescript/).
+Vorpal build configs are real programs. Write them in the language your project already uses. See the full SDK guides for [Rust](https://docs.vorpal.build/guides/rust/), [Go](https://docs.vorpal.build/guides/go/), [Python](https://docs.vorpal.build/guides/python/), and [TypeScript](https://docs.vorpal.build/guides/typescript/).
 
 ### Build an artifact
 
@@ -410,7 +410,7 @@ func main() {
 
 ## Features
 
-- **Config as code** -- Your build config is a real program, not YAML. Write it in Rust, Go, or TypeScript with full IDE support.
+- **Config as code** -- Your build config is a real program, not YAML. Write it in Rust, Go, Python, or TypeScript with full IDE support.
 - **Reproducible by default** -- Content-addressed artifacts with hermetic build steps. Same inputs always produce the same output.
 - **Cross-platform** -- Target macOS (Apple Silicon + Intel) and Linux (x86_64 + ARM64) from a single config.
 - **Built-in caching** -- Artifacts are cached by content hash. Unchanged builds resolve instantly.
@@ -445,6 +445,7 @@ Full documentation is available at **[docs.vorpal.build](https://docs.vorpal.bui
 | Architecture overview | [docs.vorpal.build/concepts/architecture](https://docs.vorpal.build/concepts/architecture/) |
 | CLI reference | [docs.vorpal.build/reference/cli](https://docs.vorpal.build/reference/cli/) |
 | Go SDK guide | [docs.vorpal.build/guides/go](https://docs.vorpal.build/guides/go/) |
+| Python SDK guide | [docs.vorpal.build/guides/python](https://docs.vorpal.build/guides/python/) |
 | Rust SDK guide | [docs.vorpal.build/guides/rust](https://docs.vorpal.build/guides/rust/) |
 | TypeScript SDK guide | [docs.vorpal.build/guides/typescript](https://docs.vorpal.build/guides/typescript/) |
 
