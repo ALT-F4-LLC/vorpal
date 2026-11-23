@@ -16,6 +16,8 @@ Every artifact has four components:
 
 ```mermaid
 graph LR
+    accTitle: Parts of an artifact
+    accDescr: An artifact is made of three parts: sources, steps and target systems.
     A[Artifact] --> SRC[Sources]
     A --> STEPS[Steps]
     A --> SYS[Target Systems]

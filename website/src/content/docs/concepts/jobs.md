@@ -11,6 +11,8 @@ A Job takes a name, a shell script, and a list of target systems. Under the hood
 
 ```mermaid
 flowchart TD
+    accTitle: How a Job becomes an artifact
+    accDescr: A Job, defined by a name, a script and target systems, becomes an artifact with a single shell step. That artifact produces content-addressed, cached output.
     A["Job(name, script, systems)"] --> B["Artifact with single shell step"]
     B --> C["Content-addressed, cached output"]
 ```

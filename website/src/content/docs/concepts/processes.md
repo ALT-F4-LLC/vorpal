@@ -17,6 +17,8 @@ A Process takes a name, an entrypoint binary, and target systems. Vorpal generat
 
 ```mermaid
 flowchart LR
+    accTitle: What a Process produces
+    accDescr: A Process, defined by a name, a binary path and target systems, produces an artifact output with three scripts: bin/my-process-start, bin/my-process-stop and bin/my-process-logs.
     A["Process(&quot;my-process&quot;, &quot;/path/to/binary&quot;, systems)"] --> B["Artifact output"]
     B --> C["bin/my-process-start"]
     B --> D["bin/my-process-stop"]
