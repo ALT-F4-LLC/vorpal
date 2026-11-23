@@ -162,6 +162,7 @@ vorpal init <NAME> [OPTIONS]
 The command presents an interactive language selector:
 
 - **Go** -- Generates `cmd/<name>/main.go`, `cmd/vorpal/main.go`, `go.mod`, `go.sum`, `Vorpal.toml`. The template directory `cmd/example/` is dynamically renamed to `cmd/<name>/` using the project name.
+- **Python** -- Generates `pyproject.toml`, `uv.lock`, `src/main.py`, `src/vorpal.py`, `Vorpal.toml`, `.gitignore`
 - **Rust** -- Generates `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/vorpal.rs`, `Vorpal.toml`, `.gitignore`
 - **TypeScript** -- Generates `src/vorpal.ts`, `src/main.ts`, `package.json`, `tsconfig.json`, `Vorpal.toml`, `.gitignore`, `bun.lock`
 

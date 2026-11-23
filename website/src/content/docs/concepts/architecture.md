@@ -11,14 +11,14 @@ Vorpal consists of three layers that work together to turn your build configurat
 
 ```mermaid
 flowchart TD
-    Config["Your Config\n(Rust / Go / TS code)"]
+    Config["Your Config\n(Rust / Go / Python / TS code)"]
     Config -->|SDK| CLI["Vorpal CLI"]
     CLI --> Agent["Agent Service"]
     CLI --> Worker["Worker Service"]
     CLI --> Registry["Registry Service"]
 ```
 
-**SDK** -- You write your build configuration as a program using the Vorpal SDK in Rust, Go, or TypeScript. The SDK provides builder types for defining artifacts, sources, build steps, and target platforms. Your config is compiled and executed like any other program.
+**SDK** -- You write your build configuration as a program using the Vorpal SDK in Rust, Go, Python, or TypeScript. The SDK provides builder types for defining artifacts, sources, build steps, and target platforms. Your config is compiled and executed like any other program.
 
 **CLI** -- The `vorpal` command-line tool is the single entry point for all interactions. It compiles your build configuration, orchestrates the build process, and manages system services. When you run `vorpal build`, the CLI compiles your config, starts it as a subprocess, and queries it for artifact definitions over gRPC.
 
@@ -80,11 +80,11 @@ This flow means that on a fresh build, everything is built from scratch. On subs
 
 All inter-component communication uses gRPC with Protocol Buffers. This provides:
 
-- **Strongly-typed contracts** across all three SDK languages -- the same `.proto` definitions generate client code for Rust, Go, and TypeScript
+- **Strongly-typed contracts** across all four SDK languages -- the same `.proto` definitions generate client code for Rust, Go, Python, and TypeScript
 - **Streaming** for transferring large archives without loading them entirely into memory
 - **TLS support** for securing communication when running services remotely
 
-By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See the [Installation](../../getting-started/installation/) page for details on TLS key generation.
+By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See [`vorpal system keys generate`](/reference/cli/#vorpal-system-keys-generate) and [`vorpal system services start`](/reference/cli/#vorpal-system-services-start) in the CLI reference for TLS key generation and the `--tls` flag.
 
 ## Why config-as-code?
 
