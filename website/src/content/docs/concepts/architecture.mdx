@@ -4,6 +4,7 @@ description: How Vorpal's client-server architecture orchestrates builds across 
 ---
 
 import ArchitectureLayers from '../../../components/diagrams/ArchitectureLayers.astro';
+import BuildFlow from '../../../components/diagrams/BuildFlow.astro';
 
 Vorpal uses a client-server architecture where your build configuration is a real program that communicates with backend services over gRPC. This page explains how the pieces fit together and why the system is designed this way.
 
@@ -17,13 +18,13 @@ Vorpal consists of three layers that work together to turn your build configurat
 
 **CLI** -- The `vorpal` command-line tool is the single entry point for all interactions. It compiles your build configuration, orchestrates the build process, and manages system services. When you run `vorpal build`, the CLI compiles your config, starts it as a subprocess, and queries it for artifact definitions over gRPC.
 
-**Services** -- Three backend services handle the actual work. They run together in a single `vorpal` process started by `vorpal system services start`, communicating over gRPC.
+**Services** -- Three backend services handle the actual work: the agent daemon, the worker and the registry. They run together in a single `vorpal` process started by `vorpal system services start`, communicating over gRPC.
 
 ## Services in detail
 
-### Agent
+### Agent daemon {#agent}
 
-The Agent prepares artifacts before they are built. When the CLI submits an artifact for building, the Agent:
+The agent daemon prepares artifacts before they are built. When your config program declares an artifact, the agent daemon:
 
 1. Resolves sources -- fetches content from the local filesystem or HTTP URLs
 2. Computes content digests (SHA-256) for each source, creating the content-addressed identity
@@ -31,7 +32,7 @@ The Agent prepares artifacts before they are built. When the CLI submits an arti
 4. Encrypts any secrets attached to build steps
 5. Pushes prepared source archives to the Registry
 
-The Agent acts as a gatekeeper: it ensures that all inputs are accounted for, hashed, and locked before any build work begins.
+The agent daemon acts as a gatekeeper: it ensures that all inputs are accounted for, hashed, and locked before any build work begins.
 
 ### Worker
 
@@ -58,18 +59,22 @@ The Registry provides storage for both binary archives and artifact metadata. It
 
 ## Build flow
 
-When you run `vorpal build <name>`, the following sequence occurs:
+When you run `vorpal build <name>`, every source and every built archive goes through the Registry. The CLI never receives files from the Worker directly; it only sends the Worker build requests and shows their log lines.
+
+<BuildFlow />
+
+The sequence:
 
 1. **Configuration resolution** -- The CLI merges settings from CLI flags, `Vorpal.toml` (project config), `~/.vorpal/settings.json` (user config), and built-in defaults.
 
-2. **Configuration compilation** -- The CLI compiles your build configuration program, starts it as a subprocess, and queries it for artifact definitions via gRPC.
+2. **Configuration compilation** -- The CLI compiles your build configuration program, starts it as a subprocess, and queries it for artifact definitions via gRPC. As the program declares each artifact, the agent daemon pins and hashes its sources and pushes them to the Registry, which gives every artifact its digest.
 
 3. **Dependency ordering** -- Artifacts are topologically sorted based on their dependency references. If artifact B depends on artifact A, A is always built first.
 
 4. **For each artifact (in dependency order):**
    - Check the local cache -- if the artifact output already exists, skip it entirely
    - Try pulling from the Registry -- if a remote cache hit exists, download it
-   - Build via the Worker -- if not cached anywhere, prepare sources through the Agent, then build through the Worker
+   - Build via the Worker -- if not cached anywhere, the CLI sends the Worker a build request. The Worker pulls the sources the agent daemon pushed (and the outputs of dependencies) from the Registry, runs the steps, and pushes the archive to the Registry, where the CLI pulls it
 
 5. **Output** -- The CLI prints the artifact digest. Use `--path` to get the filesystem path to the output.
 
