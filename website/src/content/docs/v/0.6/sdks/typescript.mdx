@@ -1,0 +1,84 @@
+---
+slug: v/0.6/sdks/typescript
+title: TypeScript SDK
+description: "Write your Vorpal config program in TypeScript: install the SDK, see the project layout, then follow any guide with TypeScript already chosen."
+summary: "Write your Vorpal config program in TypeScript: install the SDK, see the project layout, then follow any guide with TypeScript already chosen."
+kind: sdk-hub
+lastUpdated: 2026-11-24
+related:
+  - v/0.6/sdks/python
+  - v/0.6/sdks/go
+  - v/0.6/sdks/rust
+  - v/0.6/reference/configuration
+---
+
+<ul class="vp-cards">
+<li class="vp-card"><span class="vp-card-type">Start</span><a href="/getting-started/quickstart/?sdk=typescript">Quickstart in TypeScript<span class="vp-card-arrow" aria-hidden="true">→</span></a><code>vorpal init</code> with the TypeScript template.</li>
+<li class="vp-card"><span class="vp-card-type">One page</span><a href="/guides/typescript/">Every guide in TypeScript<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every task, TypeScript examples only, on one page.</li>
+<li class="vp-card"><span class="vp-card-type">API</span><a href="https://www.npmjs.com/package/@altf4llc/vorpal-sdk">@altf4llc/vorpal-sdk on npm<span class="vp-card-arrow" aria-hidden="true">→</span></a>Version 0.6.0.</li>
+</ul>
+
+## Install the SDK {#install}
+
+```bash prompt
+bun add @altf4llc/vorpal-sdk
+```
+
+Or with npm: `npm install @altf4llc/vorpal-sdk`, or with Yarn: `yarn add @altf4llc/vorpal-sdk`.
+
+## Project layout {#layout}
+
+This is what `vorpal init` writes for TypeScript, plus the `Vorpal.lock` that [`vorpal prepare`](/reference/cli/prepare/) adds.
+
+```text title="Project layout"
+hello-world/
+├── .gitignore
+├── Vorpal.lock        # written by vorpal prepare; commit it
+├── Vorpal.toml        # language = "typescript", includes
+├── bun.lock
+├── package.json       # @altf4llc/vorpal-sdk 0.6.0
+├── tsconfig.json
+└── src/
+    ├── vorpal.ts      # the config program
+    └── main.ts        # your program
+```
+
+```toml title="Vorpal.toml"
+language = "typescript"
+
+[source]
+includes = [
+    "bun.lock",
+    "package.json",
+    "src/vorpal.ts",
+    "tsconfig.json"
+]
+```
+
+`language` tells Vorpal to use the TypeScript SDK. `[source]` lists the files the config program needs. Every key is in the [configuration reference](/reference/configuration/).
+
+## TypeScript facts {#facts}
+
+- The config program and TypeScript artifacts are built with a pinned Bun runtime.
+- The development environment builder adds Bun; add other tools, such as `protoc`, with `withArtifacts`.
+
+## Every guide, in TypeScript {#guides}
+
+Each link opens with TypeScript chosen.
+
+<ul class="vp-ilist">
+<li><a href="/getting-started/quickstart/?sdk=typescript">Quickstart</a><span>Your first build, with the <code>vorpal init</code> template.</span></li>
+<li><a href="/guides/development-environment/?sdk=typescript">Add a development environment</a><span>Pinned tools in your shell.</span></li>
+<li><a href="/guides/typescript/#define-an-artifact">Define an artifact</a><span>Sources, steps and systems.</span></li>
+<li><a href="/guides/typescript/#define-artifact-dependencies">Define artifact dependencies</a><span>Use one artifact in another.</span></li>
+<li><a href="/guides/typescript/#secrets">Secrets</a><span>Values a step reads from <code>$VORPAL_SECRET_DIR</code>.</span></li>
+<li><a href="/guides/typescript/#define-jobs">Define jobs</a><span>Tests and checks as artifacts.</span></li>
+<li><a href="/guides/typescript/#define-processes">Define processes</a><span>Long-running services.</span></li>
+<li><a href="/guides/typescript/#define-user-environments">Define user environments</a><span>Tools in every shell, not one project.</span></li>
+<li><a href="/guides/typescript/#custom-executors">Custom executors</a><span>Run steps with another entrypoint.</span></li>
+<li><a href="/guides/typescript/#building">Building</a><span>Build, inspect and run artifacts.</span></li>
+</ul>
+
+## API docs {#api}
+
+[@altf4llc/vorpal-sdk on npm](https://www.npmjs.com/package/@altf4llc/vorpal-sdk). The [SDK concepts](/concepts/artifacts/) and the [CLI reference](/reference/cli/) are shared by all four SDKs.

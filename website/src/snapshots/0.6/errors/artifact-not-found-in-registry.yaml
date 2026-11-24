@@ -1,0 +1,38 @@
+group: connection
+order: 2
+message: "Artifact not found in registry (digest: <digest>)."
+variants:
+  - who: Python, TypeScript
+    message: "Artifact not found in registry (digest: <digest>)."
+  - who: Go
+    message: "error fetching artifact: <err>"
+  - who: Rust
+    message: "artifact not found: <digest>"
+raised_by: The SDK your config program uses, when it fetches an artifact from the registry by its digest.
+meaning: >-
+  The registry has no artifact with this digest in the namespace: it was never pushed there, it was
+  pruned, or the config program asks another registry or namespace than the build that made it.
+fix:
+  - text: Check that the CLI and the config program use the same registry and namespace.
+  - command: vorpal config show
+    label: show the registry and namespace
+  - text: Then build the artifact again, so it is pushed to that registry.
+check: The build prints a digest.
+links:
+  - text: "`--namespace`"
+    href: /reference/cli/build/#flag-namespace
+  - text: "`vorpal system prune`"
+    href: /reference/cli/system/prune/
+sources:
+  - file: sdk/python/src/vorpal_sdk/context.py
+    line: 779
+    match: "Artifact not found in registry (digest: {digest})."
+  - file: sdk/typescript/src/context.ts
+    line: 825
+    match: "Artifact not found in registry (digest: ${digest})."
+  - file: sdk/go/pkg/config/context.go
+    line: 502
+    match: "error fetching artifact: %v"
+  - file: sdk/rust/src/context.rs
+    line: 536
+    match: "artifact not found: {digest}"

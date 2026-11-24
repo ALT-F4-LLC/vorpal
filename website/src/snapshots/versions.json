@@ -1,0 +1,196 @@
+{
+	"$comment": "Version snapshots, newest first (src/versions.mjs). Written by script/website-versions/snapshot.mjs; do not edit by hand.",
+	"versions": [
+		{
+			"slug": "0.6",
+			"release": "0.6.0",
+			"sidebar": [
+				{
+					"label": "Get started",
+					"items": [
+						{
+							"label": "Installation",
+							"slug": "getting-started/installation"
+						},
+						{
+							"label": "Quickstart",
+							"slug": "getting-started/quickstart"
+						}
+					]
+				},
+				{
+					"label": "Guides",
+					"items": [
+						{
+							"label": "Add a development environment",
+							"slug": "guides/development-environment"
+						},
+						{
+							"label": "Every guide in one SDK",
+							"items": [
+								{
+									"label": "Python",
+									"slug": "guides/python"
+								},
+								{
+									"label": "TypeScript",
+									"slug": "guides/typescript"
+								},
+								{
+									"label": "Go",
+									"slug": "guides/go"
+								},
+								{
+									"label": "Rust",
+									"slug": "guides/rust"
+								}
+							]
+						}
+					]
+				},
+				{
+					"label": "Troubleshooting",
+					"items": [
+						{
+							"label": "Error reference",
+							"slug": "troubleshooting/errors"
+						}
+					]
+				},
+				{
+					"label": "Concepts",
+					"items": [
+						{
+							"label": "Architecture",
+							"slug": "concepts/architecture"
+						},
+						{
+							"label": "How a build runs",
+							"slug": "concepts/how-a-build-runs"
+						},
+						{
+							"label": "Artifacts",
+							"slug": "concepts/artifacts"
+						},
+						{
+							"label": "Caching",
+							"slug": "concepts/caching"
+						},
+						{
+							"label": "Environments",
+							"slug": "concepts/environments"
+						},
+						{
+							"label": "Jobs",
+							"slug": "concepts/jobs"
+						},
+						{
+							"label": "Processes",
+							"slug": "concepts/processes"
+						},
+						{
+							"label": "How Vorpal compares",
+							"slug": "concepts/how-vorpal-compares"
+						}
+					]
+				},
+				{
+					"label": "Self-hosting",
+					"items": [
+						{
+							"label": "Set up TLS and client trust",
+							"slug": "self-hosting/tls"
+						}
+					]
+				},
+				{
+					"label": "SDKs",
+					"items": [
+						{
+							"label": "Python SDK",
+							"slug": "sdks/python"
+						},
+						{
+							"label": "TypeScript SDK",
+							"slug": "sdks/typescript"
+						},
+						{
+							"label": "Go SDK",
+							"slug": "sdks/go"
+						},
+						{
+							"label": "Rust SDK",
+							"slug": "sdks/rust"
+						}
+					]
+				},
+				{
+					"label": "Reference",
+					"items": [
+						{
+							"label": "CLI",
+							"items": [
+								{
+									"label": "Overview",
+									"slug": "reference/cli"
+								},
+								{
+									"label": "vorpal build",
+									"slug": "reference/cli/build"
+								},
+								{
+									"label": "vorpal prepare",
+									"slug": "reference/cli/prepare"
+								},
+								{
+									"label": "vorpal run",
+									"slug": "reference/cli/run"
+								},
+								{
+									"label": "vorpal inspect",
+									"slug": "reference/cli/inspect"
+								},
+								{
+									"label": "vorpal init",
+									"slug": "reference/cli/init"
+								},
+								{
+									"label": "vorpal config",
+									"slug": "reference/cli/config"
+								},
+								{
+									"label": "vorpal login",
+									"slug": "reference/cli/login"
+								},
+								{
+									"label": "vorpal system keys",
+									"slug": "reference/cli/system/keys"
+								},
+								{
+									"label": "vorpal system prune",
+									"slug": "reference/cli/system/prune"
+								},
+								{
+									"label": "vorpal system services",
+									"slug": "reference/cli/system/services"
+								}
+							]
+						},
+						{
+							"label": "Configuration",
+							"slug": "reference/configuration"
+						},
+						{
+							"label": "API",
+							"slug": "reference/api"
+						},
+						{
+							"label": "Contributing to Docs",
+							"slug": "reference/contributing"
+						}
+					]
+				}
+			]
+		}
+	]
+}

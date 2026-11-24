@@ -1,0 +1,76 @@
+---
+slug: v/0.6/reference/cli/config
+title: vorpal config
+description: Set, get and show settings in Vorpal.toml or ~/.vorpal/settings.json.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - v/0.6/reference/configuration
+---
+
+import CliSynopsis from '../../../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="config" />
+
+## Options {#options}
+
+<CliEntries command="config" kind="options" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## `vorpal config set` {#cmd-set}
+
+<CliSynopsis command="config set" title="vorpal config set" />
+
+<CliEntries command="config set" kind="arguments" level={4} />
+
+```bash prompt
+# Set the registry in the project's Vorpal.toml
+vorpal config set registry "https://registry.example.com:23151"
+# Set the namespace for you, on this machine
+vorpal config --user set namespace "my-team"
+```
+
+## `vorpal config get` {#cmd-get}
+
+<CliSynopsis command="config get" title="vorpal config get" />
+
+<CliEntries command="config get" kind="arguments" level={4} />
+
+```bash prompt
+vorpal config get registry
+```
+
+```text output
+registry = unix:///var/lib/vorpal/vorpal.sock (default)
+```
+
+## `vorpal config show` {#cmd-show}
+
+<CliSynopsis command="config show" title="vorpal config show" />
+
+```bash prompt
+vorpal config show
+```
+
+```text output
+KEY        VALUE                                  SOURCE
+---        -----                                  ------
+registry   unix:///var/lib/vorpal/vorpal.sock     default
+namespace  library                                default
+language   rust                                   project
+name       vorpal-config                          project
+system     <system>                               default
+worker     unix:///var/lib/vorpal/vorpal.sock     default
+```
+
+## Errors and exit codes {#errors}
+
+- [`unknown setting key '<key>'. Valid keys: <keys>`](/troubleshooting/errors/#err-unknown-setting-key)
+
+Exit code 0 on success, 1 on an error, 2 for a usage error.

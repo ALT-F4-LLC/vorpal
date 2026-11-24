@@ -1,0 +1,391 @@
+---
+slug: v/0.6/guides/typescript
+title: Every guide in TypeScript
+description: Build artifacts and environments with the Vorpal TypeScript SDK.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+The TypeScript SDK lets you define Vorpal build configurations as TypeScript programs. Your config runs with Bun and communicates with the Vorpal daemon over gRPC.
+
+## Installation
+
+<Tabs>
+  <TabItem label="bun">
+    ```bash
+    bun add @altf4llc/vorpal-sdk
+    ```
+  </TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install @altf4llc/vorpal-sdk
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @altf4llc/vorpal-sdk
+    ```
+  </TabItem>
+</Tabs>
+
+## Project setup
+
+Create a `Vorpal.toml` manifest in your project root:
+
+```toml title="Vorpal.toml"
+language = "typescript"
+
+[source]
+includes = [
+    "bun.lock",
+    "package.json",
+    "src/vorpal.ts",
+    "tsconfig.json"
+]
+```
+
+The `language` field tells Vorpal which SDK to use. The `[source]` section defines which files to include.
+
+Then create a build configuration in `vorpal.ts`:
+
+```typescript title="vorpal.ts"
+import { ConfigContext } from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+// Define your artifacts here
+
+await ctx.run();
+```
+
+Every Vorpal config starts by creating a context. Target systems are canonical system strings, available as `SYSTEMS` for every supported platform. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+
+## Defining artifacts
+
+Artifacts are the core building blocks in Vorpal. Each artifact defines what to build, which platforms to target, what files to include, and more.
+
+### Define an artifact
+
+Use the `TypeScript` builder to compile a TypeScript project into a cross-platform artifact:
+
+:::note
+`TypeScript` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
+:::
+
+```typescript title="vorpal.ts" {1,5-8}
+import { ConfigContext, SYSTEMS, TypeScript } from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+await new TypeScript("my-app", SYSTEMS)
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+await ctx.run();
+```
+
+The `TypeScript` builder:
+- **`withEntrypoint`** — Sets the entry file. When set, produces a compiled binary. When omitted, produces a library package.
+- **`withIncludes`** — Lists files and directories to include in the build source
+
+The `TypeScript` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withEntrypoint(file)` | Entry file — binary mode when set, library mode when omitted |
+| `withIncludes(paths)` | Source files to include |
+| `withArtifacts(names)` | Artifact dependencies available during build |
+| `withEnvironments(vars)` | Environment variables for the build |
+| `withSecrets(map)` | Build-time secrets |
+| `withAliases(aliases)` | Alternative names for the artifact |
+| `withSourceScripts(scripts)` | Scripts to run before build |
+| `withWorkingDir(dir)` | Custom working directory |
+
+#### Secrets
+
+Vorpal delivers each secret to the build step as a file at `$VORPAL_SECRET_DIR/<NAME>`, not as an environment variable. Read the value from that file in your script. A step whose arguments or environment reference a secret (`$NAME` or `${NAME}`) fails. Secrets follow these rules:
+
+- A value is at most 64 KiB (65536 bytes) and may hold any bytes, including binary data that is not valid UTF-8.
+- A name matches `[A-Za-z_][A-Za-z0-9_]*`, does not start with `VORPAL_`, and is not a duplicate of another secret name in the same step.
+- Do not copy a secret file into `$VORPAL_OUTPUT`, because outputs are pushed.
+
+A `Process` receives these files only while its lifecycle scripts are built, not when the process runs, so they cannot supply runtime credentials. Runtime secrets will be supported for processes in a future release. See [Processes](/concepts/processes/#secrets).
+
+`Job` and `Process` accept a `Uint8Array` value through `withSecrets`:
+
+```typescript
+await new Job("deploy", 'my-tool --token-file "$VORPAL_SECRET_DIR/API_TOKEN"', SYSTEMS)
+  .withSecrets(new Map([["API_TOKEN", new TextEncoder().encode("example-token")]]))
+  .build(ctx);
+```
+
+Text values still work: a `string` value is stored as its UTF-8 bytes.
+
+See [Artifacts](/concepts/artifacts/) to learn more.
+
+### Define artifact dependencies
+
+Build artifacts like `Protoc` and pass them as dependencies to your language artifact:
+
+:::note
+`Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
+:::
+
+```typescript title="vorpal.ts" {3,10,13}
+import {
+  ConfigContext,
+  Protoc,
+  SYSTEMS,
+  TypeScript,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const protoc = await new Protoc().build(ctx);
+
+await new TypeScript("my-app", SYSTEMS)
+  .withArtifacts([protoc])
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+await ctx.run();
+```
+
+The dependent artifact's output is available at `$VORPAL_ARTIFACT_<digest>` during execution. Use `getEnvKey` to resolve the path.
+
+See [Artifacts](/concepts/artifacts/) to learn more.
+
+### Define development environments
+
+Create a portable development shell with pinned tools, environment variables, and more:
+
+```typescript title="vorpal.ts" {5,12-15}
+import {
+  ConfigContext,
+  Protoc,
+  SYSTEMS,
+  TypeScriptDevelopmentEnvironment,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const protoc = await new Protoc().build(ctx);
+
+await new TypeScriptDevelopmentEnvironment("my-project-shell", SYSTEMS)
+  .withArtifacts([protoc])
+  .withEnvironments(["NODE_ENV=development", "LOG_LEVEL=debug"])
+  .build(ctx);
+
+await ctx.run();
+```
+
+Activate the environment:
+
+```bash title="Terminal"
+source $(vorpal build --path my-project-shell)/bin/activate
+```
+
+Verify that dependencies are coming from the Vorpal store:
+
+```bash title="Terminal"
+$ which protoc
+/var/lib/vorpal/store/artifact/output/library/512b7dd.../bin/protoc
+```
+
+To exit, run `deactivate` or close the shell.
+
+The development environment builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withArtifacts(artifacts)` | Artifact dependencies available in the shell |
+| `withEnvironments(environments)` | Environment variables set in the shell |
+| `withSecrets(secrets)` | Secrets for the step that builds the environment, each read from `$VORPAL_SECRET_DIR/<NAME>`; not available in the shell |
+
+See [Environments](/concepts/environments/) to learn more.
+
+### Define jobs
+
+Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
+
+```typescript title="vorpal.ts" {3,7,20,22-24}
+import {
+  ConfigContext,
+  Job,
+  Protoc,
+  SYSTEMS,
+  TypeScript,
+  getEnvKey,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const protoc = await new Protoc().build(ctx);
+
+const myApp = await new TypeScript("my-app", SYSTEMS)
+  .withArtifacts([protoc])
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+const script = `${getEnvKey(myApp)}/bin/my-app --version`;
+
+await new Job("my-job", script, SYSTEMS)
+  .withArtifacts([myApp])
+  .build(ctx);
+
+await ctx.run();
+```
+
+The `Job` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `withSecrets(secrets)` | Secrets available during execution |
+
+See [Jobs](/concepts/jobs/) to learn more.
+
+### Define processes
+
+Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
+
+```typescript title="vorpal.ts" {3,7,20-27}
+import {
+  ConfigContext,
+  Process,
+  Protoc,
+  SYSTEMS,
+  TypeScript,
+  getEnvKey,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const protoc = await new Protoc().build(ctx);
+
+const myApp = await new TypeScript("my-app", SYSTEMS)
+  .withArtifacts([protoc])
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+await new Process(
+  "my-server",
+  `${getEnvKey(myApp)}/bin/my-server`,
+  SYSTEMS,
+)
+  .withArguments(["--port", "8080"])
+  .withArtifacts([myApp])
+  .build(ctx);
+
+await ctx.run();
+```
+
+The `Process` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withArguments(args)` | Command-line arguments for the process |
+| `withArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `withSecrets(secrets)` | Secrets for the step that builds the lifecycle scripts, each delivered as the file `$VORPAL_SECRET_DIR/<NAME>`; not available when the process runs. Runtime secrets will be supported for processes in a future release. |
+
+See [Processes](/concepts/processes/) to learn more.
+
+### Define user environments
+
+Install tools into your user-wide environment with symlinks:
+
+```typescript title="vorpal.ts" {5-6,16-19}
+import {
+  ConfigContext,
+  SYSTEMS,
+  TypeScript,
+  UserEnvironment,
+  getEnvKey,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const myApp = await new TypeScript("my-app", SYSTEMS)
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+await new UserEnvironment("my-home", SYSTEMS)
+  .withArtifacts([myApp])
+  .withSymlinks([[`${getEnvKey(myApp)}/bin/my-app`, "$HOME/.vorpal/bin/my-app"]])
+  .build(ctx);
+
+await ctx.run();
+```
+
+Activate with `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
+
+The `UserEnvironment` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withArtifacts(artifacts)` | Artifact dependencies available in the environment |
+| `withEnvironments(environments)` | Environment variables set in the environment |
+| `withSymlinks(symlinks)` | Symlinks to create from artifact outputs to local paths |
+
+See [Environments](/concepts/environments/) to learn more.
+
+## Custom executors
+
+Replace the default Bash executor with Docker or any custom binary:
+
+```typescript title="vorpal.ts" {3-4,10-15,17-18}
+import {
+  ConfigContext,
+  Artifact,
+  ArtifactStep,
+  SYSTEMS,
+} from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const step = new ArtifactStep("docker")
+  .withArguments([
+    "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
+    "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
+  ])
+  .build();
+
+await new Artifact("example-docker", [step], SYSTEMS)
+  .build(ctx);
+
+await ctx.run();
+```
+
+The `ArtifactStep` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withArguments(args)` | Arguments passed to the entrypoint |
+| `withArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `withEnvironments(environments)` | Environment variables for the step |
+| `withScript(script)` | Script to execute in the step |
+| `withSecrets(secrets)` | Secrets available during execution |
+
+The `Artifact` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `withAliases(aliases)` | Alternative names for the artifact |
+| `withSources(sources)` | Source files to include in the artifact |
+
+See [Artifacts](/concepts/artifacts/) to learn more.
+
+## Building
+
+Run your config with the Vorpal CLI:
+
+```bash
+vorpal build my-app
+```
+
+First builds download toolchains and dependencies. Subsequent builds with the same inputs resolve instantly from the content-addressed cache.

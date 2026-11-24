@@ -1,0 +1,17 @@
+group: settings
+order: 1
+message: "unknown setting key '<key>'. Valid keys: <keys>"
+raised_by: The CLI, in `vorpal config set` and `vorpal config get`.
+meaning: "`<key>` is not a setting. The message lists the keys that are."
+fix:
+  - text: "Use one of `language`, `name`, `namespace`, `registry`, `system` or `worker`."
+check: "`vorpal config get <key>` prints the value and where it comes from."
+links:
+  - text: "`vorpal config`"
+    href: /reference/cli/config/
+  - text: Configuration files
+    href: /reference/configuration/
+sources:
+  - file: cli/src/command/config_cmd.rs
+    line: 38
+    match: "unknown setting key '{}'. Valid keys: {}"

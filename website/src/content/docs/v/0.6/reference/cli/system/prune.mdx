@@ -1,0 +1,35 @@
+---
+slug: v/0.6/reference/cli/system/prune
+title: vorpal system prune
+description: Remove artifact outputs, archives, aliases, config programs or sandboxes from the local store.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - v/0.6/concepts/caching
+---
+
+import CliSynopsis from '../../../../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="system prune" />
+
+## Options {#options}
+
+<CliEntries command="system prune" kind="options" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Examples {#examples}
+
+```bash prompt
+# Remove everything
+vorpal system prune --all
+# Remove only archives and outputs
+vorpal system prune --artifact-archives --artifact-outputs
+# Remove only sandboxes
+vorpal system prune --sandboxes
+```

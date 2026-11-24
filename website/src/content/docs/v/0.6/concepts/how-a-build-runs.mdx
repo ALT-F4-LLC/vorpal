@@ -1,0 +1,35 @@
+---
+slug: v/0.6/concepts/how-a-build-runs
+title: How a build runs
+description: When you run vorpal build, your config program, the agent daemon, the worker, the local store and the registry each do one job. Vorpal looks in the store, then the registry, and builds only what neither has.
+kind: concept
+wide: true
+metaNote: 'Reproducible builds: Linux; macOS Planned, ENG-364'
+lastUpdated: 2026-11-24
+related:
+  - v/0.6/concepts/artifacts
+  - v/0.6/concepts/caching
+  - v/0.6/concepts/architecture
+  - v/0.6/reference/cli/build
+---
+
+import BuildParts from '../../../../../components/diagrams/BuildParts.astro';
+import Journey from '../../../../../components/Journey.astro';
+
+## The parts {#parts}
+
+Five parts take part in every build. They can all run on one laptop, or the registry and worker can run on other machines.
+
+<BuildParts />
+
+Below, step through one build of the Python template, then change the situation under "What if…" to see which work Vorpal skips. With JavaScript off, the journey reads as text.
+
+## Follow one build, from source to running program {#j1-h}
+
+<Journey />
+
+## Putting it into practice {#practice}
+
+- [Add a development environment](/guides/development-environment/): the same build path, for the tools on your `PATH`.
+- [Caching](/concepts/caching/): what is and isn't part of a digest.
+- [Set up TLS and client trust](/self-hosting/tls/): before you move the registry or worker to another machine.

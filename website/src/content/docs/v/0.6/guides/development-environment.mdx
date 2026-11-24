@@ -1,0 +1,89 @@
+---
+slug: v/0.6/guides/development-environment
+title: Add a development environment
+description: Give everyone on a project the same pinned tools in their shell with a Vorpal development environment.
+summary: Give everyone on the project the same pinned tools in their shell. Add a development environment to your config program, build it, then activate it.
+kind: how-to
+wide: true
+lastUpdated: 2026-11-24
+related:
+  - v/0.6/concepts/environments
+  - v/0.6/getting-started/quickstart
+  - v/0.6/troubleshooting/errors
+  - v/0.6/reference/cli/prepare
+---
+
+import SdkGroup from '../../../../../components/SdkGroup.astro';
+
+<dl class="vp-facts" id="before">
+<dt>Before you start</dt>
+<dd>A project with `Vorpal.toml` and a config program. The [Quickstart](/getting-started/quickstart/) makes one.</dd>
+<dt>Use it when</dt>
+<dd>AI agents, teammates and CI need the same `protoc`, interpreter or compiler, without installing them by hand.</dd>
+</dl>
+
+## Define the environment {#step-1}
+
+This gives an environment named `my-project-dev` the `protoc` compiler. In Python and TypeScript you add it with the artifacts option, which puts each artifact's tools on `PATH`. The Go and Rust builders include `protoc` already.
+
+The environments option sets variables, as `KEY=VALUE` strings.
+
+Every SDK has a development environment builder for its own language; each example uses the one that matches its SDK. Same name and the same `protoc` in every SDK, but each builder also adds its own language toolchain, so the four environments are different artifacts with different digests.
+
+<SdkGroup
+	example="dev-environment"
+	titles={{
+		python: 'src/vorpal.py',
+		typescript: 'src/vorpal.ts',
+		go: 'cmd/vorpal/main.go',
+		rust: 'src/vorpal.rs',
+	}}
+/>
+
+## Build and activate it {#step-2}
+
+Build the environment and source its `bin/activate` in your current shell.
+
+<p class="vp-iffail">If this fails: [source '&lt;name&gt;' is unpinned](/troubleshooting/errors/#err-source-unpinned) on a first build of `protoc`: run `vorpal prepare my-project-dev` first.</p>
+
+```bash prompt
+source "$(vorpal build --path my-project-dev)/bin/activate"
+```
+
+```text output title="Your prompt now starts with"
+(my-project-dev) $
+```
+
+## Check it worked {#step-3}
+
+The tool comes from the Vorpal store, not from your system. To leave the environment, run `deactivate` or close the shell.
+
+```bash prompt
+which protoc
+```
+
+```text output
+/var/lib/vorpal/store/artifact/output/library/<digest>/bin/protoc
+```
+
+:::note[Secrets]
+A secret you add reaches only the step that builds the environment, read from `$VORPAL_SECRET_DIR/<NAME>`. It is not available in the shell. See [Secrets](/concepts/processes/#secrets).
+:::
+
+## Options {#options}
+
+Each builder takes these options. The names follow each language's style.
+
+| Option | Python | TypeScript | Go | Rust |
+|---|---|---|---|---|
+| Artifacts whose tools go on `PATH` | `with_artifacts` | `withArtifacts` | `WithArtifacts` | `with_artifacts` |
+| Variables, as `KEY=VALUE` strings | `with_environments` | `withEnvironments` | `WithEnvironments` | `with_environments` |
+| Secrets, for the build step only | `with_secrets` | `withSecrets` | `WithSecrets` | `with_secrets` |
+| Leave out the default `protoc` | No default `protoc` | No default `protoc` | `WithoutProtoc` | `without_protoc` |
+
+Every builder option in your SDK is on its one-page guide: [Python](/guides/python/#define-development-environments), [TypeScript](/guides/typescript/#define-development-environments), [Go](/guides/go/#define-development-environments) or [Rust](/guides/rust/#define-development-environments).
+
+## Common problems {#problems}
+
+- [`source '<name>' is unpinned - use '--unlock' to pin`](/troubleshooting/errors/#err-source-unpinned): pin the environment's sources with `vorpal prepare my-project-dev`.
+- [Registry service is unavailable](/troubleshooting/errors/#err-registry-unavailable): the services are not running, or the config program can't reach them.

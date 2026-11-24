@@ -1,0 +1,70 @@
+---
+slug: v/0.6/reference/cli/build
+title: vorpal build
+description: Build one artifact and its dependencies from your config program, and print the artifact's digest.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - v/0.6/reference/cli/prepare
+  - v/0.6/reference/configuration
+  - v/0.6/concepts/caching
+---
+
+import CliSynopsis from '../../../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="build" />
+
+## Arguments {#arguments}
+
+<CliEntries command="build" kind="arguments" />
+
+## Options {#options}
+
+<CliEntries command="build" kind="options" />
+
+The `registry`, `worker`, `namespace` and `system` settings replace these defaults: `Vorpal.toml` first, then `~/.vorpal/settings.json`. A flag on the command line always wins. See [Configuration](/reference/configuration/#files).
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command, for example `--level debug` to see full build output.
+
+## Examples {#examples}
+
+```bash prompt
+# Build and print the output path
+vorpal build my-app --path
+# See every digest without building the artifact
+vorpal build my-app --list
+# Accept a changed remote source and update Vorpal.lock
+vorpal build my-app --unlock
+# Use another config file, for example a Go config program
+vorpal build my-app --config Vorpal.go.toml
+# Build for another system
+vorpal build my-app --system x86_64-linux
+# Pass variables to the config program
+vorpal build my-app --variable VERSION=1.2.3 --variable ENV=prod
+```
+
+## Output {#output}
+
+- Default: the artifact's digest on stdout.
+- `--path`: the artifact output's path.
+- `--export`: the definition as JSON.
+- `--list`: lines of `<name>  <digest>`, the artifact's dependencies first.
+- Progress goes to stderr: a `mode: locked` line on every build, and step output when steps run. The digest is the last line.
+
+:::planned[ENG-370]
+JSON output for `build`, `inspect` and `--list` is tracked in ENG-370. All output is text in 0.6.0 and main.
+:::
+
+## Errors and exit codes {#errors}
+
+- [`selected 'artifact' not found: <NAME>`](/troubleshooting/errors/#err-selected-artifact-not-found)
+- [`source '<name>' changed - use '--unlock' to update`](/troubleshooting/errors/#err-source-changed)
+- [`source '<name>' is unpinned - use '--unlock' to pin`](/troubleshooting/errors/#err-source-unpinned)
+- [`Unsupported language '<x>' in Vorpal.toml`](/troubleshooting/errors/#err-unsupported-language)
+
+Exit code 0 on success, 1 when the build fails, 2 for a usage error such as an unknown flag.

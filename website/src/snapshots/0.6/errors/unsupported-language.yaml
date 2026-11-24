@@ -1,0 +1,17 @@
+group: config
+order: 2
+message: "Unsupported language '<x>' in Vorpal.toml"
+raised_by: The CLI, in `vorpal build` and `vorpal prepare`, before it builds the config program.
+meaning: >-
+  The `language` key in `Vorpal.toml` (or your settings) is not one of `go`, `python`, `rust` or
+  `typescript`.
+fix:
+  - text: Set `language` to the SDK your config program is written in, for example `language = "python"`.
+check: The build gets past the config program and prints a digest.
+links:
+  - text: "`language`"
+    href: /reference/configuration/#key-language
+sources:
+  - file: cli/src/command/build.rs
+    line: 610
+    match: "Unsupported language '{other}' in Vorpal.toml"
