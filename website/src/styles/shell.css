@@ -324,20 +324,47 @@ site-search button[data-open-modal] > kbd,
 	height: 1.25rem;
 }
 
-/* ThemeSelect (Starlight's Select) as a bordered control */
-.vp-theme starlight-theme-select label {
-	min-height: 2rem;
-	padding-inline: 0.5rem;
+/* Theme: Auto / Light / Dark segmented radio group (ThemeSelect.astro) */
+.vp-seg {
+	display: inline-flex;
+	margin: 0;
+	padding: 2px;
 	border: 1px solid var(--vp-line-strong);
-	border-radius: 7px;
+	border-radius: 8px;
 	background: var(--vp-surface);
-	color: var(--vp-ink);
 }
-.vp-theme starlight-theme-select select {
-	height: 1.875rem;
-	padding-block: 0;
-	font: 600 0.8125rem / 1 var(--vp-sans);
-	color: var(--vp-ink);
+.vp-seg label {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	min-height: 1.75rem;
+	padding: 0 0.5rem;
+	border-radius: 6px;
+	color: var(--vp-ink-2);
+	font: 500 0.8125rem / 1 var(--vp-sans);
+	cursor: pointer;
+}
+.vp-seg input {
+	position: absolute;
+	inset: 0;
+	margin: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+.vp-seg label:has(input:checked) {
+	background: var(--vp-ink);
+	color: var(--vp-surface);
+	font-weight: 600;
+}
+.vp-seg label:has(input:focus-visible) {
+	outline: 2px solid var(--vp-focus);
+	outline-offset: 2px;
+}
+@media (forced-colors: active) {
+	.vp-seg label:has(input:checked) {
+		outline: 2px solid Highlight;
+		outline-offset: -2px;
+	}
 }
 
 /* The Menu button and dialog: below 50rem, with JavaScript */

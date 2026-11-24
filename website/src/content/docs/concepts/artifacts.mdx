@@ -3,6 +3,8 @@ title: Artifacts
 description: How Vorpal's content-addressed artifact model ensures reproducible builds.
 ---
 
+import ArtifactParts from '../../../components/diagrams/ArtifactParts.astro';
+
 An artifact is the core unit of work in Vorpal. It represents something you want to build -- a binary, a library, a development environment, or any other output. Artifacts are content-addressed, meaning they are identified by a SHA-256 hash of their inputs. This page explains how artifacts work and why they are designed this way.
 
 ## Anatomy of an artifact
@@ -14,14 +16,7 @@ Every artifact has four components:
 - **Steps** -- The build instructions. Each step has an entrypoint (the program that runs the step), arguments, environment variables, and optional secrets.
 - **Target systems** -- The platforms this artifact can be built for (e.g., `aarch64-darwin` for macOS Apple Silicon, `x86_64-linux` for Linux x86_64)
 
-```mermaid
-graph LR
-    accTitle: Parts of an artifact
-    accDescr: An artifact is made of three parts: sources, steps and target systems.
-    A[Artifact] --> SRC[Sources]
-    A --> STEPS[Steps]
-    A --> SYS[Target Systems]
-```
+<ArtifactParts />
 
 ## Content addressing
 

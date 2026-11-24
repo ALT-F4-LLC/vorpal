@@ -1,0 +1,63 @@
+---
+// Reference entry properties (design-system.md §10): one line of labelled
+// values under an entry's heading, always in this order: File, Type,
+// Default, Allowed, Setting, Flag, Env, Since. Leave out what does not apply.
+//
+// <Props type="string" default="`&quot;rust&quot;`" env="`VORPAL_SOCKET_PATH`" />
+//
+// A value in backticks renders as code; anything else as text.
+//
+// The entry around it comes from the heading (`### name {#key-name}` on a
+// page with a reference `kind`; src/plugins/sectionize.mjs). Its link
+// control is Starlight's anchor link beside the heading: a real link that
+// works without JavaScript; with it, a click also copies the link.
+interface Props {
+	file?: string;
+	type?: string;
+	default?: string;
+	allowed?: string;
+	setting?: string;
+	flag?: string;
+	env?: string;
+	since?: string;
+}
+
+const ORDER = [
+	['file', 'File'],
+	['type', 'Type'],
+	['default', 'Default'],
+	['allowed', 'Allowed'],
+	['setting', 'Setting'],
+	['flag', 'Flag'],
+	['env', 'Env'],
+	['since', 'Since'],
+] as const;
+
+const rows = ORDER.flatMap(([key, label]) => {
+	const value = Astro.props[key];
+	if (value === undefined) return [];
+	const code = /^`[^`]+`$/.test(value);
+	return [{ label, value: code ? value.slice(1, -1) : value, code }];
+});
+---
+
+<dl class="vp-props">
+	{
+		rows.map((r) => (
+			<div>
+				<dt>{r.label}</dt>
+				<dd>{r.code ? <code dir="auto">{r.value}</code> : r.value}</dd>
+			</div>
+		))
+	}
+</dl>
+
+<script>
+	// A click on an entry's link control also copies the link. Navigation
+	// still happens, so the address bar and :target show the entry.
+	document.querySelectorAll<HTMLAnchorElement>('.vp-refent .sl-anchor-link').forEach((a) =>
+		a.addEventListener('click', () => {
+			navigator.clipboard?.writeText(a.href).catch(() => {});
+		}),
+	);
+</script>

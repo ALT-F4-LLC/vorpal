@@ -1,107 +1,44 @@
 ---
-// Theme select. Same storage and behaviour as Starlight's ThemeSelect, so
-// its head script (ThemeProvider) and this control agree: key
-// `starlight-theme`, values `auto` (stored as ''), `light`, `dark`.
-// Changes from Starlight's component: the options are in the design's order
-// (Auto, Light, Dark), and other open tabs follow a change (`storage`).
-import { Icon } from '@astrojs/starlight/components';
-import Select from '@astrojs/starlight/components/Select.astro';
+// Theme control: the design's Auto / Light / Dark segmented radio group
+// (design-system.md §1). Storage is Starlight's, so its head script
+// (ThemeProvider) applies the choice before first paint: key
+// `starlight-theme`, values `auto` (stored as ''), `light`, `dark`. See
+// src/scripts/theme.ts; the header's script wires the radios up.
+//
+// The radios need JavaScript to do anything, so the group shows only with
+// it (`vp-jsonly`). Without JavaScript the page follows the system setting
+// (tokens.css and the code themes key dark mode on `.vp-js`).
+//
+// Starlight may render this component more than once on a page, so each
+// group gets its own radio name.
+const locals = Astro.locals as { vpThemeGroups?: number };
+locals.vpThemeGroups = (locals.vpThemeGroups ?? 0) + 1;
+const name = `vp-theme-${locals.vpThemeGroups}`;
+const options = [
+	{ value: 'auto', label: Astro.locals.t('themeSelect.auto') },
+	{ value: 'light', label: Astro.locals.t('themeSelect.light') },
+	{ value: 'dark', label: Astro.locals.t('themeSelect.dark') },
+];
 ---
 
-<starlight-theme-select>
-	<Select
-		label={Astro.locals.t('themeSelect.accessibleLabel')}
-		options={[
-			{ label: Astro.locals.t('themeSelect.auto'), selected: true, value: 'auto' },
-			{ label: Astro.locals.t('themeSelect.light'), selected: false, value: 'light' },
-			{ label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
-		]}
-		width="6.25em"
-	>
-		<Fragment slot="icon">
-			<Icon name="laptop" class="sl-theme-icon-auto" />
-			<Icon name="sun" class="sl-theme-icon-light" />
-			<Icon name="moon" class="sl-theme-icon-dark" />
-		</Fragment>
-	</Select>
-</starlight-theme-select>
+<fieldset class="vp-seg vp-jsonly" data-vp-theme-seg>
+	<legend class="sr-only">{Astro.locals.t('themeSelect.accessibleLabel')}</legend>
+	{
+		options.map((o) => (
+			<label>
+				<input type="radio" name={name} value={o.value} checked={o.value === 'auto'} />
+				{o.label}
+			</label>
+		))
+	}
+</fieldset>
 
-{/* Inlined so the select shows the stored choice before first paint. */}
+{/* Inlined so the group shows the stored choice before first paint. */}
 <script
 	is:inline
 	set:html={`(() => {
-		let theme = null;
-		try { theme = localStorage.getItem('starlight-theme'); } catch {}
-		if (theme) document.querySelectorAll('starlight-theme-select select').forEach((s) => { s.value = theme; });
+		let theme = '';
+		try { theme = localStorage.getItem('starlight-theme') || ''; } catch {}
+		if (theme === 'light' || theme === 'dark') document.querySelectorAll('[data-vp-theme-seg] input[value="' + theme + '"]').forEach((r) => { r.checked = true; });
 	})();`}
 />
-
-<style>
-	@layer starlight.components {
-		starlight-theme-select:has([value='dark']:not(:checked)) :global(.sl-theme-icon-dark),
-		starlight-theme-select:has([value='light']:not(:checked)) :global(.sl-theme-icon-light),
-		starlight-theme-select:has([value='auto']:not(:checked)) :global(.sl-theme-icon-auto) {
-			display: none;
-		}
-	}
-</style>
-
-<script>
-	type Theme = 'auto' | 'dark' | 'light';
-
-	/** Starlight's key; ThemeProvider reads it before first paint. */
-	const storageKey = 'starlight-theme';
-
-	const parseTheme = (theme: unknown): Theme =>
-		theme === 'auto' || theme === 'dark' || theme === 'light' ? theme : 'auto';
-
-	function loadTheme(): Theme {
-		try {
-			return parseTheme(localStorage.getItem(storageKey));
-		} catch {
-			return 'auto';
-		}
-	}
-
-	function storeTheme(theme: Theme): void {
-		try {
-			localStorage.setItem(storageKey, theme === 'light' || theme === 'dark' ? theme : '');
-		} catch {}
-	}
-
-	const systemTheme = (): 'light' | 'dark' =>
-		matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-
-	/** Update the selects and the document; store only when the reader chose. */
-	function applyTheme(theme: Theme, store: boolean): void {
-		document
-			.querySelectorAll<HTMLSelectElement>('starlight-theme-select select')
-			.forEach((select) => {
-				select.value = theme;
-			});
-		document.documentElement.dataset.theme = theme === 'auto' ? systemTheme() : theme;
-		if (store) storeTheme(theme);
-	}
-
-	matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-		if (loadTheme() === 'auto') applyTheme('auto', false);
-	});
-
-	// Another tab changed the choice.
-	window.addEventListener('storage', (event) => {
-		if (event.key === storageKey || event.key === null) applyTheme(loadTheme(), false);
-	});
-
-	class StarlightThemeSelect extends HTMLElement {
-		constructor() {
-			super();
-			applyTheme(loadTheme(), false);
-			this.querySelector('select')?.addEventListener('change', (e) => {
-				if (e.currentTarget instanceof HTMLSelectElement) {
-					applyTheme(parseTheme(e.currentTarget.value), true);
-				}
-			});
-		}
-	}
-	customElements.define('starlight-theme-select', StarlightThemeSelect);
-</script>

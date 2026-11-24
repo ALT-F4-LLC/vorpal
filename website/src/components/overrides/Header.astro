@@ -149,12 +149,11 @@ const themes = [
 				{sdks.map((o) => <option value={o.value}>{o.label}</option>)}
 			</select>
 		</label>
-		{/* Shows the stored SDK before first paint. */}
+		{/* Shows the SDK the head script chose, before first paint. */}
 		<script
 			is:inline
 			set:html={`(() => {
-				let sdk = null;
-				try { sdk = localStorage.getItem('vorpal-sdk'); } catch {}
+				const sdk = document.documentElement.dataset.sdk;
 				if (sdk) document.querySelectorAll('[data-vp-sdk-select]').forEach((s) => {
 					if (s.querySelector('option[value="' + sdk + '"]')) s.value = sdk;
 				});
@@ -191,70 +190,38 @@ const themes = [
 </div>
 
 <script>
-	const SDK_KEY = 'vorpal-sdk';
-	const SDKS = ['python', 'typescript', 'go', 'rust'];
+	import { initSdkGroups, onSdk, setSdk } from '../../scripts/sdk';
+	import { onTheme, setTheme } from '../../scripts/theme';
+
 	const desktop = matchMedia('(min-width: 50rem)');
 
-	function loadSdk(): string {
-		try {
-			const sdk = localStorage.getItem(SDK_KEY);
-			if (sdk && SDKS.includes(sdk)) return sdk;
-		} catch {}
-		return 'python';
-	}
-
-	/** Show the SDK in every control. Step 4's example groups follow `vorpal:sdk`. */
-	function showSdk(sdk: string): void {
+	// The header select and the Menu radios follow the site SDK (set here, by
+	// an example group's tabs, or by another tab) and set it.
+	onSdk((sdk) => {
 		document.querySelectorAll<HTMLSelectElement>('[data-vp-sdk-select]').forEach((s) => {
 			s.value = sdk;
 		});
 		document.querySelectorAll<HTMLInputElement>('[data-vp-sdk-radio]').forEach((r) => {
 			r.checked = r.value === sdk;
 		});
-	}
-
-	function setSdk(sdk: string): void {
-		if (!SDKS.includes(sdk)) return;
-		showSdk(sdk);
-		try {
-			localStorage.setItem(SDK_KEY, sdk);
-		} catch {}
-		document.dispatchEvent(new CustomEvent('vorpal:sdk', { detail: { sdk } }));
-	}
-
-	showSdk(loadSdk());
+	});
 	document.querySelectorAll<HTMLSelectElement>('[data-vp-sdk-select]').forEach((s) =>
 		s.addEventListener('change', () => setSdk(s.value)),
 	);
 	document.querySelectorAll<HTMLInputElement>('[data-vp-sdk-radio]').forEach((r) =>
 		r.addEventListener('change', () => r.checked && setSdk(r.value)),
 	);
-	// Another tab changed the choice.
-	window.addEventListener('storage', (event) => {
-		if (event.key === SDK_KEY || event.key === null) {
-			const sdk = loadSdk();
-			showSdk(sdk);
-			document.dispatchEvent(new CustomEvent('vorpal:sdk', { detail: { sdk } }));
-		}
-	});
 
-	// Theme radios in the Menu drive the header's ThemeSelect, which owns
-	// Starlight's `starlight-theme` storage.
-	const themeSelect = () => document.querySelector<HTMLSelectElement>('starlight-theme-select select');
-	const showTheme = () => {
-		const value = themeSelect()?.value ?? 'auto';
-		document.querySelectorAll<HTMLInputElement>('[data-vp-theme-radio]').forEach((r) => {
-			r.checked = r.value === value;
-		});
-	};
-	document.querySelectorAll<HTMLInputElement>('[data-vp-theme-radio]').forEach((r) =>
-		r.addEventListener('change', () => {
-			const select = themeSelect();
-			if (!r.checked || !select) return;
-			select.value = r.value;
-			select.dispatchEvent(new Event('change'));
-		}),
-	);
+	// The page's example groups (SdkGroup.astro).
+	initSdkGroups();
+
+	// The theme radios, in the header's segmented control (ThemeSelect.astro)
+	// and in the Menu, use Starlight's `starlight-theme` storage
+	// (src/scripts/theme.ts).
+	const themeRadios = () =>
+		document.querySelectorAll<HTMLInputElement>('[data-vp-theme-seg] input, [data-vp-theme-radio]');
+	onTheme((theme) => themeRadios().forEach((r) => (r.checked = r.value === theme)));
+	themeRadios().forEach((r) => r.addEventListener('change', () => r.checked && setTheme(r.value)));
 
 	// Disclosures (Sections, version) close on Escape, on a click outside and
 	// when focus leaves them.
@@ -282,8 +249,6 @@ const themes = [
 			const dialog = this.querySelector<HTMLDialogElement>('dialog')!;
 			const close = () => dialog.open && dialog.close();
 			button.addEventListener('click', () => {
-				showTheme();
-				showSdk(loadSdk());
 				dialog.showModal();
 				button.setAttribute('aria-expanded', 'true');
 			});

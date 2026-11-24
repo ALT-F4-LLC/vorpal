@@ -1,26 +1,28 @@
 ---
 title: Quickstart
 description: Create, develop, build, and run your first Vorpal project in minutes.
+kind: tutorial
+wide: true
 ---
 
 This guide walks you through creating a Vorpal project, setting up a development environment, building an artifact, and running it. You should have Vorpal [installed](/getting-started/installation/) before continuing.
 
-## 1. Create your project
+## Create your project {#step-1}
 
 Create a new directory and initialize a Vorpal project:
 
-```bash
+```bash prompt
 mkdir hello-world && cd hello-world
 vorpal init hello-world
 ```
 
 The `init` command prompts you to choose a language for your build configuration -- Go, Rust, TypeScript, or Python. Vorpal scaffolds a working project with a `Vorpal.toml` manifest and a sample build configuration in your chosen language.
 
-## 2. Develop your project
+## Develop your project {#step-2}
 
 All `vorpal init` projects include a language-specific development environment with the relevant toolchain pinned and ready. `init` names it after your project with a `-dev` suffix, so here it is `hello-world-dev`. Activate it:
 
-```bash
+```bash prompt
 source "$(vorpal build --path hello-world-dev)/bin/activate"
 ```
 
@@ -28,35 +30,39 @@ This drops you into a shell with your project's dependencies available -- consis
 
 See [Environments](/concepts/environments/) to learn more about development and user environments.
 
-## 3. Build your project
+## Build your project {#step-3}
 
 Compile your build configuration and produce a content-addressed artifact:
 
-```bash
+```bash prompt
 vorpal build hello-world
+```
+
+```text output
+<digest>
 ```
 
 On the first build, Vorpal downloads the necessary toolchains for your target platforms. Subsequent builds use the local cache -- unchanged inputs resolve instantly without re-downloading or re-compiling.
 
 A successful build returns the artifact's content digest. To get the full filesystem path to the artifact instead, use the `--path` flag:
 
-```bash
+```bash prompt
 vorpal build --path hello-world
 ```
 
 To force a fresh build and skip the cache, use `--rebuild`:
 
-```bash
+```bash prompt
 vorpal build --rebuild hello-world
 ```
 
 See [`vorpal build`](/reference/cli/#vorpal-build) in the CLI reference for all available options.
 
-## 4. Access your artifact output
+## Access your artifact output {#step-4}
 
 Using the `--path` flag from the previous step, you can inspect the artifact's contents with standard tools:
 
-```bash
+```bash prompt
 ls $(vorpal build --path hello-world)
 ```
 
@@ -66,17 +72,17 @@ The Vorpal store is immutable. Do not modify, add, or remove files in the artifa
 
 This is useful for inspecting build output, copying files into a deployment pipeline, or verifying that your artifact contains the expected structure.
 
-## 5. Run your program
+## Run your program {#step-5}
 
 The artifact's executable is in its `bin` directory, named after your project. Run it:
 
-```bash
+```bash prompt
 $(vorpal build --path hello-world)/bin/hello-world
 ```
 
 The sample program from `vorpal init` prints:
 
-```text
+```text output
 Hello, world!
 ```
 

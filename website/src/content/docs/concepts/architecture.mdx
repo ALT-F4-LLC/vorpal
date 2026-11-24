@@ -3,22 +3,15 @@ title: Architecture
 description: How Vorpal's client-server architecture orchestrates builds across services.
 ---
 
+import ArchitectureLayers from '../../../components/diagrams/ArchitectureLayers.astro';
+
 Vorpal uses a client-server architecture where your build configuration is a real program that communicates with backend services over gRPC. This page explains how the pieces fit together and why the system is designed this way.
 
 ## Three layers
 
 Vorpal consists of three layers that work together to turn your build configuration into reproducible artifacts:
 
-```mermaid
-flowchart TD
-    accTitle: Vorpal architecture
-    accDescr: Your config, written as Rust, Go, Python or TypeScript code, reaches the Vorpal CLI through the SDK. The CLI connects to three services: the Agent, the Worker and the Registry.
-    Config["Your Config\n(Rust / Go / Python / TS code)"]
-    Config -->|SDK| CLI["Vorpal CLI"]
-    CLI --> Agent["Agent Service"]
-    CLI --> Worker["Worker Service"]
-    CLI --> Registry["Registry Service"]
-```
+<ArchitectureLayers />
 
 **SDK** -- You write your build configuration as a program using the Vorpal SDK in Rust, Go, Python, or TypeScript. The SDK provides builder types for defining artifacts, sources, build steps, and target platforms. Your config is compiled and executed like any other program.
 
@@ -51,6 +44,10 @@ The Worker executes build steps. For each artifact that needs building, it:
 5. Registers the completed artifact with its content digest
 
 Build steps run the entrypoint you specify -- by default a Bash script, but you can use Docker, Bubblewrap, or any executable as the entrypoint.
+
+:::planned[ENG-364]
+A sandbox for build steps on macOS. On Linux, the SDKs' shell steps already run under Bubblewrap; on macOS they run in plain Bash.
+:::
 
 ### Registry
 

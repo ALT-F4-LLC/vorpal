@@ -3,6 +3,8 @@ title: Processes
 description: Long-running process artifacts with lifecycle management in Vorpal.
 ---
 
+import ProcessOutputs from '../../../components/diagrams/ProcessOutputs.astro';
+
 A **Process** is a long-running artifact that wraps a binary into a managed service with start, stop, and log scripts. Use a Process when you need to run something that stays alive -- a server, a background worker, or any daemon that should run continuously.
 
 ## How processes work
@@ -15,15 +17,7 @@ A Process takes a name, an entrypoint binary, and target systems. Vorpal generat
 | `bin/{name}-stop` | Stop the process by sending SIGTERM to the recorded PID |
 | `bin/{name}-logs` | Tail the process log file |
 
-```mermaid
-flowchart LR
-    accTitle: What a Process produces
-    accDescr: A Process, defined by a name, a binary path and target systems, produces an artifact output with three scripts: bin/my-process-start, bin/my-process-stop and bin/my-process-logs.
-    A["Process(&quot;my-process&quot;, &quot;/path/to/binary&quot;, systems)"] --> B["Artifact output"]
-    B --> C["bin/my-process-start"]
-    B --> D["bin/my-process-stop"]
-    B --> E["bin/my-process-logs"]
-```
+<ProcessOutputs />
 
 The process runs in the background. The start script writes the PID to `$VORPAL_OUTPUT/pid` and streams stdout/stderr to `$VORPAL_OUTPUT/logs.txt`.
 

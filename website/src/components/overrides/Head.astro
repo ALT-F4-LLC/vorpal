@@ -7,11 +7,16 @@
 // JavaScript (the Menu, the SDK select) show without a layout shift, and
 // their no-JS fallbacks (the "Sections" disclosure below 50rem, the footer
 // site map) hide.
+//
+// The SDK script runs here too, first in <head> and before Starlight's
+// stylesheets, so <html data-sdk> picks the example panels before first
+// paint (src/scripts/sdk-head.ts).
 import { Font } from 'astro:assets';
 import Default from '@astrojs/starlight/components/Head.astro';
+import { SDK_HEAD_SCRIPT } from '../../scripts/sdk-head';
 ---
 
-<script is:inline>document.documentElement.classList.add('vp-js');</script>
+<script is:inline set:html={`document.documentElement.classList.add('vp-js');${SDK_HEAD_SCRIPT}`} />
 <Default />
 <Font cssVariable="--font-instrument-sans" preload />
 <Font cssVariable="--font-jetbrains-mono" preload />

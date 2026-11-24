@@ -1,0 +1,23 @@
+---
+// Concepts › Jobs: how a Job becomes an artifact (was a Mermaid flowchart).
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram title="How a Job becomes an artifact" width={420} height={286} marker="dg-job-ah">
+	<rect class="vp-dg-box hot" x="20" y="10" width="380" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="40" y="37">Job</text>
+	<text class="vp-dg-m" x="40" y="59">Job(name, script, systems)</text>
+	<path class="vp-dg-l hot" d="M210 74 V106" marker-end="url(#dg-job-ah)"></path>
+	<rect class="vp-dg-box" x="20" y="111" width="380" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="40" y="138">Artifact</text>
+	<text class="vp-dg-s" x="40" y="160">with a single shell step</text>
+	<path class="vp-dg-l" d="M210 175 V207" marker-end="url(#dg-job-ah)"></path>
+	<rect class="vp-dg-box" x="20" y="212" width="380" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="40" y="239">Output</text>
+	<text class="vp-dg-s" x="40" y="261">content-addressed and cached</text>
+	<Fragment slot="words">
+		<li>A Job is defined by a name, a shell script and the target systems.</li>
+		<li>The Job becomes an artifact with a single shell step that runs the script.</li>
+		<li>That artifact's output is content-addressed and cached, like any other artifact's.</li>
+	</Fragment>
+</Diagram>

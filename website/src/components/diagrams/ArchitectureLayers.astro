@@ -1,0 +1,32 @@
+---
+// Concepts › Architecture: the three layers (was a Mermaid flowchart).
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram title="Your config reaches the CLI through the SDK; the CLI calls three services" width={640} height={326} marker="dg-arch-ah">
+	<rect class="vp-dg-box" x="150" y="10" width="340" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="170" y="37">Your config</text>
+	<text class="vp-dg-s" x="170" y="59">Rust, Go, Python or TypeScript code</text>
+	<path class="vp-dg-l hot" d="M320 74 V124" marker-end="url(#dg-arch-ah)"></path>
+	<text class="vp-dg-s" x="332" y="104">SDK</text>
+	<rect class="vp-dg-box hot" x="220" y="129" width="200" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="240" y="155">Vorpal CLI</text>
+	<text class="vp-dg-m" x="240" y="176">vorpal</text>
+	<path class="vp-dg-l" d="M300 189 C300 222 110 214 110 245" marker-end="url(#dg-arch-ah)"></path>
+	<path class="vp-dg-l" d="M320 189 V245" marker-end="url(#dg-arch-ah)"></path>
+	<path class="vp-dg-l" d="M340 189 C340 222 530 214 530 245" marker-end="url(#dg-arch-ah)"></path>
+	<rect class="vp-dg-box" x="15" y="250" width="190" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="35" y="277">Agent</text>
+	<text class="vp-dg-s" x="35" y="299">service</text>
+	<rect class="vp-dg-box" x="225" y="250" width="190" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="245" y="277">Worker</text>
+	<text class="vp-dg-s" x="245" y="299">service</text>
+	<rect class="vp-dg-box" x="435" y="250" width="190" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="455" y="277">Registry</text>
+	<text class="vp-dg-s" x="455" y="299">service</text>
+	<Fragment slot="words">
+		<li>Your config is a program written in Rust, Go, Python or TypeScript.</li>
+		<li>It reaches the Vorpal CLI through the SDK.</li>
+		<li>The CLI connects to three services: the Agent, the Worker and the Registry.</li>
+	</Fragment>
+</Diagram>

@@ -7,7 +7,8 @@ import starlight from '@astrojs/starlight';
 import { satteri } from '@astrojs/markdown-satteri';
 import emDashes from './src/plugins/em-dashes.mjs';
 import tableRegion from './src/plugins/table-region.mjs';
-import { vorpalDark, vorpalLight } from './src/code-themes.mjs';
+import sectionize from './src/plugins/sectionize.mjs';
+import { asideNotes, plannedDirective } from './src/plugins/callouts.mjs';
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -93,8 +94,16 @@ export default defineConfig({
 		// default; MDX inherits this processor.
 		processor: satteri({
 			// Sätteri renders `--` as an en dash; em-dashes.mjs keeps it an em dash.
-			features: { smartPunctuation: { dashes: false } },
+			// `attributes`: explicit heading ids (`## Title {#step-1}`), which
+			// sectionize.mjs keys on.
+			features: { smartPunctuation: { dashes: false }, attributes: true },
+			// `:::planned[ENG-364]`; Starlight adds its asides after this.
+			mdastPlugins: [plannedDirective],
 			hastPlugins: [
+				// Starlight's <aside> asides become role="note" callouts.
+				asideNotes,
+				// Bench steps, causes and reference entries, by frontmatter `kind`.
+				sectionize,
 				emDashes,
 				// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
 				tableRegion,
@@ -115,65 +124,6 @@ export default defineConfig({
 						});
 					});`,
 				},
-				{
-					// Render ```mermaid code blocks as diagrams in the browser.
-					// - Exact version: a floating `mermaid@11` could change rendering
-					//   under us. Bump deliberately after checking the diagrams.
-					// - Theme follows Starlight's resolved theme
-					//   (`<html data-theme="light|dark">`) and re-renders on toggle.
-					// - Text equivalent: each diagram's source sets `accTitle` and
-					//   `accDescr`, which Mermaid writes into the SVG as <title> and
-					//   <desc>, referenced by aria-labelledby/aria-describedby.
-					// - If Mermaid fails to load or a diagram fails to parse, the code
-					//   block stays visible, so the source remains readable.
-					tag: 'script',
-					attrs: { type: 'module' },
-					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
-const theme = () => (document.documentElement.dataset.theme === 'light' ? 'default' : 'dark');
-const diagrams = Array.from(document.querySelectorAll('pre[data-language="mermaid"]'), (pre) => {
-  const block = pre.closest('.expressive-code') ?? pre;
-  const source = Array.from(pre.querySelectorAll('.ec-line'), (l) => l.textContent).join('\\n');
-  const div = document.createElement('div');
-  div.className = 'mermaid';
-  div.hidden = true;
-  block.after(div);
-  return { block, div, source };
-});
-let rendered = '';
-let count = 0;
-async function render() {
-  const next = theme();
-  if (next === rendered) return;
-  rendered = next;
-  // The dark theme's edge-label background leaves its #ccc text at 4.43:1;
-  // the page background (--vp-surface, dark) brings it above 4.5:1.
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: next,
-    themeVariables: next === 'dark' ? { edgeLabelBackground: '#1c1b18' } : {},
-  });
-  for (const d of diagrams) {
-    try {
-      const { svg, bindFunctions } = await mermaid.render('vorpal-mermaid-' + count++, d.source);
-      d.div.innerHTML = svg;
-      bindFunctions?.(d.div);
-      d.div.hidden = false;
-      d.block.style.display = 'none';
-    } catch (error) {
-      console.error('Mermaid could not render a diagram; showing its source.', error);
-    }
-  }
-}
-let queue = Promise.resolve();
-const schedule = () => (queue = queue.then(render));
-if (diagrams.length) {
-  schedule();
-  new MutationObserver(schedule).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-  });
-}`,
-				},
 			],
 			social: [
 				{
@@ -182,7 +132,12 @@ if (diagrams.length) {
 					href: 'https://github.com/ALT-F4-LLC/vorpal',
 				},
 			],
-			customCss: ['./src/styles/tokens.css', './src/styles/shell.css', './src/styles/custom.css'],
+			customCss: [
+				'./src/styles/tokens.css',
+				'./src/styles/shell.css',
+				'./src/styles/components.css',
+				'./src/styles/custom.css',
+			],
 			// Edit this page. Starlight appends the page's path from website/.
 			editLink: {
 				baseUrl: 'https://github.com/ALT-F4-LLC/vorpal/edit/main/website/',
@@ -201,40 +156,8 @@ if (diagrams.length) {
 				MobileTableOfContents: './src/components/overrides/MobileTableOfContents.astro',
 				Footer: './src/components/overrides/Footer.astro',
 			},
-			expressiveCode: {
-				// Built from the design's syntax tokens (src/code-themes.mjs). The
-				// first theme is the base; each applies under Starlight's
-				// <html data-theme>.
-				themes: [vorpalLight, vorpalDark],
-				themeCssSelector: (theme) => `[data-theme='${theme.type}']`,
-				// The tokens are AA-tested (at least 5.4:1 on the code background), so
-				// a 4.5 floor leaves them untouched; Expressive Code's default (5.5)
-				// would re-tint some of them.
-				minSyntaxHighlightingColorContrast: 4.5,
-				styleOverrides: {
-					borderRadius: 'var(--vp-r-lg)',
-					borderColor: 'var(--vp-line)',
-					frames: {
-						editorBackground: 'var(--vp-code)',
-						terminalBackground: 'var(--vp-code)',
-						editorTabBarBackground: 'var(--vp-chrome)',
-						editorTabBarBorderBottomColor: 'var(--vp-line)',
-						editorActiveTabBackground: 'var(--vp-code)',
-						editorActiveTabForeground: 'var(--vp-ink)',
-						editorActiveTabIndicatorTopColor: 'var(--vp-accent-fill)',
-						editorActiveTabIndicatorBottomColor: 'transparent',
-						terminalTitlebarBackground: 'var(--vp-chrome)',
-						terminalTitlebarForeground: 'var(--vp-ink-2)',
-						terminalTitlebarBorderBottomColor: 'var(--vp-line)',
-						terminalTitlebarDotsForeground: 'var(--vp-line-strong)',
-						inlineButtonForeground: 'var(--vp-ink)',
-						inlineButtonBorder: 'var(--vp-line-strong)',
-						tooltipSuccessBackground: 'var(--vp-ok)',
-						tooltipSuccessForeground: 'var(--vp-surface)',
-						frameBoxShadowCssValue: 'none',
-					},
-				},
-			},
+			// Code blocks: themes, styles and the CLI-block plugin live in
+			// ec.config.mjs, so the <Code> component (SdkGroup) uses them too.
 			sidebar: [
 				{
 					// The header's section names match these group labels (src/nav.ts).

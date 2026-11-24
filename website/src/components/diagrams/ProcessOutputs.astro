@@ -1,0 +1,26 @@
+---
+// Concepts › Processes: what a Process produces (was a Mermaid flowchart).
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram title="What a Process produces: an artifact output with three scripts" width={640} height={290} marker="dg-proc-ah">
+	<rect class="vp-dg-box hot" x="10" y="10" width="620" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="30" y="37">Process</text>
+	<text class="vp-dg-m" x="30" y="59">Process("my-process", "/path/to/binary", systems)</text>
+	<path class="vp-dg-l hot" d="M320 74 V106" marker-end="url(#dg-proc-ah)"></path>
+	<rect class="vp-dg-box" x="200" y="111" width="240" height="56" rx="8"></rect>
+	<text class="vp-dg-t" x="220" y="144">Artifact output</text>
+	<path class="vp-dg-l" d="M300 167 C300 200 110 196 110 225" marker-end="url(#dg-proc-ah)"></path>
+	<path class="vp-dg-l" d="M320 167 V225" marker-end="url(#dg-proc-ah)"></path>
+	<path class="vp-dg-l" d="M340 167 C340 200 530 196 530 225" marker-end="url(#dg-proc-ah)"></path>
+	<rect class="vp-dg-box" x="10" y="230" width="200" height="50" rx="8"></rect>
+	<text class="vp-dg-m" x="26" y="260">bin/my-process-start</text>
+	<rect class="vp-dg-box" x="220" y="230" width="200" height="50" rx="8"></rect>
+	<text class="vp-dg-m" x="236" y="260">bin/my-process-stop</text>
+	<rect class="vp-dg-box" x="430" y="230" width="200" height="50" rx="8"></rect>
+	<text class="vp-dg-m" x="446" y="260">bin/my-process-logs</text>
+	<Fragment slot="words">
+		<li>A Process is defined by a name, the path to a binary and the target systems.</li>
+		<li>It produces an artifact output with three scripts: <code>bin/my-process-start</code>, <code>bin/my-process-stop</code> and <code>bin/my-process-logs</code>.</li>
+	</Fragment>
+</Diagram>

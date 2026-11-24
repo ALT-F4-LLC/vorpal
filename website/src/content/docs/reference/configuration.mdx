@@ -1,7 +1,10 @@
 ---
 title: Configuration
 description: Complete reference for Vorpal configuration files, keys, and resolution.
+kind: reference-config
 ---
+
+import Props from '../../../components/Props.astro';
 
 Vorpal uses a layered configuration system. Settings are resolved from four sources in order of precedence (highest to lowest):
 
@@ -18,14 +21,41 @@ The `Vorpal.toml` file defines build configuration for a project. It is a TOML f
 
 These keys control how the CLI connects to services and resolves builds.
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `language` | string | `"rust"` | Build configuration language (`rust`, `go`, `python`, or `typescript`) |
-| `name` | string | `"vorpal"` | Name of the configuration binary to build |
-| `namespace` | string | `"library"` | Artifact namespace for storage and isolation |
-| `registry` | string | `"unix:///var/lib/vorpal/vorpal.sock"` | Registry service address |
-| `system` | string | Host system | Target build system (e.g., `aarch64-darwin`) |
-| `worker` | string | `"unix:///var/lib/vorpal/vorpal.sock"` | Worker service address |
+#### `language` {#key-language}
+
+<Props type="string" default='`"rust"`' />
+
+Build configuration language (`rust`, `go`, `python`, or `typescript`).
+
+#### `name` {#key-name}
+
+<Props type="string" default='`"vorpal"`' />
+
+Name of the configuration binary to build.
+
+#### `namespace` {#key-namespace}
+
+<Props type="string" default='`"library"`' />
+
+Artifact namespace for storage and isolation.
+
+#### `registry` {#key-registry}
+
+<Props type="string" default='`"unix:///var/lib/vorpal/vorpal.sock"`' />
+
+Registry service address.
+
+#### `system` {#key-system}
+
+<Props type="string" default="Host system" />
+
+Target build system (e.g., `aarch64-darwin`).
+
+#### `worker` {#key-worker}
+
+<Props type="string" default='`"unix:///var/lib/vorpal/vorpal.sock"`' />
+
+Worker service address.
 
 ### `[source]` Section
 

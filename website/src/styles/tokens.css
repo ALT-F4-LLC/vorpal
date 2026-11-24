@@ -9,9 +9,11 @@
  * built-in components (asides, cards, tabs, search, pagination) follow them
  * without restyling each one.
  *
- * Themes: Starlight's head script always sets <html data-theme="light|dark">
- * from `localStorage["starlight-theme"]` (`auto`, `light`, `dark`). Without
- * JavaScript there is no data-theme, so the system setting decides.
+ * Themes: Starlight's head script sets <html data-theme="light|dark"> from
+ * `localStorage["starlight-theme"]` (`auto`, `light`, `dark`). Starlight's
+ * static HTML always says data-theme="dark", so the dark tokens apply only
+ * with JavaScript (`.vp-js`, set in Head.astro). Without JavaScript the
+ * system setting decides (the prefers-color-scheme block below).
  *
  * Contrast (WCAG 2.2): every text pair below is at least 4.5:1 in both
  * themes, and control borders (`--vp-line-strong`) at least 3:1 on the
@@ -71,7 +73,7 @@
 }
 
 /* ===== Dark: by choice, or by system setting when no choice is applied ===== */
-:root[data-theme='dark'] {
+:root.vp-js[data-theme='dark'] {
 	color-scheme: dark;
 	--vp-bg: #131210;
 	--vp-surface: #1c1b18;
@@ -108,7 +110,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-	:root:not([data-theme]) {
+	:root:not(.vp-js) {
 		color-scheme: dark;
 		--vp-bg: #131210;
 		--vp-surface: #1c1b18;
@@ -281,7 +283,7 @@
 	--sl-color-backdrop-overlay: rgba(27, 26, 23, 0.5);
 }
 
-[data-theme='dark'] ::backdrop {
+.vp-js[data-theme='dark'] ::backdrop {
 	--sl-color-backdrop-overlay: rgba(0, 0, 0, 0.6);
 }
 
