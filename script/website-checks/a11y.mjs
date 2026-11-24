@@ -35,6 +35,9 @@ export const PAGES = [
 	'/reference/configuration/',
 	'/troubleshooting/errors/',
 	'/404.html',
+	// A version snapshot: its home and a page with the banner (src/versions.mjs).
+	'/v/0.6/',
+	'/v/0.6/reference/cli/build/',
 ];
 const SCHEMES = /** @type {const} */ (['light', 'dark']);
 const WIDTHS = [390, 1280];

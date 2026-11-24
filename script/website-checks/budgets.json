@@ -1,9 +1,9 @@
 {
-  "$comment": "Per-page budgets from docs-redesign Stage 2 (engineering-constraints.md, section 2). Sizes are gzip (level 6) kilobytes (1 KB = 1024 bytes) of what a page loads on first visit, excluding on-demand search (Pagefind). Page types are matched by path in order; the last rule with no 'match' is the default.",
+  "$comment": "Per-page budgets from docs-redesign Stage 2 (engineering-constraints.md, section 2). Sizes are gzip (level 6) kilobytes (1 KB = 1024 bytes) of what a page loads on first visit, excluding on-demand search (Pagefind). Page types are matched by path in order; the last rule with no 'match' is the default. A version snapshot's pages (/v/<x.y>/...) have the same type as the page they copy.",
   "gzipLevel": 6,
   "types": [
-    { "type": "home", "match": "^/$", "html": 30, "css": 30, "js": 45, "fonts": 60, "total": 200, "requests": 18 },
-    { "type": "reference", "match": "^/reference/", "html": 50, "css": 25, "js": 40, "fonts": 60, "total": 175, "requests": 15 },
+    { "type": "home", "match": "^(/v/[^/]+)?/$", "html": 30, "css": 30, "js": 45, "fonts": 60, "total": 200, "requests": 18 },
+    { "type": "reference", "match": "^(/v/[^/]+)?/reference/", "html": 50, "css": 25, "js": 40, "fonts": 60, "total": 175, "requests": 15 },
     { "type": "doc", "html": 30, "css": 25, "js": 40, "fonts": 60, "total": 150, "requests": 15 }
   ],
   "thirdParty": {
