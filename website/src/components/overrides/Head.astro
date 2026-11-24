@@ -1,0 +1,11 @@
+---
+// Starlight's <head>, plus the self-hosted fonts: @font-face rules (with
+// font-display: optional and metric-matched fallbacks) and a preload for
+// each file. See `fonts` in astro.config.mjs.
+import { Font } from 'astro:assets';
+import Default from '@astrojs/starlight/components/Head.astro';
+---
+
+<Default />
+<Font cssVariable="--font-instrument-sans" preload />
+<Font cssVariable="--font-jetbrains-mono" preload />

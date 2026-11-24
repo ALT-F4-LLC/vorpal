@@ -1,0 +1,325 @@
+/*
+ * Vorpal docs design tokens (docs-redesign stage 4, design-system.md).
+ *
+ * The design system names tokens without a prefix (`--ink`, `--bg`); here
+ * they carry `--vp-` so they cannot collide with Starlight, Expressive Code
+ * or Pagefind variables: `--ink` is `--vp-ink`, `--s4` is `--vp-s4`.
+ *
+ * The second half maps the tokens onto Starlight's own variables, so its
+ * built-in components (asides, cards, tabs, search, pagination) follow them
+ * without restyling each one.
+ *
+ * Themes: Starlight's head script always sets <html data-theme="light|dark">
+ * from `localStorage["starlight-theme"]` (`auto`, `light`, `dark`). Without
+ * JavaScript there is no data-theme, so the system setting decides.
+ *
+ * Contrast (WCAG 2.2): every text pair below is at least 4.5:1 in both
+ * themes, and control borders (`--vp-line-strong`) at least 3:1 on the
+ * surfaces they sit on. The lowest text pairs: light `--vp-accent` on
+ * `--vp-hover` 4.69:1, `--vp-ink-2` on `--vp-hover` 5.64:1; dark
+ * `--vp-ink-2` on `--vp-hover` 5.70:1.
+ */
+
+/* ===== Light (default) ===== */
+:root {
+	color-scheme: light;
+
+	/* Surfaces */
+	--vp-bg: #ebe9e3;
+	--vp-surface: #ffffff;
+	--vp-chrome: #fbfaf7;
+	--vp-bench: #f3f1ec;
+	--vp-code: #fbfaf7;
+	--vp-hover: #ebe8e0;
+	--vp-tile: #ffffff;
+	--vp-dot: #dcd8ce;
+
+	/* Ink and lines */
+	--vp-ink: #1b1a17;
+	--vp-ink-2: #5c5a52;
+	--vp-line: #dedbd3;
+	--vp-line-strong: #807d75;
+	--vp-route: #8a877e;
+	--vp-slot: rgba(27, 26, 23, 0.055);
+
+	/* Accent: state and links only, never decoration. Text uses --vp-accent;
+	   --vp-accent-fill is for bars and routes, never behind text. */
+	--vp-accent: #b3400f;
+	--vp-accent-fill: #d9531a;
+	--vp-accent-tint: #fbeee6;
+	--vp-on-accent: #ffffff;
+	--vp-focus: #b3400f;
+
+	/* Status. Every status also carries a word and an icon. */
+	--vp-err: #b1261c;
+	--vp-err-tint: #fcedeb;
+	--vp-warn: #7d4c00;
+	--vp-warn-tint: #fbf1dc;
+	--vp-ok: #2c6a2a;
+	--vp-ok-tint: #e9f3e6;
+
+	/* Syntax (also in src/code-themes.mjs for Expressive Code) */
+	--vp-k-kw: #9a2a63;
+	--vp-k-str: #2c6a2a;
+	--vp-k-fn: #1d5a96;
+	--vp-k-com: #696760;
+	--vp-k-num: #8a5300;
+
+	--vp-shadow: 0 1px 0 rgba(27, 26, 23, 0.04), 0 6px 18px -10px rgba(27, 26, 23, 0.25);
+	--vp-shadow-pop: 0 18px 40px -16px rgba(0, 0, 0, 0.45);
+	--vp-backdrop: rgba(27, 26, 23, 0.5);
+}
+
+/* ===== Dark: by choice, or by system setting when no choice is applied ===== */
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--vp-bg: #131210;
+	--vp-surface: #1c1b18;
+	--vp-chrome: #191816;
+	--vp-bench: #24231f;
+	--vp-code: #181715;
+	--vp-hover: #2c2b26;
+	--vp-tile: #2b2a25;
+	--vp-dot: #34322d;
+	--vp-ink: #ece9e1;
+	--vp-ink-2: #a8a499;
+	--vp-line: #2f2e29;
+	--vp-line-strong: #76736a;
+	--vp-route: #8f8b80;
+	--vp-slot: rgba(255, 255, 255, 0.05);
+	--vp-accent: #ff8c57;
+	--vp-accent-fill: #ff7a3d;
+	--vp-accent-tint: #33241b;
+	--vp-on-accent: #1c1b18;
+	--vp-focus: #ff8c57;
+	--vp-err: #ff8f84;
+	--vp-err-tint: #3a1f1c;
+	--vp-warn: #e8b45e;
+	--vp-warn-tint: #2f2716;
+	--vp-ok: #a4d68f;
+	--vp-ok-tint: #1f2a1b;
+	--vp-k-kw: #f39ac6;
+	--vp-k-str: #a4d68f;
+	--vp-k-fn: #8fc1f6;
+	--vp-k-com: #9a968b;
+	--vp-k-num: #e8b45e;
+	--vp-shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 8px 22px -12px rgba(0, 0, 0, 0.7);
+	--vp-backdrop: rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) {
+		color-scheme: dark;
+		--vp-bg: #131210;
+		--vp-surface: #1c1b18;
+		--vp-chrome: #191816;
+		--vp-bench: #24231f;
+		--vp-code: #181715;
+		--vp-hover: #2c2b26;
+		--vp-tile: #2b2a25;
+		--vp-dot: #34322d;
+		--vp-ink: #ece9e1;
+		--vp-ink-2: #a8a499;
+		--vp-line: #2f2e29;
+		--vp-line-strong: #76736a;
+		--vp-route: #8f8b80;
+		--vp-slot: rgba(255, 255, 255, 0.05);
+		--vp-accent: #ff8c57;
+		--vp-accent-fill: #ff7a3d;
+		--vp-accent-tint: #33241b;
+		--vp-on-accent: #1c1b18;
+		--vp-focus: #ff8c57;
+		--vp-err: #ff8f84;
+		--vp-err-tint: #3a1f1c;
+		--vp-warn: #e8b45e;
+		--vp-warn-tint: #2f2716;
+		--vp-ok: #a4d68f;
+		--vp-ok-tint: #1f2a1b;
+		--vp-k-kw: #f39ac6;
+		--vp-k-str: #a4d68f;
+		--vp-k-fn: #8fc1f6;
+		--vp-k-com: #9a968b;
+		--vp-k-num: #e8b45e;
+		--vp-shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 8px 22px -12px rgba(0, 0, 0, 0.7);
+		--vp-backdrop: rgba(0, 0, 0, 0.6);
+	}
+}
+
+/* ===== Theme-independent tokens ===== */
+:root {
+	/* Type. The families come from Astro's `fonts` config (astro.config.mjs),
+	   which adds the metric-matched fallback faces. */
+	--vp-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+		sans-serif;
+	--vp-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--vp-fs-label: 0.75rem; /* 12px, the floor */
+	--vp-fs-small: 0.84375rem; /* 13.5px */
+	--vp-fs-ui: 0.875rem; /* 14px */
+	--vp-fs-code: 0.875rem; /* 14px */
+	--vp-fs-body: 1rem; /* 16px */
+	--vp-fs-lede: 1.125rem; /* 18px */
+	--vp-fs-h4: 1rem; /* 16px */
+	--vp-fs-h3: 1.1875rem; /* 19px */
+	--vp-fs-h2: 1.5rem; /* 24px */
+	--vp-fs-h1: clamp(1.75rem, 2.4vw, 2.125rem); /* 28 to 34px */
+	--vp-fs-hero: clamp(1.75rem, 2.9vw, 2.625rem); /* 28 to 42px, Home only */
+
+	/* Space: a 4px grid */
+	--vp-s1: 0.25rem;
+	--vp-s2: 0.5rem;
+	--vp-s3: 0.75rem;
+	--vp-s4: 1rem;
+	--vp-s5: 1.5rem;
+	--vp-s6: 2rem;
+	--vp-s7: 3rem;
+	--vp-s8: 4rem;
+
+	/* Radii: inline code, badges, buttons and callouts, cards and code groups,
+	   signature frames */
+	--vp-r-xs: 4px;
+	--vp-r-sm: 6px;
+	--vp-r-md: 8px;
+	--vp-r-lg: 10px;
+	--vp-r-xl: 16px;
+
+	/* Layout */
+	--vp-header: 3.375rem; /* 54px */
+	--vp-side: 18.75rem;
+	--vp-toc: 13.75rem;
+	--vp-measure: 45rem;
+	--vp-measure-wide: 72rem;
+
+	/* Motion: transform and opacity only; zero under reduced motion */
+	--vp-t-fast: 140ms;
+	--vp-t-ui: 200ms;
+	--vp-t-route: 460ms;
+	--vp-t-once: 600ms;
+	--vp-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--vp-t-fast: 0ms;
+		--vp-t-ui: 0ms;
+		--vp-t-route: 0ms;
+		--vp-t-once: 0ms;
+	}
+}
+
+/* ===== Starlight variables, from the tokens =====
+ * Starlight's greys run from --sl-color-white (strongest text) to
+ * --sl-color-black (page ground) in both themes. Its CSS uses gray-2 for
+ * body and sidebar text, gray-3 for muted text, gray-4 and gray-5 for
+ * borders, and gray-6 for raised backgrounds. Defined once here: each value
+ * is a token, which already changes with the theme. Unlayered, so these win
+ * over Starlight's layered defaults and its own light-mode block. */
+:root {
+	--sl-color-white: var(--vp-ink);
+	--sl-color-gray-1: var(--vp-ink);
+	--sl-color-gray-2: var(--vp-ink);
+	--sl-color-gray-3: var(--vp-ink-2);
+	--sl-color-gray-4: var(--vp-line-strong);
+	--sl-color-gray-5: var(--vp-line);
+	--sl-color-gray-6: var(--vp-bench);
+	--sl-color-gray-7: var(--vp-hover);
+	--sl-color-black: var(--vp-surface);
+
+	--sl-color-accent-low: var(--vp-accent-tint);
+	--sl-color-accent: var(--vp-accent);
+	--sl-color-accent-high: var(--vp-accent);
+
+	/* Aside and badge hues: note and tip are neutral (orange is for state),
+	   caution is the warning colour, danger the error colour. */
+	--sl-color-blue-low: var(--vp-bench);
+	--sl-color-blue: var(--vp-line-strong);
+	--sl-color-blue-high: var(--vp-ink);
+	--sl-color-purple-low: var(--vp-bench);
+	--sl-color-purple: var(--vp-ink-2);
+	--sl-color-purple-high: var(--vp-ink);
+	--sl-color-orange-low: var(--vp-warn-tint);
+	--sl-color-orange: var(--vp-warn);
+	--sl-color-orange-high: var(--vp-warn);
+	--sl-color-red-low: var(--vp-err-tint);
+	--sl-color-red: var(--vp-err);
+	--sl-color-red-high: var(--vp-err);
+	--sl-color-green-low: var(--vp-ok-tint);
+	--sl-color-green: var(--vp-ok);
+	--sl-color-green-high: var(--vp-ok);
+
+	--sl-color-text: var(--vp-ink);
+	--sl-color-text-accent: var(--vp-accent);
+	--sl-color-text-invert: var(--vp-on-accent);
+	--sl-color-bg: var(--vp-surface);
+	--sl-color-bg-nav: var(--vp-chrome);
+	--sl-color-bg-sidebar: var(--vp-chrome);
+	--sl-color-bg-inline-code: var(--vp-hover);
+	--sl-color-bg-accent: var(--vp-accent);
+	--sl-color-hairline-light: var(--vp-line);
+	--sl-color-hairline: var(--vp-line);
+	--sl-color-hairline-shade: var(--vp-line);
+
+	--sl-font: var(--vp-sans);
+	--sl-font-mono: var(--vp-mono);
+	--sl-text-body: var(--vp-fs-body);
+	--sl-text-body-sm: var(--vp-fs-small);
+	--sl-text-code: var(--vp-fs-code);
+	--sl-text-code-sm: var(--vp-fs-small);
+	--sl-text-h1: var(--vp-fs-h1);
+	--sl-text-h2: var(--vp-fs-h2);
+	--sl-text-h3: var(--vp-fs-h3);
+	--sl-text-h4: var(--vp-fs-h4);
+	--sl-text-h5: var(--vp-fs-h4);
+	--sl-line-height: 1.6;
+	--sl-line-height-headings: 1.25;
+
+	--sl-nav-height: var(--vp-header);
+	--sl-sidebar-width: var(--vp-side);
+	--sl-content-width: var(--vp-measure);
+}
+
+::backdrop {
+	--sl-color-backdrop-overlay: rgba(27, 26, 23, 0.5);
+}
+
+[data-theme='dark'] ::backdrop {
+	--sl-color-backdrop-overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* ===== Base ===== */
+body {
+	font-feature-settings: 'ss01';
+}
+
+code,
+pre,
+kbd {
+	font-variant-ligatures: none;
+}
+
+.sl-markdown-content a {
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+}
+
+.sl-markdown-content a:hover {
+	text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+	outline: 2px solid var(--vp-focus);
+	outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	html {
+		scroll-behavior: smooth;
+	}
+}
+
+/* Forced colours: keep selected and current states visible. */
+@media (forced-colors: active) {
+	[aria-current='page'],
+	[aria-selected='true'] {
+		outline: 2px solid Highlight;
+	}
+}

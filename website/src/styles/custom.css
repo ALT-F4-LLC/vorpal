@@ -1,19 +1,4 @@
-:root {
-	--sl-color-accent-low: #1a1a2e;
-	/* Dark accent: white text on it is 4.88:1, and as a border or focus ring
-	   it is 3.64:1 on --sl-color-black. Text on dark backgrounds uses
-	   --sl-color-text-accent (accent-high), not this value. */
-	--sl-color-accent: #6057ff;
-	--sl-color-accent-high: #b8b5ff;
-	--sl-color-white: #ffffff;
-	--sl-color-gray-1: #eceef2;
-	--sl-color-gray-2: #c0c2c7;
-	--sl-color-gray-3: #888b96;
-	--sl-color-gray-4: #545861;
-	--sl-color-gray-5: #353841;
-	--sl-color-gray-6: #24272f;
-	--sl-color-black: #17181c;
-}
+/* Colours, type and layout sizes come from tokens.css. */
 
 @media (min-width: 50rem) {
 	.header {
@@ -134,9 +119,9 @@
 
 .cta-actions .primary {
 	background-color: var(--sl-color-accent);
-	color: #ffffff;
+	color: var(--sl-color-text-invert);
 	padding: 0.75rem 1.5rem;
-	border-radius: 0.5rem;
+	border-radius: var(--vp-r-md);
 	font-weight: 600;
 }
 
@@ -162,8 +147,9 @@
 	justify-content: space-between;
 	min-height: 44px;
 	padding: 0.5rem 1rem;
-	border: 1px solid var(--sl-color-gray-5);
-	border-radius: 0.5rem;
+	/* Control border: --vp-line-strong, at least 3:1 on the page. */
+	border: 1px solid var(--sl-color-gray-4);
+	border-radius: var(--vp-r-md);
 	color: var(--sl-color-white);
 	font-weight: 600;
 	cursor: pointer;
@@ -270,7 +256,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
 	.sdk-carousel--active .sdk-carousel-panel.active {
-		animation: sdk-carousel-fade-in 200ms ease;
+		animation: sdk-carousel-fade-in var(--vp-t-ui) var(--vp-ease);
 	}
 }
 
@@ -285,22 +271,6 @@
 
 .sdk-carousel:not(.sdk-carousel--active) .sdk-carousel-tabs {
 	display: none;
-}
-
-:root[data-theme='light'] {
-	--sl-color-accent-low: #e8e7ff;
-	/* Light accent: 5.93:1 on white (links, focus rings) and white on it
-	   (sidebar current page, primary buttons, 4.96:1 at 90% hover opacity). */
-	--sl-color-accent: #4d42ff;
-	--sl-color-accent-high: #2d2680;
-	--sl-color-white: #17181c;
-	--sl-color-gray-1: #24272f;
-	--sl-color-gray-2: #353841;
-	--sl-color-gray-3: #545861;
-	--sl-color-gray-4: #888b96;
-	--sl-color-gray-5: #c0c2c7;
-	--sl-color-gray-6: #eceef2;
-	--sl-color-black: #ffffff;
 }
 
 /* Table scroll regions (src/plugins/rehype-table-region.mjs). The wrapper

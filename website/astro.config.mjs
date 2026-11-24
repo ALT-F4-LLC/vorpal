@@ -2,11 +2,12 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'astro/config';
+import { defineConfig, fontProviders } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { satteri } from '@astrojs/markdown-satteri';
 import emDashes from './src/plugins/em-dashes.mjs';
 import tableRegion from './src/plugins/table-region.mjs';
+import { vorpalDark, vorpalLight } from './src/code-themes.mjs';
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -56,6 +57,37 @@ function prefixBaseLinks() {
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://docs.vorpal.build',
+	// Self-hosted fonts: subset WOFF2 files committed in src/fonts (made by
+	// script/website-fonts/subset.py; 39 KB together), so the build needs no
+	// network and nothing outside bun.lock. `display: optional` plus Astro's
+	// metric-matched fallback faces keep a late font from shifting layout.
+	// Head.astro (an override) adds the @font-face rules and preloads.
+	fonts: [
+		{
+			provider: fontProviders.local(),
+			name: 'Instrument Sans',
+			cssVariable: '--font-instrument-sans',
+			display: 'optional',
+			fallbacks: ['sans-serif'],
+			options: {
+				variants: [
+					{ src: ['./src/fonts/instrument-sans-wght.woff2'], weight: '400 700', style: 'normal' },
+				],
+			},
+		},
+		{
+			provider: fontProviders.local(),
+			name: 'JetBrains Mono',
+			cssVariable: '--font-jetbrains-mono',
+			display: 'optional',
+			fallbacks: ['monospace'],
+			options: {
+				variants: [
+					{ src: ['./src/fonts/jetbrains-mono-wght.woff2'], weight: '400 700', style: 'normal' },
+				],
+			},
+		},
+	],
 	markdown: {
 		// Astro 7 renders Markdown and MDX with Sätteri. GFM (tables) is on by
 		// default; MDX inherits this processor.
@@ -114,11 +146,11 @@ async function render() {
   if (next === rendered) return;
   rendered = next;
   // The dark theme's edge-label background leaves its #ccc text at 4.43:1;
-  // the page background brings it above 4.5:1.
+  // the page background (--vp-surface, dark) brings it above 4.5:1.
   mermaid.initialize({
     startOnLoad: false,
     theme: next,
-    themeVariables: next === 'dark' ? { edgeLabelBackground: '#17181c' } : {},
+    themeVariables: next === 'dark' ? { edgeLabelBackground: '#1c1b18' } : {},
   });
   for (const d of diagrams) {
     try {
@@ -150,7 +182,45 @@ if (diagrams.length) {
 					href: 'https://github.com/ALT-F4-LLC/vorpal',
 				},
 			],
-			customCss: ['./src/styles/custom.css'],
+			customCss: ['./src/styles/tokens.css', './src/styles/custom.css'],
+			components: {
+				Head: './src/components/overrides/Head.astro',
+				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
+			},
+			expressiveCode: {
+				// Built from the design's syntax tokens (src/code-themes.mjs). The
+				// first theme is the base; each applies under Starlight's
+				// <html data-theme>.
+				themes: [vorpalLight, vorpalDark],
+				themeCssSelector: (theme) => `[data-theme='${theme.type}']`,
+				// The tokens are AA-tested (at least 5.4:1 on the code background), so
+				// a 4.5 floor leaves them untouched; Expressive Code's default (5.5)
+				// would re-tint some of them.
+				minSyntaxHighlightingColorContrast: 4.5,
+				styleOverrides: {
+					borderRadius: 'var(--vp-r-lg)',
+					borderColor: 'var(--vp-line)',
+					frames: {
+						editorBackground: 'var(--vp-code)',
+						terminalBackground: 'var(--vp-code)',
+						editorTabBarBackground: 'var(--vp-chrome)',
+						editorTabBarBorderBottomColor: 'var(--vp-line)',
+						editorActiveTabBackground: 'var(--vp-code)',
+						editorActiveTabForeground: 'var(--vp-ink)',
+						editorActiveTabIndicatorTopColor: 'var(--vp-accent-fill)',
+						editorActiveTabIndicatorBottomColor: 'transparent',
+						terminalTitlebarBackground: 'var(--vp-chrome)',
+						terminalTitlebarForeground: 'var(--vp-ink-2)',
+						terminalTitlebarBorderBottomColor: 'var(--vp-line)',
+						terminalTitlebarDotsForeground: 'var(--vp-line-strong)',
+						inlineButtonForeground: 'var(--vp-ink)',
+						inlineButtonBorder: 'var(--vp-line-strong)',
+						tooltipSuccessBackground: 'var(--vp-ok)',
+						tooltipSuccessForeground: 'var(--vp-surface)',
+						frameBoxShadowCssValue: 'none',
+					},
+				},
+			},
 			sidebar: [
 				{
 					label: 'Getting Started',
