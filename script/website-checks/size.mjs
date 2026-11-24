@@ -10,7 +10,7 @@
 //
 // Usage: node size.mjs [--json out.json]   (WEBSITE_DIST overrides the dist path)
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, posix, relative, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { DIST } from './serve.mjs';
 
