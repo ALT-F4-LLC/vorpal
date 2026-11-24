@@ -1,0 +1,16 @@
+---
+// The current section's pages only (route data narrows `sidebar` in
+// src/vorpal-route-data.ts). Starlight's SidebarPersister and SidebarSublist
+// render them, so `aria-current="page"` and the saved open/scroll state work
+// as before. The section name is a label, not a heading, so nothing comes
+// before the page's h1. Below 50rem this sidebar is not shown; the header's
+// Menu holds the same pages.
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
+
+const { sidebar } = Astro.locals.starlightRoute;
+const { section } = Astro.locals.vorpalNav;
+---
+
+{section && <p class="vp-side-label">{section.label}</p>}
+<SidebarPersister><SidebarSublist sublist={sidebar} /></SidebarPersister>

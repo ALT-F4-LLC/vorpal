@@ -1,0 +1,30 @@
+---
+// A plain nested list of sidebar entries: the Menu's current section and the
+// footer site map. Groups are a label plus their own list.
+import type { SidebarEntry } from '../nav';
+
+interface Props {
+	entries: SidebarEntry[];
+}
+
+const { entries } = Astro.props;
+---
+
+<ul class="vp-tree">
+	{
+		entries.map((e) =>
+			e.type === 'link' ? (
+				<li>
+					<a href={e.href} aria-current={e.isCurrent ? 'page' : undefined}>
+						{e.label}
+					</a>
+				</li>
+			) : (
+				<li>
+					<span class="vp-tree-group">{e.label}</span>
+					<Astro.self entries={e.entries} />
+				</li>
+			),
+		)
+	}
+</ul>

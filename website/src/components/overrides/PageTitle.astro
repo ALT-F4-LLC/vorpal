@@ -1,0 +1,79 @@
+---
+// Page header (docs-redesign stage 4, design-system.md §3 and §4):
+// breadcrumb, h1, one-sentence summary, a meta line with the kind badge and
+// the versions the page applies to, then "On this page" as a disclosure
+// below 72rem (and at every width on wide pages).
+//
+// - The h1 keeps Starlight's `_top` id, which the skip link targets.
+// - Unreleased and "Since x.y.z" badges sit inside the h1, so screen readers
+//   and AI tools read them with the title. Both come from frontmatter only.
+// - The summary is `summary`, or else `description` (the same sentence: the
+//   summary is also the page's meta description).
+// - The version comes from website/package.json.
+import pkg from '../../../package.json';
+import TocList from '../TocList.astro';
+
+const { entry } = Astro.locals.starlightRoute;
+const { section, trail, toc } = Astro.locals.vorpalNav;
+const data = entry.data;
+const version = pkg.version;
+
+const KINDS: Record<string, string> = {
+	tutorial: 'Tutorial',
+	'how-to': 'How-to',
+	'operator-how-to': 'Operator how-to',
+	concept: 'Concept',
+	'reference-cli': 'Reference · CLI',
+	'reference-config': 'Reference · Config',
+	'reference-sdk': 'Reference · SDK',
+	'reference-errors': 'Reference · Errors',
+	troubleshooting: 'Troubleshooting',
+	'sdk-hub': 'SDK hub',
+};
+const kind = data.kind ? KINDS[data.kind] : undefined;
+const summary = data.summary ?? data.description;
+const applies = data.unreleased ? 'Applies to main' : `Applies to ${version} and main`;
+/** Starlight's PAGE_TITLE_ID, the skip link's target. */
+const PAGE_TITLE_ID = '_top';
+const hasToc = !!toc && toc.length > 0;
+---
+
+<header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
+	{
+		section && (
+			<nav class="vp-bc" aria-label="Breadcrumb">
+				<ol>
+					<li>
+						<a href={section.href}>{section.label}</a>
+					</li>
+					{trail.map((g) => (
+						<li>{g.label}</li>
+					))}
+					<li>
+						<span aria-current="page">{data.title}</span>
+					</li>
+				</ol>
+			</nav>
+		)
+	}
+	<h1 id={PAGE_TITLE_ID}>
+		{data.title}
+		{data.unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
+		{data.since && <span class="vp-vb">Since {data.since}</span>}
+	</h1>
+	{summary && <p class="vp-summary">{summary}</p>}
+	<p class="vp-pmeta">
+		{kind && <span class="vp-kind">{kind}</span>}
+		<span>{applies}</span>
+	</p>
+	{
+		hasToc && (
+			<details class="vp-toc-d">
+				<summary class="vp-btn">On this page</summary>
+				<nav aria-label="On this page">
+					<TocList items={toc} />
+				</nav>
+			</details>
+		)
+	}
+</header>

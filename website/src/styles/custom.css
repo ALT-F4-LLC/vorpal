@@ -1,21 +1,5 @@
 /* Colours, type and layout sizes come from tokens.css. */
 
-@media (min-width: 50rem) {
-	.header {
-		grid-template-columns: auto 1fr auto !important;
-	}
-	.header .right-group {
-		justify-content: flex-end;
-	}
-	.header > div:has(site-search) {
-		justify-content: center;
-	}
-	site-search button[data-open-modal] {
-		max-width: 100%;
-		width: 100%;
-	}
-}
-
 .hero {
 	padding-block: 5rem !important;
 }

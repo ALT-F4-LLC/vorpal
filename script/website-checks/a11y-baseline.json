@@ -1,21 +1,4 @@
 {
 	"$comment": "Known axe violations: \"<page> <scheme> <width> <rule>\" -> affected node count. The check fails on any new key or a higher count. Regenerate with node a11y.mjs --update-baseline, and only to record a deliberate, reviewed exception.",
-	"known": {
-		"/ dark 1280 label-content-name-mismatch": 1,
-		"/ light 1280 label-content-name-mismatch": 1,
-		"/404.html dark 1280 label-content-name-mismatch": 1,
-		"/404.html light 1280 label-content-name-mismatch": 1,
-		"/concepts/architecture/ dark 1280 label-content-name-mismatch": 1,
-		"/concepts/architecture/ light 1280 label-content-name-mismatch": 1,
-		"/concepts/artifacts/ dark 1280 label-content-name-mismatch": 1,
-		"/concepts/artifacts/ light 1280 label-content-name-mismatch": 1,
-		"/getting-started/quickstart/ dark 1280 label-content-name-mismatch": 1,
-		"/getting-started/quickstart/ light 1280 label-content-name-mismatch": 1,
-		"/guides/typescript/ dark 1280 label-content-name-mismatch": 1,
-		"/guides/typescript/ light 1280 label-content-name-mismatch": 1,
-		"/reference/cli/ dark 1280 label-content-name-mismatch": 1,
-		"/reference/cli/ light 1280 label-content-name-mismatch": 1,
-		"/reference/configuration/ dark 1280 label-content-name-mismatch": 1,
-		"/reference/configuration/ light 1280 label-content-name-mismatch": 1
-	}
+	"known": {}
 }

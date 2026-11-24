@@ -1,0 +1,114 @@
+---
+// Page footer (docs-redesign stage 4, design-system.md §12, §13).
+//
+// - Related: cards from frontmatter `related` (collection ids, checked at
+//   build time, so a moved page fails the build).
+// - Previous and Next: Starlight's Pagination; route data keeps them only in
+//   an ordered section (src/vorpal-route-data.ts).
+// - Edit this page (Starlight's `editUrl`, from `editLink` in the config)
+//   and Last updated. The date comes
+//   from frontmatter `lastUpdated` only: Starlight's own `lastUpdated` reads
+//   git, and the vorpal-website artifact builds without a .git directory.
+// - "View as Markdown" arrives with the Markdown twins (redesign step 7).
+// - A site map built from the sidebar config, shown only without JavaScript
+//   (with it, the header and Menu carry navigation), plus links that are
+//   not in the header and the version line.
+import { getEntry } from 'astro:content';
+import { Icon } from '@astrojs/starlight/components';
+import Pagination from '@astrojs/starlight/components/Pagination.astro';
+import SidebarTree from '../SidebarTree.astro';
+import { flatten } from '../../nav';
+import pkg from '../../../package.json';
+
+const { entry, lang, editUrl } = Astro.locals.starlightRoute;
+const { sections } = Astro.locals.vorpalNav;
+const isSplash = entry.data.template === 'splash';
+
+const lastUpdated = entry.data.lastUpdated instanceof Date ? entry.data.lastUpdated : undefined;
+
+const related = (
+	await Promise.all((entry.data.related ?? []).map((ref) => getEntry(ref)))
+).flatMap((page) => {
+	if (!page) return [];
+	const href = page.id === 'index' ? '/' : `/${page.id}/`;
+	const section = sections.find(
+		(s) => s.group && flatten(s.group.entries).some((l) => l.href.endsWith(href)),
+	);
+	return [
+		{
+			href,
+			title: page.data.title,
+			type: section?.label,
+			text: page.data.summary ?? page.data.description,
+		},
+	];
+});
+---
+
+<footer class="vp-footer" data-pagefind-ignore="all">
+	{
+		related.length > 0 && (
+			<section class="vp-related" aria-labelledby="vp-related-h">
+				<h2 id="vp-related-h">Related</h2>
+				<ul class="vp-cards">
+					{related.map((r) => (
+						<li class="vp-card">
+							{r.type && <span class="vp-card-type">{r.type}</span>}
+							<a href={r.href}>
+								{r.title}
+								<span class="vp-card-arrow" aria-hidden="true">
+									→
+								</span>
+							</a>
+							{r.text}
+						</li>
+					))}
+				</ul>
+			</section>
+		)
+	}
+
+	<Pagination />
+
+	{
+		!isSplash && (
+			<div class="vp-pfoot">
+				{editUrl && (
+					<a href={editUrl}>
+						<Icon name="pencil" size="1rem" />
+						Edit this page
+					</a>
+				)}
+				{lastUpdated && (
+					<p class="vp-updated">
+						Last updated{' '}
+						<time datetime={lastUpdated.toISOString().slice(0, 10)}>
+							{lastUpdated.toLocaleDateString(lang, { dateStyle: 'medium', timeZone: 'UTC' })}
+						</time>
+					</p>
+				)}
+			</div>
+		)
+	}
+
+	<nav class="vp-sitefoot print:hidden" aria-label="Site map">
+		<div class="vp-sitemap vp-nojsonly">
+			{
+				sections.map((s) => (
+					<div>
+						<h2>
+							<a href={s.href}>{s.label}</a>
+						</h2>
+						{s.group && <SidebarTree entries={s.group.entries} />}
+					</div>
+				))
+			}
+		</div>
+		<ul class="vp-footlinks">
+			<li><a href="/reference/contributing/">Contribute to the docs</a></li>
+			<li><a href={`https://github.com/ALT-F4-LLC/vorpal/releases/tag/${pkg.version}`}>Release notes</a></li>
+			<li><a href="https://github.com/ALT-F4-LLC/vorpal">GitHub</a></li>
+		</ul>
+		<p class="vp-vline">Docs for main · Latest release {pkg.version}</p>
+	</nav>
+</footer>

@@ -182,10 +182,24 @@ if (diagrams.length) {
 					href: 'https://github.com/ALT-F4-LLC/vorpal',
 				},
 			],
-			customCss: ['./src/styles/tokens.css', './src/styles/custom.css'],
+			customCss: ['./src/styles/tokens.css', './src/styles/shell.css', './src/styles/custom.css'],
+			// Edit this page. Starlight appends the page's path from website/.
+			editLink: {
+				baseUrl: 'https://github.com/ALT-F4-LLC/vorpal/edit/main/website/',
+			},
+			// The page shell (docs-redesign step 3): sections, the narrowed
+			// sidebar and the page header read this route data.
+			routeMiddleware: './src/vorpal-route-data.ts',
 			components: {
 				Head: './src/components/overrides/Head.astro',
+				Header: './src/components/overrides/Header.astro',
+				Search: './src/components/overrides/Search.astro',
 				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
+				MobileMenuToggle: './src/components/overrides/MobileMenuToggle.astro',
+				Sidebar: './src/components/overrides/Sidebar.astro',
+				PageTitle: './src/components/overrides/PageTitle.astro',
+				MobileTableOfContents: './src/components/overrides/MobileTableOfContents.astro',
+				Footer: './src/components/overrides/Footer.astro',
 			},
 			expressiveCode: {
 				// Built from the design's syntax tokens (src/code-themes.mjs). The
@@ -223,7 +237,8 @@ if (diagrams.length) {
 			},
 			sidebar: [
 				{
-					label: 'Getting Started',
+					// The header's section names match these group labels (src/nav.ts).
+					label: 'Get started',
 					items: [
 						{ label: 'Installation', slug: 'getting-started/installation' },
 						{ label: 'Quickstart', slug: 'getting-started/quickstart' },

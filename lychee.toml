@@ -7,4 +7,6 @@ exclude = [
   # Fragment anchors URL-encoded as %23 and treated as file paths
   "%23",
   "^https://docs\\.vorpal\\.build/",
+  # "Edit this page" links: GitHub's editor needs a signed-in session
+  "^https://github\\.com/ALT-F4-LLC/vorpal/edit/",
 ]

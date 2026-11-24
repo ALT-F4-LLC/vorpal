@@ -1,0 +1,22 @@
+---
+// Starlight's search, unchanged, plus the Ctrl K hint drawn beside its
+// button rather than inside it. Inside, the hint made the button's visible
+// text ("Search Ctrl K") differ from its accessible name ("Search"), which
+// axe reports as label-content-name-mismatch (WCAG 2.5.3). The button keeps
+// `aria-keyshortcuts`, so the shortcut is still announced.
+import Default from '@astrojs/starlight/components/Search.astro';
+---
+
+<span class="vp-search">
+	<Default {...Astro.props} />
+	<kbd class="vp-search-key" aria-hidden="true">Ctrl K</kbd>
+</span>
+
+<script is:inline>
+	(() => {
+		if (!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) return;
+		document.querySelectorAll('.vp-search-key').forEach((k) => {
+			k.textContent = '⌘ K';
+		});
+	})();
+</script>
