@@ -29,6 +29,7 @@ export const PAGES = [
 	'/concepts/architecture/',
 	'/concepts/jobs/',
 	'/concepts/artifacts/',
+	'/concepts/how-a-build-runs/',
 	'/reference/cli/',
 	'/reference/cli/build/',
 	'/reference/configuration/',
