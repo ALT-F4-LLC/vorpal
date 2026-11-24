@@ -6,7 +6,7 @@
  * with no pages yet link to the nearest existing page instead (`fallback`)
  * and are never current.
  *
- * `vorpal-route-data.ts` (Starlight route middleware) uses these helpers to
+ * `route-data.ts` (Starlight route middleware) uses these helpers to
  * narrow the sidebar to the current section and keep the full tree in
  * `Astro.locals.vorpalNav` for the header, Menu, breadcrumb and site map.
  */

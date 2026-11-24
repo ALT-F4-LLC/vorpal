@@ -189,7 +189,7 @@ if (diagrams.length) {
 			},
 			// The page shell (docs-redesign step 3): sections, the narrowed
 			// sidebar and the page header read this route data.
-			routeMiddleware: './src/vorpal-route-data.ts',
+			routeMiddleware: './src/route-data.ts',
 			components: {
 				Head: './src/components/overrides/Head.astro',
 				Header: './src/components/overrides/Header.astro',
