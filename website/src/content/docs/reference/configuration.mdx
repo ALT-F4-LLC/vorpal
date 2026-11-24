@@ -1,115 +1,220 @@
 ---
-title: Configuration
-description: Complete reference for Vorpal configuration files, keys, and resolution.
+title: Configuration files
+description: Every key in Vorpal.toml and ~/.vorpal/settings.json, with its default and the flag that overrides it.
 kind: reference-config
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - reference/cli/config
+  - reference/cli/build
 ---
 
 import Props from '../../../components/Props.astro';
 
-Vorpal uses a layered configuration system. Settings are resolved from four sources in order of precedence (highest to lowest):
+## Files and precedence {#files}
 
-1. **CLI flags** -- Explicit flags on the command line
-2. **Project config** -- `Vorpal.toml` in the project root
-3. **User config** -- `~/.vorpal/settings.json`
-4. **Built-in defaults**
+`Vorpal.toml` sits in the project root. Six keys are also *settings* you can set for yourself, on this machine, in `~/.vorpal/settings.json` with `vorpal config --user set`: `language`, `name`, `namespace`, `registry`, `system`, `worker`.
 
-## Project Configuration (`Vorpal.toml`)
+Each setting is read from, in order: a flag on the command line, `Vorpal.toml`, `~/.vorpal/settings.json`, then the built-in default.
 
-The `Vorpal.toml` file defines build configuration for a project. It is a TOML file with settings keys at the top level and build-specific sections nested under `[source]`.
+## Keys {#keys}
 
-### Settings Keys
+<ul class="vp-findex" aria-label="All keys">
+	<li><a href="#key-language">language</a></li>
+	<li><a href="#key-name">name</a></li>
+	<li><a href="#key-namespace">namespace</a></li>
+	<li><a href="#key-registry">registry</a></li>
+	<li><a href="#key-system">system</a></li>
+	<li><a href="#key-worker">worker</a></li>
+	<li><a href="#key-environments">environments</a></li>
+	<li><a href="#key-source-includes">source.includes</a></li>
+	<li><a href="#key-source-script">source.script</a></li>
+	<li><a href="#key-source-go-directory">source.go.directory</a></li>
+	<li><a href="#key-source-python-directory">source.python.directory</a></li>
+	<li><a href="#key-source-python-entrypoint">source.python.entrypoint</a></li>
+	<li><a href="#key-source-rust-bin">source.rust.bin</a></li>
+	<li><a href="#key-source-rust-packages">source.rust.packages</a></li>
+	<li><a href="#key-source-typescript-directory">source.typescript.directory</a></li>
+	<li><a href="#key-source-typescript-entrypoint">source.typescript.entrypoint</a></li>
+</ul>
 
-These keys control how the CLI connects to services and resolves builds.
+### `language` {#key-language}
 
-#### `language` {#key-language}
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="`rust`" allowed="`go`, `python`, `rust`, `typescript`" flag="none (setting: `vorpal config set language`)" />
 
-<Props type="string" default='`"rust"`' />
+The SDK your config program is written in. Any other value stops the build with [`Unsupported language`](/troubleshooting/errors/#err-unsupported-language).
 
-Build configuration language (`rust`, `go`, `python`, or `typescript`).
+```toml title="Vorpal.toml"
+language = "python"
+```
 
-#### `name` {#key-name}
+### `name` {#key-name}
 
-<Props type="string" default='`"vorpal"`' />
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="`vorpal`" allowed="any" flag="none (setting)" />
 
-Name of the configuration binary to build.
+The config program's name. It sets default file names, such as `src/<name>.py` for Python.
 
-#### `namespace` {#key-namespace}
+```toml title="Vorpal.toml"
+name = "vorpal"
+```
 
-<Props type="string" default='`"library"`' />
+### `namespace` {#key-namespace}
 
-Artifact namespace for storage and isolation.
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="`library`" flag="[`--namespace`](/reference/cli/build/#flag-namespace)" />
 
-#### `registry` {#key-registry}
+The namespace artifacts are stored in.
 
-<Props type="string" default='`"unix:///var/lib/vorpal/vorpal.sock"`' />
+```toml title="Vorpal.toml"
+namespace = "my-team"
+```
 
-Registry service address.
+### `registry` {#key-registry}
 
-#### `system` {#key-system}
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="`unix:///var/lib/vorpal/vorpal.sock`" allowed="a `unix://`, `http://` or `https://` address" flag="[`--registry`](/reference/cli/build/#flag-registry)" env="`VORPAL_SOCKET_PATH` changes the default socket" />
 
-<Props type="string" default="Host system" />
+Where the CLI and the agent daemon find the registry.
 
-Target build system (e.g., `aarch64-darwin`).
+```toml title="Vorpal.toml"
+registry = "https://build.example.com:23151"
+```
 
-#### `worker` {#key-worker}
+### `system` {#key-system}
 
-<Props type="string" default='`"unix:///var/lib/vorpal/vorpal.sock"`' />
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="this machine's system" allowed="`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`, `x86_64-linux`" flag="[`--system`](/reference/cli/build/#flag-system)" />
 
-Worker service address.
+The system to build for.
 
-### `[source]` Section
+```toml title="Vorpal.toml"
+system = "x86_64-linux"
+```
 
-Controls which files are included in the build configuration source.
+### `worker` {#key-worker}
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `includes` | string[] | List of file paths or directories to include as source input |
-| `script` | string | Optional pre-build script to run on the source |
+<Props file="`Vorpal.toml`, `settings.json`" type="string" default="`unix:///var/lib/vorpal/vorpal.sock`" allowed="a `unix://`, `http://` or `https://` address" flag="[`--worker`](/reference/cli/build/#flag-worker)" env="`VORPAL_SOCKET_PATH` changes the default socket" />
 
-### `[source.rust]` Section
+Where builds run.
 
-Rust-specific source configuration.
+```toml title="Vorpal.toml"
+worker = "https://build.example.com:23151"
+```
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `bin` | string | Override the binary name produced by the Rust build |
-| `packages` | string[] | Cargo packages to include in the build |
+### `environments` {#key-environments}
 
-### `[source.go]` Section
+<Props file="`Vorpal.toml`" type="list of strings" default="not set" allowed="`KEY=VALUE` strings" flag="none" />
 
-Go-specific source configuration.
+Environment variables for building the config program.
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `directory` | string | Go module directory containing `main.go` |
+```toml title="Vorpal.toml"
+environments = ["EXAMPLE=value"]
+```
 
-### `[source.typescript]` Section
+### `source.includes` {#key-source-includes}
 
-TypeScript-specific source configuration.
+<Props file="`Vorpal.toml` `[source]`" type="list of strings" default="depends on `language`, see below" allowed="paths relative to `--context`" flag="none" />
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `entrypoint` | string | TypeScript entrypoint file (default: `src/<name>.ts`) |
-| `directory` | string | Working directory for the TypeScript build |
+The files Vorpal hashes into the config program. Keep it small: any change to these files rebuilds the config program. A list given here replaces the default list.
 
-### `[source.python]` Section
+- Go: `<name>.go`, `go.mod`, `go.sum`
+- Python: `pyproject.toml`, `uv.lock`, `src`, `README.md`
+- Rust: `src/<name>.rs`, `Cargo.toml`, `Cargo.lock`
+- TypeScript: `bun.lock`, `bun.lockb`, `package.json`, `tsconfig.json` and the entrypoint
 
-Python-specific source configuration.
+```toml title="Vorpal.toml"
+[source]
+includes = ["pyproject.toml", "uv.lock", "src"]
+```
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `entrypoint` | string | Python entrypoint file (default: `src/<name>.py`) |
-| `directory` | string | Working directory for the Python build |
+### `source.script` {#key-source-script}
 
-### `environments` Key
+<Props file="`Vorpal.toml` `[source]`" type="string" default="not set" flag="none" />
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `environments` | string[] | Environment variables (`KEY=VALUE`) passed to the build |
+A shell script that runs on the source before a Go config program is built. Only the Go SDK uses it.
 
-### Examples
+```toml title="Vorpal.toml"
+[source]
+script = "./generate.sh"
+```
 
-#### Rust Configuration
+### `source.go.directory` {#key-source-go-directory}
+
+<Props file="`Vorpal.toml` `[source.go]`" type="string" default="not set" allowed="a folder inside `source.includes`" flag="none" />
+
+The Go package folder that holds the config program's `main.go`.
+
+```toml title="Vorpal.toml"
+[source.go]
+directory = "cmd/vorpal"
+```
+
+### `source.python.directory` {#key-source-python-directory}
+
+<Props file="`Vorpal.toml` `[source.python]`" type="string" default="not set" allowed="a folder relative to `--context`" flag="none" />
+
+The working folder for the Python config program.
+
+```toml title="Vorpal.toml"
+[source.python]
+directory = "."
+```
+
+### `source.python.entrypoint` {#key-source-python-entrypoint}
+
+<Props file="`Vorpal.toml` `[source.python]`" type="string" default="`src/<name>.py`, so `src/vorpal.py` with the default `name`" allowed="a path inside `source.includes`" flag="none" />
+
+The Python file the config program starts from.
+
+```toml title="Vorpal.toml"
+[source.python]
+entrypoint = "src/vorpal.py"
+```
+
+### `source.rust.bin` {#key-source-rust-bin}
+
+<Props file="`Vorpal.toml` `[source.rust]`" type="string" default="the value of `name`" flag="none" />
+
+The Cargo binary to build as the config program.
+
+```toml title="Vorpal.toml"
+[source.rust]
+bin = "vorpal-config"
+```
+
+### `source.rust.packages` {#key-source-rust-packages}
+
+<Props file="`Vorpal.toml` `[source.rust]`" type="list of strings" default="not set" flag="none" />
+
+The Cargo packages of a workspace to build.
+
+```toml title="Vorpal.toml"
+[source.rust]
+packages = ["vorpal-config", "vorpal-sdk"]
+```
+
+### `source.typescript.directory` {#key-source-typescript-directory}
+
+<Props file="`Vorpal.toml` `[source.typescript]`" type="string" default="not set" allowed="a folder relative to `--context`" flag="none" />
+
+The working folder for the TypeScript config program.
+
+```toml title="Vorpal.toml"
+[source.typescript]
+directory = "."
+```
+
+### `source.typescript.entrypoint` {#key-source-typescript-entrypoint}
+
+<Props file="`Vorpal.toml` `[source.typescript]`" type="string" default="`src/<name>.ts`, so `src/vorpal.ts` with the default `name`" allowed="a path inside `source.includes`" flag="none" />
+
+The TypeScript file the config program starts from.
+
+```toml title="Vorpal.toml"
+[source.typescript]
+entrypoint = "src/vorpal.ts"
+```
+
+## Examples {#examples}
+
+### Rust
 
 ```toml
 language = "rust"
@@ -128,7 +233,7 @@ packages = [
 ]
 ```
 
-#### Go Configuration
+### Go
 
 ```toml
 language = "go"
@@ -140,7 +245,7 @@ includes = ["sdk/go"]
 directory = "sdk/go/cmd/vorpal"
 ```
 
-#### Python Configuration
+### Python
 
 ```toml
 language = "python"
@@ -158,7 +263,7 @@ directory = "sdk/python"
 entrypoint = "src/vorpal_sdk/vorpal.py"
 ```
 
-#### TypeScript Configuration
+### TypeScript
 
 ```toml
 language = "typescript"
@@ -176,15 +281,11 @@ directory = "sdk/typescript"
 entrypoint = "src/vorpal.ts"
 ```
 
-## User Configuration (`~/.vorpal/settings.json`)
+## Your settings file {#settings-json}
 
-User-level settings are stored as JSON at `~/.vorpal/settings.json`. These provide defaults that apply across all projects for the current user.
+`~/.vorpal/settings.json` holds your settings on this machine, as JSON. They apply to every project, unless its `Vorpal.toml` sets the same key. `VORPAL_USER_CONFIG_DIR` changes the folder.
 
-Override the config directory with the `VORPAL_USER_CONFIG_DIR` environment variable.
-
-### Format
-
-```json
+```json title="~/.vorpal/settings.json"
 {
   "registry": "https://registry.example.com:23151",
   "namespace": "my-team",
@@ -192,12 +293,10 @@ Override the config directory with the `VORPAL_USER_CONFIG_DIR` environment vari
 }
 ```
 
-All fields are optional. Only set fields override the built-in defaults.
+Every key is optional; a key that is not set keeps the built-in default.
 
-### Managing User Config
-
-```bash
-# Set a user-level value
+```bash prompt
+# Set a value in your settings file
 vorpal config --user set registry "https://registry.example.com:23151"
 
 # Get a value (shows resolved source)
@@ -207,13 +306,11 @@ vorpal config get registry
 vorpal config show
 ```
 
-## Lockfile (`Vorpal.lock`)
+## Lockfile {#lockfile-vorpallock}
 
-The lockfile pins source digests per platform to ensure reproducible builds. It is automatically created and updated during builds.
+`Vorpal.lock` pins the digest of each remote source, per platform. `vorpal prepare` (or a build with `--unlock`) writes it; commit it with your project.
 
-### Format
-
-```toml
+```toml title="Vorpal.lock"
 lockfile = 1
 
 [[sources]]
@@ -225,22 +322,17 @@ includes = []
 excludes = []
 ```
 
-### Behavior
+- A build runs in locked mode: it stops on a remote source with no pin ([`is unpinned`](/troubleshooting/errors/#err-source-unpinned)) or one that no longer matches its pin ([`changed`](/troubleshooting/errors/#err-source-changed)).
+- Each entry is for one platform.
 
-- Sources are locked after first resolution
-- Locked sources cannot change without the `--unlock` flag
-- Each source entry is platform-specific
-- The lockfile should be committed to version control
-
-```bash
-# Build normally (locked mode - rejects changed sources)
+```bash prompt
+# Pin or update the sources
+vorpal prepare my-app
+# Build in locked mode
 vorpal build my-app
-
-# Update locked sources
-vorpal build my-app --unlock
 ```
 
-## Storage Layout
+## Storage layout {#storage-layout}
 
 Vorpal stores all data under `/var/lib/vorpal/`:
 
@@ -255,9 +347,9 @@ Vorpal stores all data under `/var/lib/vorpal/`:
 | `store/artifact/output/` | Unpacked artifact outputs |
 | `sandbox/` | Isolated build workspaces |
 
-## Supported Systems
+## Supported systems {#supported-systems}
 
-The `system` configuration value accepts these platform identifiers:
+[`system`](#key-system) and `--system` take these values:
 
 | Value | Platform |
 |-------|----------|

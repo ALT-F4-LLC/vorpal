@@ -36,6 +36,8 @@ const applies = data.unreleased ? 'Applies to main' : `Applies to ${version} and
 /** Starlight's PAGE_TITLE_ID, the skip link's target. */
 const PAGE_TITLE_ID = '_top';
 const hasToc = !!toc && toc.length > 0;
+// A CLI command page's title is the command itself, shown as code.
+const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal');
 ---
 
 <header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
@@ -57,14 +59,14 @@ const hasToc = !!toc && toc.length > 0;
 		)
 	}
 	<h1 id={PAGE_TITLE_ID}>
-		{data.title}
+		{codeTitle ? <code>{data.title}</code> : data.title}
 		{data.unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
 		{data.since && <span class="vp-vb">Since {data.since}</span>}
 	</h1>
 	{summary && <p class="vp-summary">{summary}</p>}
 	<p class="vp-pmeta">
 		{kind && <span class="vp-kind">{kind}</span>}
-		<span>{applies}</span>
+		<span>{data.metaNote ? `${applies} · ${data.metaNote}` : applies}</span>
 	</p>
 	{
 		hasToc && (

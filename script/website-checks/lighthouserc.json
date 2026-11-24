@@ -6,6 +6,7 @@
         "http://localhost/",
         "http://localhost/guides/typescript/",
         "http://localhost/reference/cli/",
+        "http://localhost/reference/cli/build/",
         "http://localhost/concepts/architecture/"
       ],
       "numberOfRuns": 3,

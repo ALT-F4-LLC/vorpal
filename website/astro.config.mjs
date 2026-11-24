@@ -177,6 +177,10 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Troubleshooting',
+					items: [{ label: 'Error reference', slug: 'troubleshooting/errors' }],
+				},
+				{
 					label: 'Concepts',
 					items: [
 						{ label: 'Architecture', slug: 'concepts/architecture' },
@@ -190,7 +194,22 @@ export default defineConfig({
 				{
 					label: 'Reference',
 					items: [
-						{ label: 'Command-line (CLI)', slug: 'reference/cli' },
+						{
+							label: 'CLI',
+							items: [
+								{ label: 'Overview', slug: 'reference/cli' },
+								{ label: 'vorpal build', slug: 'reference/cli/build' },
+								{ label: 'vorpal prepare', slug: 'reference/cli/prepare' },
+								{ label: 'vorpal run', slug: 'reference/cli/run' },
+								{ label: 'vorpal inspect', slug: 'reference/cli/inspect' },
+								{ label: 'vorpal init', slug: 'reference/cli/init' },
+								{ label: 'vorpal config', slug: 'reference/cli/config' },
+								{ label: 'vorpal login', slug: 'reference/cli/login' },
+								{ label: 'vorpal system keys', slug: 'reference/cli/system/keys' },
+								{ label: 'vorpal system prune', slug: 'reference/cli/system/prune' },
+								{ label: 'vorpal system services', slug: 'reference/cli/system/services' },
+							],
+						},
 						{ label: 'Configuration', slug: 'reference/configuration' },
 						{ label: 'API', slug: 'reference/api' },
 						{ label: 'Contributing to Docs', slug: 'reference/contributing' },

@@ -1,0 +1,34 @@
+---
+title: vorpal login
+description: Sign in to an OIDC provider with the device flow and store the credentials for a registry.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+---
+
+import CliSynopsis from '../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="login" />
+
+`login` runs the OAuth2 device flow: it prints a verification URL and a code, waits for you to sign in, then stores the credentials in `/var/lib/vorpal/key/credentials.json`.
+
+## Options {#options}
+
+<CliEntries command="login" kind="options" />
+
+The `registry` setting replaces the `--registry` default. A flag on the command line always wins.
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Examples {#examples}
+
+```bash prompt
+# Sign in with the defaults (a local Keycloak)
+vorpal login
+# Sign in to your identity provider, for your registry
+vorpal login --issuer https://id.example.com/realms/vorpal --registry https://registry.example.com:23151
+```

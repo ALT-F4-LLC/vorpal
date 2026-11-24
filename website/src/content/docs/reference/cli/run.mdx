@@ -1,0 +1,42 @@
+---
+title: vorpal run
+description: Run a built artifact's program from the store, by its alias.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - reference/cli/build
+---
+
+import CliSynopsis from '../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="run" />
+
+`run` finds the alias's digest (in the local store, then the registry), pulls the artifact if it isn't in the local store, and replaces itself with the program from the artifact's `bin/` folder.
+
+## Arguments {#arguments}
+
+<CliEntries command="run" kind="arguments" />
+
+## Options {#options}
+
+<CliEntries command="run" kind="options" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Examples {#examples}
+
+```bash prompt
+# Run an artifact's program
+vorpal run my-tool
+# Run another program from the same artifact
+vorpal run my-tools --bin specific-tool
+# Pass arguments to the program
+vorpal run my-tool -- --verbose --output /tmp/out
+# Run from a namespace, at a tag
+vorpal run my-namespace/my-tool:v1.0
+```

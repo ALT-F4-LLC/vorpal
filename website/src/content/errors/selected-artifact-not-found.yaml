@@ -1,0 +1,18 @@
+group: config
+order: 1
+message: "selected 'artifact' not found: <NAME>"
+raised_by: The CLI, in `vorpal build` (also with `--list` or `--export`) and `vorpal prepare`.
+meaning: Your config program defines no artifact called `<NAME>`.
+fix:
+  - text: >-
+      Check the names your config program passes to its builders: the first argument, such as
+      `Python("hello-world", SYSTEMS)`. Projects from `vorpal init` define `<project>` and
+      `<project>-dev`.
+check: The build prints a digest.
+links:
+  - text: "`vorpal build <NAME>`"
+    href: /reference/cli/build/#arg-name
+sources:
+  - file: cli/src/command/build.rs
+    line: 914
+    match: "selected 'artifact' not found: {}"

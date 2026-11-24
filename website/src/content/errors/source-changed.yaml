@@ -1,0 +1,30 @@
+group: lockfile
+order: 1
+message: "source '<name>' changed - use '--unlock' to update"
+raised_by: The agent daemon, during `vorpal build` or `vorpal prepare --unlock=false`, in locked mode.
+meaning: >-
+  `Vorpal.lock` has a pin for the remote source `<name>` on this system, and the source your config
+  program defines no longer matches it: its URL, `includes`, `excludes` or declared digest changed. In
+  locked mode Vorpal refuses to use it, so a build can't change without you noticing.
+fix:
+  - text: "If you changed it on purpose, review and update the pin, then commit `Vorpal.lock`:"
+  - command: vorpal prepare <artifact>
+    label: update the pin
+    output: |-
+      verify: <other-source> (<platform>) -> <digest>
+      update: <name> (<platform>) -> <digest>
+      <artifact-digest>
+  - text: "One line for every remote source; only the changed one says `update:`."
+  - text: >-
+      If you didn't edit it yourself (an SDK upgrade or a teammate's change), find which change
+      brought it in before unlocking: unlocking trusts the new source.
+check: "`vorpal build <artifact>` finishes and prints the digest."
+links:
+  - text: "`vorpal prepare`"
+    href: /reference/cli/prepare/
+  - text: "`vorpal build --unlock`"
+    href: /reference/cli/build/#flag-unlock
+sources:
+  - file: cli/src/command/start/agent.rs
+    line: 702
+    match: "source '{}' changed - use '--unlock' to update"

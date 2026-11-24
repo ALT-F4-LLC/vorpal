@@ -19,7 +19,7 @@
  *   icon and its own ground); text before the first row is the cause's
  *   "why" line.
  * - reference-cli, reference-config, reference-sdk, reference-errors:
- *   `### name {#flag-…}` (or `key-`, `method-`, `err-`; h3 or h4) starts a
+ *   `### name {#flag-…}` (or `arg-`, `env-`, `key-`, `method-`, `err-`; h3 or h4) starts a
  *   reference entry that runs to the next heading of its level or higher. Put a `<Props>` line right under
  *   the heading in MDX.
  *
@@ -85,7 +85,7 @@ const RULES = [
 	{
 		kinds: ['reference-cli', 'reference-config', 'reference-sdk', 'reference-errors'],
 		tag: ['h3', 'h4'],
-		id: /^(flag|key|method|err)-[\w.-]+$/,
+		id: /^(flag|arg|env|key|method|err)-[\w.-]+$/,
 		wrap: 'entry',
 	},
 ];

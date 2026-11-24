@@ -1,0 +1,50 @@
+---
+title: CLI reference
+description: Every vorpal command, the options every command takes, environment variables and exit codes.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+---
+
+import CliCommands from '../../../../components/cli/CliCommands.astro';
+import CliEntries from '../../../../components/cli/CliEntries.astro';
+import CliAnchors from '../../../../components/cli/CliAnchors.astro';
+
+The `vorpal` CLI builds artifacts, manages settings, runs built artifacts and administers the services. Each command has its own page; `vorpal <command> --help` prints the same flags.
+
+## Commands {#commands}
+
+<CliCommands />
+
+## Global options {#global-options}
+
+<CliEntries command="_global" kind="options" index={false} />
+
+Every command also takes `--help` (`-h`) and `--version` (`-V`).
+
+## Environment variables {#environment-variables}
+
+### `VORPAL_SOCKET_PATH` {#env-vorpal-socket-path}
+
+Changes the default socket path, `/var/lib/vorpal/vorpal.sock`. Every `--agent`, `--registry` and `--worker` default then points to `unix://<path>`, and `vorpal system services start` listens there when it has no `--port`.
+
+### `VORPAL_ISSUER_CLIENT_SECRET_FILE` {#env-vorpal-issuer-client-secret-file}
+
+The same as [`--issuer-client-secret-file`](/reference/cli/system/services/#flag-issuer-client-secret-file) on `vorpal system services start`.
+
+### `VORPAL_ISSUER_SERVICE_CLIENT_IDS` {#env-vorpal-issuer-service-client-ids}
+
+The same as [`--issuer-service-client-ids`](/reference/cli/system/services/#flag-issuer-service-client-ids) on `vorpal system services start`.
+
+### `VORPAL_USER_CONFIG_DIR` {#env-vorpal-user-config-dir}
+
+Changes the folder of your settings file, `~/.vorpal/settings.json`. See [Configuration](/reference/configuration/#settings-json).
+
+## Exit codes {#exit-codes}
+
+- `0`: success.
+- `1`: an error, such as a failed build, a missing artifact or a configuration error.
+- `2`: a usage error, such as an unknown flag.
+
+<CliAnchors />

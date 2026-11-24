@@ -1,0 +1,113 @@
+---
+// Generated reference entries for a command's arguments or options
+// (docs-redesign step 5; template reference-cli-build.html): an optional
+// flag index, then one anchored entry per item with Default, Setting, Env
+// and Since, and the hand-written text from src/data/cli/overlay.yaml.
+//
+// <CliEntries command="build" kind="options" />
+// <CliEntries command="config set" kind="arguments" level={4} />
+// <CliEntries command="_global" kind="options" />
+//
+// The entries use the same markup as Markdown reference entries
+// (sectionize.mjs and <Props>): Starlight's anchor heading inside
+// `.vp-refent`, so the link control, :target highlight and copy-on-click
+// behave the same.
+import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
+import Props from '../Props.astro';
+import {
+	GLOBAL,
+	anchor,
+	blocks,
+	cli,
+	defaultText,
+	flagName,
+	getCommand,
+	inline,
+	mark,
+	overlayKey,
+	type CliArg,
+} from '../../data/cli';
+import { getOverlay } from './overlay';
+
+interface Props {
+	command: string;
+	kind: 'arguments' | 'options';
+	/** Heading level of each entry. */
+	level?: 3 | 4;
+	/** Show the one-line index of every flag above the entries. */
+	index?: boolean;
+}
+
+const { command, kind, level = 3 } = Astro.props;
+const overlay = (await getOverlay())[command];
+const list: CliArg[] =
+	command === GLOBAL ? cli.global : kind === 'arguments' ? getCommand(command).arguments : getCommand(command).options;
+const items = kind === 'options' ? [...list].sort((a, b) => flagName(a).localeCompare(flagName(b))) : list;
+const showIndex = Astro.props.index ?? (kind === 'options' && items.length > 3);
+
+const entries = items.map((a) => {
+	const o = kind === 'arguments' ? overlay.arguments?.[a.id] : overlay.options?.[overlayKey(a)];
+	if (!o) throw new Error(`overlay.yaml: "${command}" ${kind}.${a.id} is missing`);
+	const id =
+		command === GLOBAL
+			? `flag-${overlayKey(a)}`
+			: anchor(command, kind === 'arguments' ? 'arg' : 'flag', kind === 'arguments' ? a.id : overlayKey(a));
+	const valueName = o.value_name ?? a.value_name;
+	let name: string;
+	let value: string | undefined;
+	if (kind === 'arguments') {
+		name = a.trailing ? `-- <${valueName}>...` : `<${valueName}>`;
+	} else {
+		name = flagName(a);
+		if (valueName && a.action !== 'flag')
+			value = a.optional_value ? `[=${valueName}]` : a.require_equals ? `=<${valueName}>` : `<${valueName}>`;
+	}
+	const m = mark(`${kind === 'arguments' ? 'arg' : 'opt'}:${command}:${a.id}`, o.since);
+	const envText = o.env ?? (a.env ? `\`${a.env}\`` : undefined);
+	return {
+		id,
+		name,
+		value,
+		label: [name, value].filter(Boolean).join(' '),
+		props: {
+			required: kind === 'arguments' ? (a.required ? 'yes' : 'no') : a.required ? 'yes' : undefined,
+			default: kind === 'arguments' && a.default === null ? undefined : defaultText(a, o.default),
+			allowed:
+				a.possible_values && a.action === 'set' ? a.possible_values.map((v) => `\`${v}\``).join(', ') : undefined,
+			setting: o.setting ? `[\`${o.setting}\`](/reference/configuration/#key-${o.setting})` : undefined,
+			env: envText,
+			repeatable: a.action === 'append' ? 'yes' : undefined,
+			conflicts: a.conflicts_with.length ? a.conflicts_with.map((c) => `\`${c}\``).join(', ') : undefined,
+			since: m ? ('unreleased' in m ? 'Unreleased' : m.since) : undefined,
+		},
+		text: blocks(o.text),
+		why: o.why ? `Why: ${inline(o.why)}` : undefined,
+	};
+});
+---
+
+{
+	showIndex && (
+		<ul class="vp-findex" aria-label={kind === 'options' ? 'All options' : 'All arguments'}>
+			{entries.map((e) => (
+				<li>
+					<a href={`#${e.id}`}>{e.name}</a>
+				</li>
+			))}
+		</ul>
+	)
+}
+{
+	entries.map((e) => (
+		<div class="vp-refent">
+			<AnchorHeading level={level} id={e.id}>
+				<code>{e.name}</code>
+				{e.value && ' '}
+				{e.value && <span class="vp-argv">{e.value}</span>}
+			</AnchorHeading>
+			<Props {...e.props} />
+			<Fragment set:html={e.text} />
+			{e.why && <p class="vp-why" set:html={e.why} />}
+		</div>
+	))
+}

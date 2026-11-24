@@ -1,0 +1,45 @@
+---
+// Old anchors of the single-page CLI reference (before step 5), which
+// readers and other sites still link to: `/reference/cli/#vorpal-build`.
+//
+// - Without JavaScript, `#vorpal-<command>` lands on that command's row in
+//   the Commands list (CliCommands gives each row the old id), which links
+//   to its page. The other old ids land at the top.
+// - With JavaScript, this script sends every old anchor to its new page
+//   and entry. IA §2 "Fragment map".
+import { hrefOf, cli } from '../../data/cli';
+
+// Old section ids (github-slugger order of the old page's headings) by the
+// command whose section they were in, then where that part now lives.
+const OLD: Record<string, string> = {
+	arguments: '/reference/cli/build/#arguments',
+	options: '/reference/cli/build/#options',
+	examples: '/reference/cli/build/#examples',
+	output: '/reference/cli/build/#output',
+	'options-1': '/reference/cli/config/#options',
+	'options-2': '/reference/cli/init/#options',
+	'arguments-1': '/reference/cli/init/#arguments',
+	'interactive-prompt': '/reference/cli/init/#prompt',
+	'arguments-2': '/reference/cli/inspect/#arguments',
+	'options-3': '/reference/cli/inspect/#options',
+	'options-4': '/reference/cli/login/#options',
+	'arguments-3': '/reference/cli/prepare/#arguments',
+	'options-5': '/reference/cli/prepare/#options',
+	'examples-1': '/reference/cli/prepare/#examples',
+	'output-1': '/reference/cli/prepare/#output',
+	'arguments-4': '/reference/cli/run/#arguments',
+	'options-6': '/reference/cli/run/#options',
+	'options-7': '/reference/cli/system/prune/#options',
+	'options-8': '/reference/cli/system/services/#options',
+	'transport-modes': '/reference/cli/system/services/#transport',
+};
+for (const c of cli.commands) {
+	const href = hrefOf(c.path);
+	if (href) OLD[`vorpal-${c.path.replace(/ /g, '-')}`] = href;
+}
+---
+
+<script is:inline define:vars={{ map: OLD }}>
+	const to = map[decodeURIComponent(location.hash.slice(1))];
+	if (to) location.replace(to);
+</script>

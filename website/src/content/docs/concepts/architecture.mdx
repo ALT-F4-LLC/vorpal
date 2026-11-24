@@ -83,7 +83,7 @@ All inter-component communication uses gRPC with Protocol Buffers. This provides
 - **Streaming** for transferring large archives without loading them entirely into memory
 - **TLS support** for securing communication when running services remotely
 
-By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See [`vorpal system keys generate`](/reference/cli/#vorpal-system-keys-generate) and [`vorpal system services start`](/reference/cli/#vorpal-system-services-start) in the CLI reference for TLS key generation and the `--tls` flag.
+By default, services communicate over a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. For remote deployments, TCP with optional TLS is available. See [`vorpal system keys generate`](/reference/cli/system/keys/) and [`vorpal system services start`](/reference/cli/system/services/#flag-tls) in the CLI reference for TLS key generation and the `--tls` flag.
 
 ## Why config-as-code?
 

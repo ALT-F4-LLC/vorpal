@@ -29,7 +29,7 @@ export const SECTIONS: SectionConfig[] = [
 	{ label: 'Get started', group: 'Get started' },
 	{ label: 'Guides', group: 'Guides' },
 	{ label: 'Reference', group: 'Reference' },
-	{ label: 'Troubleshooting', fallback: '/getting-started/installation/#troubleshooting' },
+	{ label: 'Troubleshooting', group: 'Troubleshooting' },
 	{ label: 'Concepts', group: 'Concepts' },
 	{ label: 'Self-hosting', fallback: '/concepts/architecture/#services-in-detail' },
 ];

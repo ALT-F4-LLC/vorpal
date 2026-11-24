@@ -26,7 +26,9 @@ export const PAGES = [
 	'/concepts/jobs/',
 	'/concepts/artifacts/',
 	'/reference/cli/',
+	'/reference/cli/build/',
 	'/reference/configuration/',
+	'/troubleshooting/errors/',
 	'/404.html',
 ];
 const SCHEMES = /** @type {const} */ (['light', 'dark']);

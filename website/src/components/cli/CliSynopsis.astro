@@ -1,0 +1,33 @@
+---
+// The synopsis of a generated CLI reference page (docs-redesign step 5):
+// `vorpal build <NAME> [OPTIONS]` as a CLI block. For the page's own
+// command it also checks that the page's `unreleased` frontmatter matches
+// the generated data, so the title badge and the data cannot disagree.
+//
+// <CliSynopsis command="build" />
+// <CliSynopsis command="config set" title="vorpal config set" />
+import { Code } from '@astrojs/starlight/components';
+import { getCommand, mark, synopsis } from '../../data/cli';
+import { getOverlay } from './overlay';
+
+interface Props {
+	/** The command path, such as `build` or `system services start`. */
+	command: string;
+	/** The block's title; a block with its own title is a subcommand's. */
+	title?: string;
+}
+
+const { command, title } = Astro.props;
+await getOverlay();
+const c = getCommand(command);
+const m = mark(`cmd:${command}`);
+const unreleased = !!m && 'unreleased' in m;
+const entry = Astro.locals.starlightRoute?.entry;
+if (!title && entry && Boolean(entry.data.unreleased) !== unreleased) {
+	throw new Error(
+		`${entry.filePath}: "vorpal ${command}" is ${unreleased ? 'not ' : ''}in the latest release: set \`unreleased: ${unreleased}\` in the frontmatter.`,
+	);
+}
+---
+
+<Code code={synopsis(c)} lang="bash" meta="prompt" title={title ?? 'Synopsis'} />

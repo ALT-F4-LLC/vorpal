@@ -1,0 +1,36 @@
+---
+title: Error reference
+description: Each message Vorpal prints, word for word, with what it means and how to fix it.
+summary: Each message Vorpal prints, word for word, with what it means and how to fix it. Paste a message into search to land on its entry.
+kind: reference-errors
+metaNote: Messages checked against the source in CI
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - reference/cli/build
+  - reference/configuration
+---
+
+import ErrorEntries from '../../../components/ErrorEntries.astro';
+
+Placeholders such as <code>&lt;name&gt;</code> stand for the value in your message. Where an SDK words a message differently, each wording is listed under the entry.
+
+## Lockfile {#lockfile}
+
+<ErrorEntries group="lockfile" />
+
+## Config program and names {#config}
+
+<ErrorEntries group="config" />
+
+## Settings {#settings}
+
+<ErrorEntries group="settings" />
+
+## Connection {#connection}
+
+<ErrorEntries group="connection" />
+
+## Still stuck {#still-stuck}
+
+Search this page for the exact message, or open an issue on [GitHub](https://github.com/ALT-F4-LLC/vorpal/issues) with the output of `vorpal build <name> --list`.

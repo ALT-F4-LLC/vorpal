@@ -56,7 +56,7 @@ To force a fresh build and skip the cache, use `--rebuild`:
 vorpal build --rebuild hello-world
 ```
 
-See [`vorpal build`](/reference/cli/#vorpal-build) in the CLI reference for all available options.
+See [`vorpal build`](/reference/cli/build/) in the CLI reference for all available options.
 
 ## Access your artifact output {#step-4}
 

@@ -1,0 +1,39 @@
+---
+title: vorpal inspect
+description: Print a stored artifact's definition as JSON, by its digest.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - reference/cli/build
+---
+
+import CliSynopsis from '../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="inspect" />
+
+## Arguments {#arguments}
+
+<CliEntries command="inspect" kind="arguments" />
+
+## Options {#options}
+
+<CliEntries command="inspect" kind="options" />
+
+The `registry` and `namespace` settings replace these defaults. A flag on the command line always wins.
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Examples {#examples}
+
+```bash prompt
+vorpal inspect "$(vorpal build my-app)"
+```
+
+## Output {#output}
+
+The artifact's definition, as pretty-printed JSON.

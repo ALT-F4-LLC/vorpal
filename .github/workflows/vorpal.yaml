@@ -121,6 +121,15 @@ jobs:
           fi
 
       - run: ./script/dev.sh make TARGET=release test
+
+      # The docs' generated CLI reference (website/src/data/cli/main.json)
+      # must match the clap definitions. `make test` already runs this test;
+      # it is repeated here (already compiled) so a drift shows up as its
+      # own step. Fix: VORPAL_CLI_REFERENCE_WRITE=1 cargo test -p vorpal-cli cli_reference
+      - name: CLI reference data is current
+        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        run: ./script/dev.sh cargo test --offline --release -p vorpal-cli cli_reference
+
       - run: ./script/dev.sh make TARGET=release dist
 
       - run: |
@@ -696,6 +705,27 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
+
+  # Error reference and CLI reference data: each message in
+  # website/src/content/errors must still be in the Rust or SDK source it
+  # cites, and the generated CLI data is compared with the latest release's
+  # (the Unreleased marks). Runs on every pull request, because a change in
+  # cli/ or sdk/ alone can break a quoted message. Bun only, no install.
+  test-website-reference:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Error messages and CLI version marks
+        run: bun script/website-checks/reference.mjs
 
   test-website-checks:
     if: ${{ needs.test-website-changes.outputs.changed == 'true' }}

@@ -86,7 +86,7 @@ As an alternative, the installer also accepts environment variables. These are u
 
 Note that `CI` and `NO_COLOR` are environment-variable-only options with no flag equivalents. Conversely, `--uninstall` and `--help` are flag-only with no environment variable equivalents.
 
-The installer adds each issuer option you set to the service definition it writes (the LaunchAgent on macOS, the systemd unit on Linux). If the installed binary supports `--issuer-client-secret-file`, the installer writes the client secret to `/var/lib/vorpal/key/issuer-client-secret` (mode `0600`) and passes the file path, so the service definition does not contain the secret. Older binaries receive the secret value on the service command line. See [`vorpal system services start`](/reference/cli/#vorpal-system-services-start) for what each option does.
+The installer adds each issuer option you set to the service definition it writes (the LaunchAgent on macOS, the systemd unit on Linux). If the installed binary supports `--issuer-client-secret-file`, the installer writes the client secret to `/var/lib/vorpal/key/issuer-client-secret` (mode `0600`) and passes the file path, so the service definition does not contain the secret. Older binaries receive the secret value on the service command line. See [`vorpal system services start`](/reference/cli/system/services/) for what each option does.
 
 For example, using environment variables:
 

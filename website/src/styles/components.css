@@ -448,6 +448,113 @@
 	text-transform: uppercase;
 }
 
+/* Generated CLI entries (components/cli): the value after the flag, the
+   flag index and the "Why" line. */
+.vp-refent .vp-argv {
+	margin-inline-start: 0.375rem;
+	color: var(--vp-ink-2);
+	font: 500 0.9375rem / 1.4 var(--vp-mono);
+}
+.sl-markdown-content .vp-findex {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 1rem;
+	margin: 0.75rem 0 0.5rem;
+	padding: 0;
+	list-style: none;
+	font: 500 var(--vp-fs-ui) / 1.6 var(--vp-mono);
+}
+.sl-markdown-content .vp-findex li {
+	margin: 0;
+}
+.sl-markdown-content .vp-why {
+	color: var(--vp-ink-2);
+	font-size: var(--vp-fs-ui);
+}
+.sl-markdown-content .vp-cmdlist {
+	padding: 0;
+	list-style: none;
+}
+.sl-markdown-content .vp-cmdlist li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.25rem 0.75rem;
+	margin: 0;
+	padding: 0.5rem 0;
+	border-top: 1px solid var(--vp-line);
+	scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+}
+.vp-cmdlist-s {
+	flex: 1 1 20rem;
+	color: var(--vp-ink-2);
+}
+
+/* Error entries (ErrorEntries.astro): the Error tag, per-SDK wording and
+   the Printed by / What it means / Fix rows. */
+.vp-errent h3 {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.25rem 0.625rem;
+	overflow-wrap: anywhere;
+}
+.vp-etag {
+	padding: 1px 6px;
+	border: 1px solid var(--vp-err);
+	border-radius: var(--vp-r-sm);
+	color: var(--vp-err);
+	font: 600 var(--vp-fs-label) / 1.4 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.sl-markdown-content .vp-variants {
+	margin: 0.5rem 0;
+	padding: 0;
+	list-style: none;
+	font-size: var(--vp-fs-ui);
+}
+.sl-markdown-content .vp-variants li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.125rem 0.625rem;
+	margin: 0.25rem 0;
+}
+.vp-who {
+	min-width: 9rem;
+	color: var(--vp-ink-2);
+	font-weight: 600;
+}
+.sl-markdown-content .vp-errdl {
+	display: grid;
+	grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+	gap: 0.5rem 1rem;
+	margin: 0.75rem 0 0;
+}
+.sl-markdown-content .vp-errdl dt {
+	margin: 0;
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.9 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.sl-markdown-content .vp-errdl dd {
+	margin: 0;
+	min-width: 0;
+}
+.sl-markdown-content .vp-errdl dd > :first-child {
+	margin-top: 0;
+}
+@media (max-width: 50rem) {
+	.sl-markdown-content .vp-errdl {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.125rem;
+	}
+	.sl-markdown-content .vp-errdl dd {
+		margin-bottom: 0.5rem;
+	}
+}
+
 /* ===== Diagram frame (Diagram.astro) ===== */
 .vp-dfig {
 	margin-block: 1.125rem;
