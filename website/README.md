@@ -10,7 +10,7 @@ bun run build   # production build to ./dist/
 
 ## Checks
 
-Pull requests that touch `website/` run `.github/workflows/website.yaml`: size budgets, axe (WCAG 2.2 A/AA, light and dark), internal links and anchors (lychee), and Lighthouse CI. The tools live in `script/website-checks/`, outside `website/`, so they are not part of the `vorpal-website` artifact. To run them against a local build:
+On pull requests that touch `website/`, `script/website-checks/` or `.github/workflows/vorpal.yaml`, the `test-website-checks` and `test-website-lighthouse` jobs in `.github/workflows/vorpal.yaml` run size budgets, axe (WCAG 2.2 A/AA, light and dark), internal links and anchors (lychee), and Lighthouse CI. The tools live in `script/website-checks/`, outside `website/`, so they are not part of the `vorpal-website` artifact. To run them against a local build:
 
 ```bash
 bun run build
