@@ -1,0 +1,27 @@
+---
+title: We can't find that page
+description: The page you followed a link to is not here. Search for it, or start from a section.
+summary: It may have moved in the redesign. Search for it, or start from a section.
+kind: not-found
+template: splash
+editUrl: false
+pagefind: false
+tableOfContents: false
+---
+
+import NotFound from '../../components/NotFound.astro';
+
+<NotFound>
+
+<h2 class="sr-only" id="routes">Start from a section</h2>
+
+<ul class="vp-cards" aria-labelledby="routes">
+<li class="vp-card"><span class="vp-card-type">New here</span><a href="/getting-started/installation/">Get started<span class="vp-card-arrow" aria-hidden="true">→</span></a>Install, then build the Python template.</li>
+<li class="vp-card"><span class="vp-card-type">Building</span><a href="/guides/development-environment/">Guides<span class="vp-card-arrow" aria-hidden="true">→</span></a>Environments, and every guide in your SDK.</li>
+<li class="vp-card"><span class="vp-card-type">Have a message</span><a href="/troubleshooting/errors/">Error reference<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every message, word for word.</li>
+<li class="vp-card"><span class="vp-card-type">Look up</span><a href="/reference/cli/">Reference<span class="vp-card-arrow" aria-hidden="true">→</span></a>CLI, configuration and API.</li>
+<li class="vp-card"><span class="vp-card-type">Understand</span><a href="/concepts/architecture/">Concepts<span class="vp-card-arrow" aria-hidden="true">→</span></a>How builds, artifacts and caching work.</li>
+<li class="vp-card"><span class="vp-card-type">Everything</span><a href="#sitemap">All pages<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every page, by section.</li>
+</ul>
+
+</NotFound>

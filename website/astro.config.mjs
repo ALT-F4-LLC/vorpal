@@ -170,10 +170,18 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Go', slug: 'guides/go' },
-						{ label: 'Python', slug: 'guides/python' },
-						{ label: 'Rust', slug: 'guides/rust' },
-						{ label: 'TypeScript', slug: 'guides/typescript' },
+						{ label: 'Add a development environment', slug: 'guides/development-environment' },
+						{
+							// Every task in one SDK, on one page each. They become the
+							// generated per-SDK views (ia-proposal, Question 2 B).
+							label: 'Every guide in one SDK',
+							items: [
+								{ label: 'Python', slug: 'guides/python' },
+								{ label: 'TypeScript', slug: 'guides/typescript' },
+								{ label: 'Go', slug: 'guides/go' },
+								{ label: 'Rust', slug: 'guides/rust' },
+							],
+						},
 					],
 				},
 				{
@@ -189,6 +197,22 @@ export default defineConfig({
 						{ label: 'Environments', slug: 'concepts/environments' },
 						{ label: 'Jobs', slug: 'concepts/jobs' },
 						{ label: 'Processes', slug: 'concepts/processes' },
+						{ label: 'How Vorpal compares', slug: 'concepts/how-vorpal-compares' },
+					],
+				},
+				{
+					label: 'Self-hosting',
+					items: [{ label: 'Set up TLS and client trust', slug: 'self-hosting/tls' }],
+				},
+				{
+					// Not a header section: the SDK hubs sit beside the sections
+					// (src/nav.ts, EXTRA_SECTIONS). Site order: Python first.
+					label: 'SDKs',
+					items: [
+						{ label: 'Python SDK', slug: 'sdks/python' },
+						{ label: 'TypeScript SDK', slug: 'sdks/typescript' },
+						{ label: 'Go SDK', slug: 'sdks/go' },
+						{ label: 'Rust SDK', slug: 'sdks/rust' },
 					],
 				},
 				{

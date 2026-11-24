@@ -21,7 +21,11 @@ import { serve } from './serve.mjs';
 export const PAGES = [
 	'/',
 	'/getting-started/quickstart/',
+	'/guides/development-environment/',
 	'/guides/typescript/',
+	'/self-hosting/tls/',
+	'/sdks/python/',
+	'/concepts/how-vorpal-compares/',
 	'/concepts/architecture/',
 	'/concepts/jobs/',
 	'/concepts/artifacts/',
