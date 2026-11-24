@@ -23,9 +23,15 @@
 //
 // Page metadata for the labels comes from `data-pagefind-meta` on the page
 // header (PageTitle.astro).
+//
+// Versions (src/versions.mjs): every page has a `version` Pagefind filter
+// (`main`, or a snapshot's `0.6`; PageTitle.astro), and search keeps to the
+// page's own version, so a reader of the 0.6 docs never lands on main.
 import { Icon } from '@astrojs/starlight/components';
 
-const { sections, extra } = Astro.locals.vorpalNav;
+const { sections, extra, snapshot } = Astro.locals.vorpalNav;
+const version = snapshot?.slug ?? 'main';
+const versionText = snapshot ? `the ${snapshot.release} docs` : 'the docs for main';
 const byLabel = (label: string) => [...sections, ...extra].find((s) => s.label === label);
 
 /** Shown before anything is typed. Paths are checked by the links check. */
@@ -46,7 +52,7 @@ const ROUTES = [
 ];
 ---
 
-<vp-search class="vp-search vp-jsonly" data-base={import.meta.env.BASE_URL}>
+<vp-search class="vp-search vp-jsonly" data-base={import.meta.env.BASE_URL} data-version={version}>
 	<button
 		type="button"
 		class="vp-search-btn"
@@ -78,7 +84,7 @@ const ROUTES = [
 			<button type="button" class="vp-btn" data-close>Close</button>
 		</form>
 		<p id="vp-sq-hint" class="sr-only">
-			Results update as you type. Each result shows its section and page type. Up and Down arrows
+			Searches {versionText}. Results update as you type. Each result shows its section and page type. Up and Down arrows
 			move through results; Escape closes.
 		</p>
 		<p class="vp-sres-h" id="vp-sres-h">Start here</p>
@@ -110,7 +116,7 @@ const ROUTES = [
 		<p class="vp-sfail" hidden>Search could not load. Try again, or use the sections in the header.</p>
 		<div class="vp-sfoot">
 			<span>Enter opens the first result · ↑↓ move · Esc closes</span>
-			<span>Searches all four SDK examples and every error message</span>
+			<span>Searches {versionText}: all four SDK examples and every error message</span>
 		</div>
 	</dialog>
 	<div class="sr-only" id="vp-live" aria-live="polite" aria-atomic="true"></div>
@@ -134,6 +140,7 @@ const ROUTES = [
 		constructor() {
 			super();
 			const base = this.dataset.base || '/';
+			const version = this.dataset.version || 'main';
 			const button = this.querySelector<HTMLButtonElement>('.vp-search-btn')!;
 			const dialog = this.querySelector<HTMLDialogElement>('dialog')!;
 			const input = dialog.querySelector<HTMLInputElement>('input')!;
@@ -242,7 +249,7 @@ const ROUTES = [
 				let items: SearchItem[];
 				try {
 					const pf = await load();
-					const found = await pf.debouncedSearch(query, {}, 120);
+					const found = await pf.debouncedSearch(query, { filters: { version } }, 120);
 					if (found === null || mine !== seq) return;
 					const pages = await Promise.all(found.results.slice(0, 8).map((r) => r.data()));
 					if (mine !== seq) return;
