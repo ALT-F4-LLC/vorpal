@@ -1,0 +1,145 @@
+---
+title: Set up TLS and client trust
+description: Serve the Vorpal registry and worker over TLS on a real host name, and make each client trust the certificate.
+summary: Serve the registry and worker over TLS on a real host name, and make each client trust it.
+kind: operator-how-to
+wide: true
+lastUpdated: 2026-11-24
+related:
+  - reference/cli/system/keys
+  - reference/cli/system/services
+  - reference/cli/config
+  - troubleshooting/errors
+---
+
+import SdkGroup from '../../../components/SdkGroup.astro';
+
+<dl class="vp-facts" id="before">
+<dt>You end up with</dt>
+<dd>One server, `build.example.com`, running the registry and worker on TCP port 23151 with TLS. Each client keeps its own agent daemon on the local socket and reaches the server at `https://build.example.com:23151`.</dd>
+<dt>Before you start</dt>
+<dd>Vorpal 0.6.0 on the server and every client. A certificate and key for `build.example.com`, from your CA or a public one. The key must be RSA, in PKCS#8 PEM (`BEGIN PRIVATE KEY`): Vorpal also uses it to open secrets. An ECDSA key does not work.</dd>
+</dl>
+
+Convert a `BEGIN RSA PRIVATE KEY` file to PKCS#8 with OpenSSL:
+
+```bash prompt
+openssl pkcs8 -topk8 -nocrypt -in build.example.com.key -out build.example.com.pk8.key
+```
+
+:::note[Why you bring your own certificate]
+`vorpal system keys generate` signs its service certificate for `localhost` only, so a client that connects to a real host name rejects it.
+:::
+
+:::planned[ENG-372]
+A host name flag for the generated certificate, so `keys generate` can sign it for `build.example.com`.
+:::
+
+## Install your certificate {#step-1}
+
+On the server, put the certificate and key where the services read them: `/var/lib/vorpal/key/service.pem` and `service.key.pem`. `keys generate` keeps an existing `service.pem`.
+
+```bash prompt title="Server"
+sudo install -m 0644 build.example.com.pem /var/lib/vorpal/key/service.pem
+sudo install -m 0600 build.example.com.pk8.key /var/lib/vorpal/key/service.key.pem
+```
+
+## Generate the other keys {#step-2}
+
+This creates the CA, the service public key (from your key) and the service secret. It skips every file that already exists, so your certificate and key are kept. See [what it writes](/reference/cli/system/keys/#output).
+
+```bash prompt title="Server"
+vorpal system keys generate
+```
+
+## Start the services with TLS {#step-3}
+
+With [`--tls`](/reference/cli/system/services/#flag-tls) and no [`--port`](/reference/cli/system/services/#flag-port), the services listen on TCP 23151. The service the installer sets up (`vorpal.service` under systemd on Linux, `com.altf4llc.vorpal` under launchd on macOS) starts without TLS, so add these flags to its start command, or stop it and run the command below. [Services failed to start](/getting-started/installation/#services-failed-to-start) shows how to restart it.
+
+```bash prompt title="Server"
+vorpal system services start --services registry,worker --tls
+```
+
+## Point each client at the host {#step-4}
+
+Settings in `Vorpal.toml` apply to one project; [`--user`](/reference/cli/config/#flag-user) writes `~/.vorpal/settings.json` for every project on this machine.
+
+```bash prompt title="Each client"
+vorpal config --user set registry https://build.example.com:23151
+vorpal config --user set worker https://build.example.com:23151
+```
+
+## Make each client trust the certificate {#step-5}
+
+The CLI and the config program each make their own connection, and the config program uses your SDK's TLS code, so trust differs by SDK. Use the tab for the SDK the project's config program is written in. Every client also uses `/var/lib/vorpal/key/ca.pem` when it exists.
+
+<SdkGroup>
+<Fragment slot="python">
+
+**Trusts only `ca.pem` when it exists.** If `/var/lib/vorpal/key/ca.pem` exists, the Python SDK trusts that file and nothing else; otherwise it uses the system trust store. So on each client, replace `ca.pem` with the CA that signed your certificate, or remove it if the certificate is publicly trusted.
+
+</Fragment>
+<Fragment slot="typescript">
+
+**Trusts only `ca.pem` when it exists.** Same as Python: with `ca.pem` present the TypeScript SDK trusts only that file; without it, Node's default CA store. Replace or remove `ca.pem` on each client.
+
+</Fragment>
+<Fragment slot="go">
+
+**Trusts the system store plus `ca.pem`.** The Go SDK adds `ca.pem` to the system trust store. A publicly trusted certificate works with no change; for a private CA, put that CA in `ca.pem`.
+
+</Fragment>
+<Fragment slot="rust">
+
+**Trusts the system store plus `ca.pem`.** The Rust SDK and the CLI use the native roots and add `ca.pem` when it exists. A publicly trusted certificate works with no change; for a private CA, put that CA in `ca.pem`.
+
+</Fragment>
+</SdkGroup>
+
+The CLI itself trusts like the Rust SDK, whatever SDK the config program uses.
+
+:::caution
+If any artifact uses secrets, each client's agent daemon seals them with the client's `service.public.pem`, and the server's worker opens them with the server's key. Copy the server's `/var/lib/vorpal/key/service.public.pem` to the same path on each client. See [Secrets](/concepts/processes/#secrets).
+:::
+
+## Check it worked {#check}
+
+On a client, build any artifact. The build finishes and prints the digest. A trust problem shows up as a [connection error](/troubleshooting/errors/#err-registry-unavailable) even though the registry is running; the wording differs by SDK.
+
+```bash prompt title="Each client"
+vorpal build hello-world
+```
+
+```text output
+<digest>
+```
+
+## Alternative: a localhost tunnel {#tunnel}
+
+If you can't get a certificate for the host name, keep the generated `localhost` certificate and reach the server as `localhost` through SSH. Copy the server's `/var/lib/vorpal/key/ca.pem` to the client's `ca.pem`.
+
+```bash prompt title="Each client"
+ssh -N -L 23151:localhost:23151 build.example.com
+# in another shell
+vorpal config --user set registry https://localhost:23151
+vorpal config --user set worker https://localhost:23151
+```
+
+## Undo {#undo}
+
+On the server, start the services again without `--tls`. On each client, point `registry` and `worker` back at the local socket.
+
+```bash prompt title="Each client"
+vorpal config --user set registry unix:///var/lib/vorpal/vorpal.sock
+vorpal config --user set worker unix:///var/lib/vorpal/vorpal.sock
+```
+
+## Security notes {#security}
+
+- TLS encrypts traffic; it does not check who is calling. Without [`--issuer`](/reference/cli/system/services/#flag-issuer), anyone who can reach port 23151 can pull and push. With it, sign-in is OIDC, with read and write roles per namespace, plus trusted service clients.
+- Keep `service.key.pem` and `ca.key.pem` on the server, readable only by the user that runs Vorpal. `service.key.pem` serves TLS and opens every sealed secret, so a leaked key exposes both.
+- Replacing a client's `ca.pem` changes what every Python and TypeScript config program on that machine trusts.
+
+## Services in detail
+
+The [Architecture](/concepts/architecture/#services-in-detail) page explains what the agent daemon, the worker and the registry each do.
