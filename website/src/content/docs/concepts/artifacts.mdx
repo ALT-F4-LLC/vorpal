@@ -1,9 +1,12 @@
 ---
 title: Artifacts
 description: How Vorpal's content-addressed artifact model ensures reproducible builds.
+kind: concept
+wide: true
 ---
 
 import ArtifactParts from '../../../components/diagrams/ArtifactParts.astro';
+import Prism from '../../../components/Prism.astro';
 
 An artifact is the core unit of work in Vorpal. It represents something you want to build -- a binary, a library, a development environment, or any other output. Artifacts are content-addressed, meaning they are identified by a SHA-256 hash of their inputs. This page explains how artifacts work and why they are designed this way.
 
@@ -30,6 +33,12 @@ This design has two important properties:
 
 When you change any input -- a source file, an environment variable, a build step argument -- the digest changes, and Vorpal treats it as a new artifact that needs to be built from scratch. This is intentional: it eliminates an entire class of "stale cache" bugs.
 
+## Try it: change a value, then only the style {#try}
+
+Every SDK writes a definition as the same JSON: the same fields, in the same order, with no whitespace. So the same definition has the same digest whichever language you write it in, and a change to any value gives a new digest. Style is not part of the definition. Digests match across SDKs at matching SDK versions.
+
+<Prism />
+
 ## Sources
 
 Sources define the input files for your build. Each source has:
@@ -55,6 +64,18 @@ path = "https://example.com/toolchain.tar.gz"
 ```
 
 The lockfile pins digests per-platform because the same source URL may serve different binaries for different architectures.
+
+## What reproducible means here {#reproducible}
+
+A build is reproducible when the same definition gives the same digest, and so the same artifact, on any machine. Vorpal gets there in three ways, each with a limit:
+
+- **Pinned sources.** Every remote source is checked against its digest in `Vorpal.lock` before a step runs.
+- **Sandboxed steps on Linux.** The SDKs' shell steps run under Bubblewrap with only their declared artifacts. Steps keep network access, so a step that downloads at build time can still differ. On macOS, steps run without a sandbox.
+- **Same SDK version.** Built-in tools pin their versions in the SDK, so digests match across machines and SDKs at the same SDK version.
+
+:::planned[ENG-364]
+A sandbox for build steps on macOS.
+:::
 
 ## Build steps
 
