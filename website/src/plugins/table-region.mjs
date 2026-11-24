@@ -16,13 +16,18 @@
  * vorpal build". Names still equal after that are numbered. A table with no
  * heading before it is "Table N".
  *
- * @returns {(tree: any) => void}
+ * Astro 7 renders Markdown with Sätteri, so this is a Sätteri hast plugin: the
+ * `before` hook reads the whole tree once (heading context needs document
+ * order) and queues one `wrapNode` per table.
+ *
+ * @type {import('satteri').HastPluginEntry}
  */
-export default function rehypeTableRegion() {
-	return (tree) => {
+const tableRegion = {
+	name: 'table-region',
+	before(tree, ctx) {
 		/** Current heading text by level, index 2..6. @type {string[]} */
 		const headings = [];
-		/** @type {{ parent: any, index: number, table: any, own: string, context: string, parentHeading: string }[]} */
+		/** @type {{ table: any, own: string, context: string, parentHeading: string }[]} */
 		const found = [];
 
 		/** @param {any} node @returns {string} */
@@ -36,7 +41,7 @@ export default function rehypeTableRegion() {
 		/** @param {any} parent */
 		const walk = (parent) => {
 			if (!Array.isArray(parent.children)) return;
-			parent.children.forEach((/** @type {any} */ node, /** @type {number} */ index) => {
+			parent.children.forEach((/** @type {any} */ node) => {
 				if (node.type !== 'element') return walk(node);
 				const level = /^h([2-6])$/.exec(node.tagName)?.[1];
 				if (level) {
@@ -51,8 +56,6 @@ export default function rehypeTableRegion() {
 					(/** @type {any} */ c) => c.type === 'element' && c.tagName === 'caption',
 				);
 				found.push({
-					parent,
-					index,
 					table: node,
 					own: caption ? text(caption).trim() : '',
 					context: chain.at(-1) ?? '',
@@ -85,7 +88,7 @@ export default function rehypeTableRegion() {
 				seen.set(label, n);
 				label = `${label} ${n}`;
 			}
-			f.parent.children[f.index] = {
+			ctx.wrapNode(f.table, {
 				type: 'element',
 				tagName: 'div',
 				properties: {
@@ -94,8 +97,10 @@ export default function rehypeTableRegion() {
 					tabIndex: 0,
 					ariaLabel: label,
 				},
-				children: [f.table],
-			};
+				children: [],
+			});
 		});
-	};
-}
+	},
+};
+
+export default tableRegion;

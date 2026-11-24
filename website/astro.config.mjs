@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import rehypeTableRegion from './src/plugins/rehype-table-region.mjs';
+import { satteri } from '@astrojs/markdown-satteri';
+import emDashes from './src/plugins/em-dashes.mjs';
+import tableRegion from './src/plugins/table-region.mjs';
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -55,13 +57,17 @@ function prefixBaseLinks() {
 export default defineConfig({
 	site: 'https://docs.vorpal.build',
 	markdown: {
-		// Astro 6 leaves `gfm` undefined by default, which @astrojs/mdx reads as
-		// disabled, so `.mdx` pages lose GFM tables. Set it explicitly. The
-		// build's `markdown.gfm` deprecation warning is expected; when upgrading
-		// Astro, switch to an explicit `mdx({ gfm: true })` integration instead.
-		gfm: true,
-		// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
-		rehypePlugins: [rehypeTableRegion],
+		// Astro 7 renders Markdown and MDX with Sätteri. GFM (tables) is on by
+		// default; MDX inherits this processor.
+		processor: satteri({
+			// Sätteri renders `--` as an en dash; em-dashes.mjs keeps it an em dash.
+			features: { smartPunctuation: { dashes: false } },
+			hastPlugins: [
+				emDashes,
+				// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
+				tableRegion,
+			],
+		}),
 	},
 	integrations: [
 		prefixBaseLinks(),
