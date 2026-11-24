@@ -20,11 +20,13 @@ import { Icon } from '@astrojs/starlight/components';
 import Pagination from '@astrojs/starlight/components/Pagination.astro';
 import SidebarTree from '../SidebarTree.astro';
 import { flatten } from '../../nav';
-import pkg from '../../../package.json';
+import { LATEST_RELEASE } from '../../versions.mjs';
 import { markdownPath } from '../../markdown-path.mjs';
 
 const { entry, lang, editUrl } = Astro.locals.starlightRoute;
-const { sections, extra } = Astro.locals.vorpalNav;
+const { sections, extra, snapshot } = Astro.locals.vorpalNav;
+// On a version snapshot's page: that release (src/versions.mjs).
+const shown = snapshot?.release ?? LATEST_RELEASE;
 const allSections = [...sections, ...extra];
 const isSplash = entry.data.template === 'splash';
 
@@ -133,10 +135,10 @@ const related = (
 		</div>
 		<ul class="vp-footlinks">
 			<li><a href="/reference/contributing/">Contribute to the docs</a></li>
-			<li><a href={`https://github.com/ALT-F4-LLC/vorpal/releases/tag/${pkg.version}`}>Release notes</a></li>
+			<li><a href={`https://github.com/ALT-F4-LLC/vorpal/releases/tag/${shown}`}>Release notes</a></li>
 			<li><a href="https://github.com/ALT-F4-LLC/vorpal">GitHub</a></li>
 		</ul>
-		<p class="vp-vline">Docs for main · Latest release {pkg.version}</p>
+		<p class="vp-vline">Docs for {snapshot ? snapshot.release : 'main'} · Latest release {LATEST_RELEASE}</p>
 	</nav>
 </footer>
 

@@ -15,13 +15,31 @@ import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
 import Search from './Search.astro';
 import ThemeSelect from './ThemeSelect.astro';
 import SidebarTree from '../SidebarTree.astro';
-import pkg from '../../../package.json';
+import { LATEST_RELEASE } from '../../versions.mjs';
+import { versionLinks } from '../../version-routes';
 
 const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
-const { sections, extra } = Astro.locals.vorpalNav;
-const version = pkg.version;
+const { sections, extra, snapshot } = Astro.locals.vorpalNav;
+const version = LATEST_RELEASE;
 const github = 'https://github.com/ALT-F4-LLC/vorpal';
 const releaseNotes = `${github}/releases/tag/${version}`;
+
+// The version switcher (design-system.md §14): main, then each version
+// snapshot, each linking this page there, or that version's home when it
+// has no such page. `data-vp-version` keeps src/middleware.ts from moving
+// these links into the snapshot.
+const versions = await versionLinks(Astro.url.pathname);
+const current = snapshot ? snapshot.slug : 'main';
+const intro = snapshot
+	? `Docs for release ${snapshot.release}, frozen when it was released.`
+	: `Docs for main. Latest release ${version}. Anything not in ${version} is marked Unreleased.`;
+const vmeta = (v: (typeof versions)[number]) => {
+	const what = v.snapshot
+		? `${v.snapshot.release}${v.snapshot.release === version ? ', latest release' : ''}`
+		: 'updated on every push';
+	if (v.current) return `these docs, ${what}`;
+	return v.samePage ? what : `${what}; not on this page, opens its home`;
+};
 
 /** Site order for SDKs (team decision 2); Python is the default. */
 const sdks = [
@@ -98,10 +116,26 @@ const themes = [
 						))
 					}
 				</fieldset>
-				<p class="vp-label">Version</p>
+				<p class="vp-label" id="vp-menu-version">Version</p>
 				<p class="vp-menu-text">
-					Docs for main. Latest release {version}. <a href={releaseNotes}>Release notes</a>
+					{intro} <a href={releaseNotes} data-vp-version>Release notes</a>
 				</p>
+				<ul class="vp-menu-versions" aria-labelledby="vp-menu-version">
+					{
+						versions.map((v) => (
+							<li>
+								{v.current ? (
+									<span aria-current="true">{v.label}</span>
+								) : (
+									<a href={v.href} data-vp-version>
+										{v.label}
+									</a>
+								)}{' '}
+								<span class="vp-vmeta">{vmeta(v)}</span>
+							</li>
+						))
+					}
+				</ul>
 				<ul class="vp-menu-links">
 					<li><a href={github}>GitHub</a></li>
 				</ul>
@@ -159,26 +193,34 @@ const themes = [
 				});
 			})();`}
 		/>
-		<details class="vp-ver vp-pop-wrap">
+		<details class="vp-ver vp-pop-wrap" data-snapshot={snapshot ? '' : undefined}>
 			<summary>
-				<span class="vp-vdot" aria-hidden="true"></span>main<span class="sr-only"
-					>: docs for main, latest release {version}. Versions</span
+				<span class="vp-vdot" aria-hidden="true"></span>{current}<span class="sr-only"
+					>: {snapshot ? `docs for release ${snapshot.release}` : `docs for main, latest release ${version}`}.
+					Versions</span
 				>
 			</summary>
 			<div class="vp-pop vp-ver-pop">
-				<p>
-					Docs for <b>main</b>. Latest release <b>{version}</b>. Anything not in {version} is marked
-					Unreleased.
-				</p>
+				<p set:html={intro.replace(/(main|\d+\.\d+\.\d+)(?=[.,])/g, '<b>$1</b>')} />
 				<ul>
+					{
+						versions.map((v) => (
+							<li>
+								{v.current ? (
+									<span class="vp-cur-v" aria-current="true">
+										{v.label} <span class="vp-vmeta">{vmeta(v)}</span>
+									</span>
+								) : (
+									<a href={v.href} data-vp-version>
+										{v.label} <span class="vp-vmeta">{vmeta(v)}</span>
+									</a>
+								)}
+							</li>
+						))
+					}
 					<li>
-						<span class="vp-cur-v" aria-current="true">
-							main <span class="vp-vmeta">these docs, updated on every push</span>
-						</span>
-					</li>
-					<li>
-						<a href={releaseNotes}>
-							{version} <span class="vp-vmeta">latest release, notes on GitHub</span>
+						<a href={releaseNotes} data-vp-version>
+							Release notes <span class="vp-vmeta">{version}, on GitHub</span>
 						</a>
 					</li>
 				</ul>

@@ -10,13 +10,27 @@
 // - The summary is `summary`, or else `description` (the same sentence: the
 //   summary is also the page's meta description).
 // - The version comes from website/package.json.
-import pkg from '../../../package.json';
+// - Versions (src/versions.mjs). On main, a page that the latest release's
+//   snapshot does not have is Unreleased, as is one with `unreleased: true`:
+//   so the first Unreleased badge appears the first time main differs from
+//   the release (team decision 4), with no frontmatter to remember. A
+//   snapshot's page applies to its release only and opens with a banner
+//   that links the same page on main (or in the latest release).
+// - `data-pagefind-filter="version:…"` scopes search to the page's version
+//   (Search.astro).
 import TocList from '../TocList.astro';
+import { LATEST_RELEASE, LATEST_SNAPSHOT, mainPathOf } from '../../versions.mjs';
+import { versionLinks, versionPages } from '../../version-routes';
 
 const { entry } = Astro.locals.starlightRoute;
-const { section, trail, toc } = Astro.locals.vorpalNav;
+const { section, trail, toc, snapshot } = Astro.locals.vorpalNav;
 const data = entry.data;
-const version = pkg.version;
+const version = LATEST_RELEASE;
+const pages = await versionPages();
+const isPage = data.kind !== 'not-found' && data.kind !== 'home';
+const notInRelease =
+	!snapshot && isPage && !!LATEST_SNAPSHOT && !pages.snapshots.get(LATEST_SNAPSHOT.slug)?.has(mainPathOf(Astro.url.pathname));
+const unreleased = !snapshot && (!!data.unreleased || notInRelease);
 
 const KINDS: Record<string, string> = {
 	tutorial: 'Tutorial',
@@ -33,7 +47,28 @@ const KINDS: Record<string, string> = {
 };
 const kind = data.kind ? KINDS[data.kind] : undefined;
 const summary = data.summary ?? data.description;
-const applies = data.unreleased ? 'Applies to main' : `Applies to ${version} and main`;
+const applies = snapshot
+	? `Applies to ${snapshot.release}`
+	: unreleased
+		? 'Applies to main'
+		: `Applies to ${version} and main`;
+
+// The snapshot banner: this release, and where the newer docs are.
+let banner: { text: string; href: string; link: string } | undefined;
+if (snapshot) {
+	const links = await versionLinks(Astro.url.pathname);
+	const isLatest = snapshot.release === version;
+	const target = isLatest ? undefined : links.find((l) => l.snapshot === LATEST_SNAPSHOT && l.samePage);
+	const main = links[0];
+	const to = target ?? main;
+	banner = {
+		text: isLatest
+			? `the latest release. Main may have changes that are not released yet.`
+			: `an older release. The latest release is ${version}.`,
+		href: to.href,
+		link: `${to.samePage ? 'This page' : 'The docs'} ${to.snapshot ? `in ${to.snapshot.release}` : 'on main'}`,
+	};
+}
 /** Starlight's PAGE_TITLE_ID, the skip link's target. */
 const PAGE_TITLE_ID = '_top';
 const hasToc = !!toc && toc.length > 0;
@@ -59,6 +94,20 @@ const searchSection = section?.label;
 const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
 ---
 
+<span hidden data-pagefind-filter={`version:${snapshot ? snapshot.slug : 'main'}`} />
+{
+	banner && snapshot && (
+		<div class="vp-vbanner" role="note" aria-label="Version" data-pagefind-ignore>
+			<p>
+				<b>Docs for {snapshot.release}</b>, {banner.text}{' '}
+				<a href={banner.href} data-vp-version>
+					{banner.link}
+					<span aria-hidden="true"> →</span>
+				</a>
+			</p>
+		</div>
+	)
+}
 {!isHome && (
 <header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
 	{searchSection && <span hidden data-pagefind-meta={`section:${searchSection}`} />}
@@ -82,7 +131,7 @@ const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
 	}
 	<h1 id={PAGE_TITLE_ID}>
 		{codeTitle ? <code>{data.title}</code> : data.title}
-		{data.unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
+		{unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
 		{data.since && <span class="vp-vb">Since {data.since}</span>}
 	</h1>
 	{summary && <p class="vp-summary">{summary}</p>}

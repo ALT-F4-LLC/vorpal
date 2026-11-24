@@ -422,6 +422,10 @@ details[open] > summary.vp-btn {
 	border: 1.5px solid var(--vp-ink-2);
 	border-radius: 50%;
 }
+/* A snapshot is frozen: a filled dot. */
+.vp-ver[data-snapshot] .vp-vdot {
+	background: var(--vp-ink-2);
+}
 .vp-ver-pop {
 	inset-inline-end: 0;
 	width: min(300px, calc(100vw - 2rem));
@@ -690,8 +694,31 @@ details[open] > summary.vp-btn {
 	margin: 0 0 0.375rem;
 	font-size: var(--vp-fs-ui);
 }
-.vp-menu-text a {
+.vp-menu-text a,
+.vp-menu-versions a {
 	color: var(--vp-accent);
+}
+.vp-menu-versions {
+	margin: 0 0 0.5rem;
+	padding: 0;
+	list-style: none;
+	font-size: var(--vp-fs-ui);
+}
+.vp-menu-versions li {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	min-height: 2.25rem;
+}
+.vp-menu-versions a,
+.vp-menu-versions [aria-current] {
+	display: inline-flex;
+	align-items: center;
+	min-width: 2.75rem;
+	min-height: 1.75rem;
+}
+.vp-menu-versions [aria-current] {
+	font-weight: 650;
 }
 
 /* ===== Sidebar: the current section's pages ===== */
