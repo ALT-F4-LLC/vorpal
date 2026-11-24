@@ -3,13 +3,13 @@
 // the site SDK.
 //
 // - Every card renders its own language; CSS shows the site SDK's card.
-//   The language radios set the site SDK (sdk.ts), and follow it.
+//   The language radios set the site SDK (a `vorpal:sdk-request` event that
+//   sdk.ts handles), and follow it (the `vorpal:sdk` event).
 // - Typing in the version never replaces the input being typed in: only the
 //   other cards' inputs get the new value. One announcement, 900 ms after
 //   typing stops.
 // - Announcements use the page's one live region (live.ts).
 import { SYS, canon, canonHtml, codeHtml, hexHtml, bandHtml, initial, langOf } from './prism-core.js';
-import { onSdk, setSdk } from './sdk';
 import { say as announce } from './live';
 
 const RM = matchMedia('(prefers-reduced-motion: reduce)');
@@ -155,11 +155,15 @@ export function mountPrism(root) {
 			update('target', null, ['target'], 'Building on ' + SYS[st.target - 1] + '. The code is unchanged, but the target in the definition is.', null);
 		} else if (t.name === 'pz-lang') {
 			// The reader picked a language here: it becomes the site SDK.
-			setSdk(t.value);
+			document.dispatchEvent(new CustomEvent('vorpal:sdk-request', { detail: { sdk: t.value } }));
 		}
 	});
 	// Follow the site SDK (the header select, a tab elsewhere, another tab).
 	let first = true;
+	const onSdk = (fn) => {
+		fn(document.documentElement.dataset.sdk || 'python');
+		document.addEventListener('vorpal:sdk', (e) => e.detail?.sdk && fn(e.detail.sdk));
+	};
 	onSdk((sdk) => {
 		qa(root, 'input[name="pz-lang"]').forEach((r) => (r.checked = r.value === sdk));
 		const changed = st.lang !== sdk;

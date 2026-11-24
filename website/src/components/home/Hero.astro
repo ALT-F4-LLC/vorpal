@@ -6,7 +6,7 @@
 // cloud and the other CLI users drawn but out of reach. Without JavaScript
 // a sentence tells the rest of the story. With JavaScript, the story bar
 // (Pause and the 1/2/3 stage switch) shows from first paint (.vp-js), and
-// src/scripts/hero.js, loaded after the page's `load` event or on the first
+// src/scripts/hero.js, started after the page's `load` event or on the first
 // interaction with the scene, draws the routes and plays the three stages:
 //
 //   1. All local: CLI, agent daemon, registry and worker on your laptop.
@@ -115,16 +115,18 @@ import './hero.css';
 </div>
 
 <script>
-	// Load the scene's module after the page has loaded, or as soon as the
-	// reader points at, focuses or presses a key in the scene. A click that
-	// arrives before the module is ready is replayed once it is.
+	import { mount } from '../../scripts/hero.js';
+	// The module is one deferred script with this loader (no second request);
+	// the scene starts after the page's `load` event, or as soon as the reader
+	// points at, focuses or presses a key in it. A click that arrives before
+	// it has started is replayed once it has.
 	const scene = document.querySelector<HTMLElement>('[data-hx]');
 	if (scene && window.crypto?.subtle) {
 		let started: Promise<void> | undefined;
 		let pending: HTMLElement | null = null;
 		let user = false;
 		const start = () =>
-			(started ??= import('../../scripts/hero.js').then(({ mount }) => {
+			(started ??= Promise.resolve().then(() => {
 				mount(scene, user);
 				const el = pending;
 				pending = null;

@@ -47,6 +47,13 @@ export function onSdk(fn: (sdk: Sdk) => void): void {
 	});
 }
 
+// Code that loads on its own (the Prism element) asks for a change with a
+// `vorpal:sdk-request` event instead of importing this module, so it does
+// not split this module out of the header's script into a chunk of its own.
+document.addEventListener('vorpal:sdk-request', (e) => {
+	setSdk(String((e as CustomEvent<{ sdk: unknown }>).detail?.sdk));
+});
+
 // Another open tab changed the choice. Registered once, however many
 // modules import this file (Vite bundles it into one shared chunk).
 window.addEventListener('storage', (event) => {

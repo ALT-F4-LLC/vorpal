@@ -11,7 +11,7 @@
 //   HTML, and <html data-sdk> picks one before first paint, like SdkGroup.
 //   Without JavaScript only Python shows, with a line saying the others
 //   write the same bytes.
-// - src/scripts/prism.js loads after `load` or on the first interaction
+// - src/scripts/prism.js starts after `load` or on the first interaction
 //   and makes the version, `docs`, the style toggles, Built on and Copy work.
 //   Reduced motion: no flashes.
 import { createHash } from 'node:crypto';
@@ -87,7 +87,8 @@ const radios = SDKS.map((id) => LANGS.find((l: { id: string }) => l.id === id));
 </section>
 
 <script>
-	// Load the interactive part after `load`, or at once on the first
+	import { mountPrism } from '../scripts/prism.js';
+	// Start the interactive part after `load`, or at once on the first
 	// interaction with the element.
 	const root = document.querySelector<HTMLElement>('[data-prism]');
 	if (root) {
@@ -95,7 +96,7 @@ const radios = SDKS.map((id) => LANGS.find((l: { id: string }) => l.id === id));
 		const start = () => {
 			if (started) return;
 			started = true;
-			import('../scripts/prism.js').then(({ mountPrism }) => mountPrism(root));
+			mountPrism(root);
 		};
 		for (const type of ['pointerdown', 'focusin', 'keydown']) root.addEventListener(type, start, { capture: true, once: true });
 		if (document.readyState === 'complete') start();

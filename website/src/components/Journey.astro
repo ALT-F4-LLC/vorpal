@@ -11,7 +11,7 @@
 // search and the Markdown copy see it), which labels the section. Without JavaScript the
 // controls hide and the text version is open; with it, a small inline
 // script closes the text version before first paint, and
-// src/scripts/journey.js loads when the element nears the viewport or on
+// src/scripts/journey.js starts when the element nears the viewport or on
 // the first interaction (a click on Play that comes first is replayed).
 import './journey.css';
 ---
@@ -33,12 +33,13 @@ import './journey.css';
 </section>
 
 <script>
+	import { mountJourney } from '../scripts/journey.js';
 	const root = document.querySelector<HTMLElement>('[data-journey]');
 	if (root) {
 		let started: Promise<void> | undefined;
 		let pending: HTMLElement | null = null;
 		const start = () =>
-			(started ??= import('../scripts/journey.js').then(({ mountJourney }) => {
+			(started ??= Promise.resolve().then(() => {
 				mountJourney(root);
 				const el = pending;
 				pending = null;
