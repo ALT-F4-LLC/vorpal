@@ -11,12 +11,24 @@
 // The SDK script runs here too, first in <head> and before Starlight's
 // stylesheets, so <html data-sdk> picks the example panels before first
 // paint (src/scripts/sdk-head.ts).
+//
+// Last, a link to the page's Markdown copy.
 import { Font } from 'astro:assets';
 import Default from '@astrojs/starlight/components/Head.astro';
 import { SDK_HEAD_SCRIPT } from '../../scripts/sdk-head';
+import { markdownPath } from '../../markdown-path.mjs';
+
+// The page's Markdown copy (src/integrations/markdown-twins.mjs), for tools
+// that look for one. The 404 page has none.
+const path = Astro.url.pathname;
+const markdown =
+	Astro.locals.starlightRoute.entry.data.kind === 'not-found'
+		? undefined
+		: markdownPath(path.endsWith('/') ? path : `${path}/`);
 ---
 
 <script is:inline set:html={`document.documentElement.classList.add('vp-js');${SDK_HEAD_SCRIPT}`} />
 <Default />
 <Font cssVariable="--font-instrument-sans" preload />
 <Font cssVariable="--font-jetbrains-mono" preload />
+{markdown && <link rel="alternate" type="text/markdown" href={markdown} />}

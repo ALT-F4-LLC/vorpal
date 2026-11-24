@@ -9,6 +9,7 @@ import emDashes from './src/plugins/em-dashes.mjs';
 import tableRegion from './src/plugins/table-region.mjs';
 import sectionize from './src/plugins/sectionize.mjs';
 import { asideNotes, plannedDirective } from './src/plugins/callouts.mjs';
+import markdownTwins from './src/integrations/markdown-twins.mjs';
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -54,6 +55,93 @@ function prefixBaseLinks() {
 		},
 	};
 }
+
+/**
+ * The sidebar, also read by the Markdown copies for llms.txt's sections.
+ * @type {import('./src/integrations/markdown-twins.mjs').SidebarItem[]}
+ */
+const sidebar = [
+	{
+		// The header's section names match these group labels (src/nav.ts).
+		label: 'Get started',
+		items: [
+			{ label: 'Installation', slug: 'getting-started/installation' },
+			{ label: 'Quickstart', slug: 'getting-started/quickstart' },
+		],
+	},
+	{
+		label: 'Guides',
+		items: [
+			{ label: 'Add a development environment', slug: 'guides/development-environment' },
+			{
+				// Every task in one SDK, on one page each. They become the
+				// generated per-SDK views (ia-proposal, Question 2 B).
+				label: 'Every guide in one SDK',
+				items: [
+					{ label: 'Python', slug: 'guides/python' },
+					{ label: 'TypeScript', slug: 'guides/typescript' },
+					{ label: 'Go', slug: 'guides/go' },
+					{ label: 'Rust', slug: 'guides/rust' },
+				],
+			},
+		],
+	},
+	{
+		label: 'Troubleshooting',
+		items: [{ label: 'Error reference', slug: 'troubleshooting/errors' }],
+	},
+	{
+		label: 'Concepts',
+		items: [
+			{ label: 'Architecture', slug: 'concepts/architecture' },
+			{ label: 'Artifacts', slug: 'concepts/artifacts' },
+			{ label: 'Caching', slug: 'concepts/caching' },
+			{ label: 'Environments', slug: 'concepts/environments' },
+			{ label: 'Jobs', slug: 'concepts/jobs' },
+			{ label: 'Processes', slug: 'concepts/processes' },
+			{ label: 'How Vorpal compares', slug: 'concepts/how-vorpal-compares' },
+		],
+	},
+	{
+		label: 'Self-hosting',
+		items: [{ label: 'Set up TLS and client trust', slug: 'self-hosting/tls' }],
+	},
+	{
+		// Not a header section: the SDK hubs sit beside the sections
+		// (src/nav.ts, EXTRA_SECTIONS). Site order: Python first.
+		label: 'SDKs',
+		items: [
+			{ label: 'Python SDK', slug: 'sdks/python' },
+			{ label: 'TypeScript SDK', slug: 'sdks/typescript' },
+			{ label: 'Go SDK', slug: 'sdks/go' },
+			{ label: 'Rust SDK', slug: 'sdks/rust' },
+		],
+	},
+	{
+		label: 'Reference',
+		items: [
+			{
+				label: 'CLI',
+				items: [
+					{ label: 'Overview', slug: 'reference/cli' },
+					{ label: 'vorpal build', slug: 'reference/cli/build' },
+					{ label: 'vorpal prepare', slug: 'reference/cli/prepare' },
+					{ label: 'vorpal run', slug: 'reference/cli/run' },
+					{ label: 'vorpal inspect', slug: 'reference/cli/inspect' },
+					{ label: 'vorpal init', slug: 'reference/cli/init' },
+					{ label: 'vorpal config', slug: 'reference/cli/config' },
+					{ label: 'vorpal login', slug: 'reference/cli/login' },
+					{ label: 'vorpal system keys', slug: 'reference/cli/system/keys' },
+					{ label: 'vorpal system prune', slug: 'reference/cli/system/prune' },
+					{ label: 'vorpal system services', slug: 'reference/cli/system/services' },
+				],
+			},
+			{ label: 'Configuration', slug: 'reference/configuration' },
+			{ label: 'API', slug: 'reference/api' },
+			{ label: 'Contributing to Docs', slug: 'reference/contributing' },
+		],
+	},
+];
 
 // https://astro.build/config
 export default defineConfig({
@@ -158,88 +246,8 @@ export default defineConfig({
 			},
 			// Code blocks: themes, styles and the CLI-block plugin live in
 			// ec.config.mjs, so the <Code> component (SdkGroup) uses them too.
-			sidebar: [
-				{
-					// The header's section names match these group labels (src/nav.ts).
-					label: 'Get started',
-					items: [
-						{ label: 'Installation', slug: 'getting-started/installation' },
-						{ label: 'Quickstart', slug: 'getting-started/quickstart' },
-					],
-				},
-				{
-					label: 'Guides',
-					items: [
-						{ label: 'Add a development environment', slug: 'guides/development-environment' },
-						{
-							// Every task in one SDK, on one page each. They become the
-							// generated per-SDK views (ia-proposal, Question 2 B).
-							label: 'Every guide in one SDK',
-							items: [
-								{ label: 'Python', slug: 'guides/python' },
-								{ label: 'TypeScript', slug: 'guides/typescript' },
-								{ label: 'Go', slug: 'guides/go' },
-								{ label: 'Rust', slug: 'guides/rust' },
-							],
-						},
-					],
-				},
-				{
-					label: 'Troubleshooting',
-					items: [{ label: 'Error reference', slug: 'troubleshooting/errors' }],
-				},
-				{
-					label: 'Concepts',
-					items: [
-						{ label: 'Architecture', slug: 'concepts/architecture' },
-						{ label: 'Artifacts', slug: 'concepts/artifacts' },
-						{ label: 'Caching', slug: 'concepts/caching' },
-						{ label: 'Environments', slug: 'concepts/environments' },
-						{ label: 'Jobs', slug: 'concepts/jobs' },
-						{ label: 'Processes', slug: 'concepts/processes' },
-						{ label: 'How Vorpal compares', slug: 'concepts/how-vorpal-compares' },
-					],
-				},
-				{
-					label: 'Self-hosting',
-					items: [{ label: 'Set up TLS and client trust', slug: 'self-hosting/tls' }],
-				},
-				{
-					// Not a header section: the SDK hubs sit beside the sections
-					// (src/nav.ts, EXTRA_SECTIONS). Site order: Python first.
-					label: 'SDKs',
-					items: [
-						{ label: 'Python SDK', slug: 'sdks/python' },
-						{ label: 'TypeScript SDK', slug: 'sdks/typescript' },
-						{ label: 'Go SDK', slug: 'sdks/go' },
-						{ label: 'Rust SDK', slug: 'sdks/rust' },
-					],
-				},
-				{
-					label: 'Reference',
-					items: [
-						{
-							label: 'CLI',
-							items: [
-								{ label: 'Overview', slug: 'reference/cli' },
-								{ label: 'vorpal build', slug: 'reference/cli/build' },
-								{ label: 'vorpal prepare', slug: 'reference/cli/prepare' },
-								{ label: 'vorpal run', slug: 'reference/cli/run' },
-								{ label: 'vorpal inspect', slug: 'reference/cli/inspect' },
-								{ label: 'vorpal init', slug: 'reference/cli/init' },
-								{ label: 'vorpal config', slug: 'reference/cli/config' },
-								{ label: 'vorpal login', slug: 'reference/cli/login' },
-								{ label: 'vorpal system keys', slug: 'reference/cli/system/keys' },
-								{ label: 'vorpal system prune', slug: 'reference/cli/system/prune' },
-								{ label: 'vorpal system services', slug: 'reference/cli/system/services' },
-							],
-						},
-						{ label: 'Configuration', slug: 'reference/configuration' },
-						{ label: 'API', slug: 'reference/api' },
-						{ label: 'Contributing to Docs', slug: 'reference/contributing' },
-					],
-				},
-			],
+			sidebar,
 		}),
+		markdownTwins({ sidebar, title: 'Vorpal' }),
 	],
 });
