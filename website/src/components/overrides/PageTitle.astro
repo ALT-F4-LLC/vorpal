@@ -39,12 +39,30 @@ const PAGE_TITLE_ID = '_top';
 const hasToc = !!toc && toc.length > 0;
 // A CLI command page's title is the command itself, shown as code.
 const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal');
+/** The type tag on search results (Search.astro). */
+const SEARCH_TAGS: Record<string, string> = {
+	tutorial: 'Tutorial',
+	'how-to': 'How-to',
+	'operator-how-to': 'How-to',
+	concept: 'Concept',
+	'reference-cli': 'CLI',
+	'reference-config': 'Config',
+	'reference-sdk': 'SDK',
+	'reference-errors': 'Errors',
+	troubleshooting: 'Troubleshooting',
+	'sdk-hub': 'SDK hub',
+};
+// Pagefind metadata for the search labels (Search.astro).
+const searchSection = section?.label;
+const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
 ---
 
 <header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
+	{searchSection && <span hidden data-pagefind-meta={`section:${searchSection}`} />}
+	{searchKind && <span hidden data-pagefind-meta={`kind:${searchKind}`} />}
 	{
 		section && (
-			<nav class="vp-bc" aria-label="Breadcrumb">
+			<nav class="vp-bc" aria-label="Breadcrumb" data-pagefind-ignore>
 				<ol>
 					<li>
 						<a href={section.href}>{section.label}</a>
@@ -65,13 +83,13 @@ const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal
 		{data.since && <span class="vp-vb">Since {data.since}</span>}
 	</h1>
 	{summary && <p class="vp-summary">{summary}</p>}
-	<p class="vp-pmeta">
+	<p class="vp-pmeta" data-pagefind-ignore>
 		{kind && <span class="vp-kind">{kind}</span>}
 		{data.kind !== 'not-found' && <span>{data.metaNote ? `${applies} · ${data.metaNote}` : applies}</span>}
 	</p>
 	{
 		hasToc && (
-			<details class="vp-toc-d">
+			<details class="vp-toc-d" data-pagefind-ignore>
 				<summary class="vp-btn">On this page</summary>
 				<nav aria-label="On this page">
 					<TocList items={toc} />
