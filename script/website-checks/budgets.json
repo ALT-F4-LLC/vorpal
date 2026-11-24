@@ -8,11 +8,6 @@
   ],
   "thirdParty": {
     "$comment": "Hosts a page may load from. Anything else fails. Stage 2 policy: no third-party request on page load except the Cloudflare Web Analytics beacon, which is injected at the edge and not in dist/.",
-    "allow": [
-      {
-        "host": "cdn.jsdelivr.net",
-        "reason": "Known exception: Mermaid 11.17.2, loaded by the head script in astro.config.mjs. Remove this entry when Mermaid is replaced by build-time diagrams (redesign build step 2)."
-      }
-    ]
+    "allow": []
   }
 }

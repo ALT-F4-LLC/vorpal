@@ -17,7 +17,7 @@
     "assert": {
       "assertions": {
         "cumulative-layout-shift": ["error", { "maxNumericValue": 0.05, "aggregationMethod": "median-run" }],
-        "largest-contentful-paint": ["warn", { "maxNumericValue": 2000, "aggregationMethod": "median-run" }],
+        "largest-contentful-paint": ["error", { "maxNumericValue": 2000, "aggregationMethod": "median-run" }],
         "total-blocking-time": ["warn", { "maxNumericValue": 100, "aggregationMethod": "median-run" }],
         "categories:performance": ["warn", { "minScore": 0.95, "aggregationMethod": "median-run" }],
         "categories:accessibility": ["warn", { "minScore": 1, "aggregationMethod": "median-run" }]

@@ -12,9 +12,7 @@
 // Env: WEBSITE_DIST (default ../../website/dist), CHROMIUM_PATH (optional
 // browser binary, for a preinstalled Chromium).
 //
-// Third-party requests are blocked, so the result does not depend on a CDN
-// (today that blocks Mermaid from jsDelivr, so diagrams show as their source
-// code blocks; Mermaid is being replaced by build-time diagrams).
+// Third-party requests are blocked, so the result does not depend on a CDN.
 import { AxeBuilder } from '@axe-core/playwright';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
@@ -25,6 +23,7 @@ export const PAGES = [
 	'/getting-started/quickstart/',
 	'/guides/typescript/',
 	'/concepts/architecture/',
+	'/concepts/jobs/',
 	'/concepts/artifacts/',
 	'/reference/cli/',
 	'/reference/configuration/',

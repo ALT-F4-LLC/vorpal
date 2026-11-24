@@ -7,7 +7,7 @@ const manifest = JSON.parse(readFileSync(new URL('manifest.json', dir), 'utf8'))
 const lines = [
 	'### Lighthouse (mobile, lab, median of runs)',
 	'',
-	'Gates: CLS ≤ 0.05 fails the check. LCP ≤ 2.0 s, TBT ≤ 100 ms, Performance ≥ 95 and Accessibility 100 warn only.',
+	'Gates: CLS ≤ 0.05 and LCP ≤ 2.0 s fail the check. TBT ≤ 100 ms, Performance ≥ 95 and Accessibility 100 warn only.',
 	'',
 	'| Page | LCP | CLS | TBT | Performance | Accessibility |',
 	'|---|---|---|---|---|---|',

@@ -153,7 +153,7 @@ const budgetLines = [
 			.map((/** @type {any} */ t) => `${t.type}: ${METRICS.map((k) => `${k} ${t[k]}`).join(', ')}, requests ${t.requests}`)
 			.join('; '),
 	'',
-	'Sizes are first-party bytes only. Third-party scripts (Mermaid from jsDelivr today) are not in dist/ and are not counted; their hosts are listed and must be allowed in budgets.json.',
+	'Sizes are first-party bytes only. Third-party requests are not in dist/ and are not counted; their hosts are listed and must be allowed in budgets.json.',
 ];
 
 const report = ['### Size budgets', '', ...lines, ...budgetLines].join('\n');
