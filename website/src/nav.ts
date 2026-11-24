@@ -64,6 +64,8 @@ export interface VorpalNav {
 	trail: SidebarGroup[];
 	/** The page's "On this page" items, kept for the disclosure under the title. */
 	toc?: TocItem[];
+	/** The version snapshot the page belongs to; undefined on main's pages. */
+	snapshot?: import('./versions.mjs').Snapshot;
 }
 
 export function flatten(entries: SidebarEntry[]): SidebarLink[] {

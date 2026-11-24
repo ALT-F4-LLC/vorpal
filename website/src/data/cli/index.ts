@@ -20,6 +20,7 @@
  */
 import pkg from '../../../package.json';
 import main from './main.json';
+import { snapshotOf } from '../../versions.mjs';
 
 export { blocks, inline } from '../inline';
 
@@ -75,7 +76,6 @@ export interface OverlayCommand {
 	options?: Record<string, OverlayItem>;
 }
 
-export const cli = main as CliData;
 
 /** The pseudo command that holds the global options in overlay.yaml. */
 export const GLOBAL = '_global';
@@ -112,64 +112,11 @@ function keys(data: CliData): Set<string> {
 	}
 	return out;
 }
-const releaseKeys = releases.map((r) => ({ version: r.version, keys: keys(r.data) }));
-
-export type Mark = { unreleased: true } | { since: string } | null;
-
-/** The version mark for `cmd:<path>`, `arg:<path>:<id>` or `opt:<path>:<id>`. */
-export function mark(key: string, since?: string): Mark {
-	const latest = releaseKeys.find((r) => r.version === latestRelease);
-	if (!latest?.keys.has(key)) return { unreleased: true };
-	if (since) return { since };
-	const first = releaseKeys.find((r) => r.keys.has(key));
-	if (!first || first.version === releaseKeys[0].version) return null;
-	return { since: first.version };
-}
-
-export function getCommand(path: string): CliCommand {
-	const c = cli.commands.find((x) => x.path === path);
-	if (!c) throw new Error(`CLI reference: no command "${path}" in src/data/cli/main.json`);
-	return c;
-}
-
 /** The page that documents a command: reference/cli/<page>/. */
 export function pageOf(path: string): string | null {
 	const [first, second] = path.split(' ');
 	if (first === 'system') return second ? `system/${second}` : null;
 	return first;
-}
-
-/**
- * The command a page is about: `system/keys` documents `system keys
- * generate`, its only subcommand; `config` documents `config`, with its
- * subcommands as sections (`#cmd-set`).
- */
-export function pageCommand(page: string): string {
-	const path = page.replace(/\//g, ' ');
-	const c = cli.commands.find((x) => x.path === path);
-	return c && c.subcommands.length === 1 ? c.subcommands[0] : path;
-}
-
-/** Where a command is documented: `/reference/cli/config/#cmd-set`. */
-export function hrefOf(path: string): string | undefined {
-	const page = pageOf(path);
-	if (!page) return undefined;
-	const own = pageCommand(page);
-	const base = `/reference/cli/${page}/`;
-	if (path === own || own.startsWith(`${path} `)) return base;
-	return `${base}#cmd-${path.slice(own.length).trim().replace(/\s+/g, '-')}`;
-}
-
-/**
- * An entry's anchor. On the page of the command itself: `#arg-name`,
- * `#flag-unlock`; for a subcommand on the same page: `#arg-set-key`.
- */
-export function anchor(path: string, kind: 'arg' | 'flag', id: string): string {
-	const page = pageOf(path);
-	const own = page ? pageCommand(page) : '';
-	const rest = path === own ? '' : path.slice(own.length).trim();
-	const sub = rest ? `${rest.replace(/\s+/g, '-')}-` : '';
-	return `${kind}-${sub}${id}`;
 }
 
 /** The synopsis line, as `vorpal build <NAME> [OPTIONS]`. */
@@ -193,47 +140,136 @@ export const flagName = (o: CliArg) => (o.long ? `--${o.long}` : o.short ? `-${o
 /** An option's key in overlay.yaml: its long name (`issuer-audience`). */
 export const overlayKey = (o: CliArg) => o.long ?? o.id;
 
-/** Checks overlay.yaml against main.json; throws on any gap either way. */
-export function checkOverlay(overlay: Record<string, OverlayCommand>) {
-	const problems: string[] = [];
-	const commands: [string, CliArg[], CliArg[]][] = [
-		[GLOBAL, [], cli.global],
-		...cli.commands.map((c): [string, CliArg[], CliArg[]] => [c.path, c.arguments, c.options]),
-	];
-	for (const [path, args, opts] of commands) {
-		const o = overlay[path];
-		if (!o) {
-			problems.push(`"${path}": no entry`);
-			continue;
+const releaseKeys = releases.map((r) => ({ version: r.version, keys: keys(r.data) }));
+
+export type Mark = { unreleased: true } | { since: string } | null;
+
+/**
+ * The CLI data and its helpers for one version of the docs: main (marked
+ * against the latest release) or a release (marked against itself).
+ */
+export function createCli(data: CliData, release: string) {
+	const known = releaseKeys.filter((r) => cmp(r.version, release) <= 0);
+	const base = known.find((r) => r.version === release);
+
+	/** The version mark for `cmd:<path>`, `arg:<path>:<id>` or `opt:<path>:<id>`. */
+	function mark(key: string, since?: string): Mark {
+		if (!base?.keys.has(key)) return { unreleased: true };
+		if (since) return { since };
+		const first = known.find((r) => r.keys.has(key));
+		if (!first || first.version === releaseKeys[0].version) return null;
+		return { since: first.version };
+	}
+
+	function getCommand(path: string): CliCommand {
+		const c = data.commands.find((x) => x.path === path);
+		if (!c) throw new Error(`CLI reference: no command "${path}" in the CLI data for ${data === main ? 'main' : release}`);
+		return c;
+	}
+
+	/**
+	 * The command a page is about: `system/keys` documents `system keys
+	 * generate`, its only subcommand; `config` documents `config`, with its
+	 * subcommands as sections (`#cmd-set`).
+	 */
+	function pageCommand(page: string): string {
+		const path = page.replace(/\//g, ' ');
+		const c = data.commands.find((x) => x.path === path);
+		return c && c.subcommands.length === 1 ? c.subcommands[0] : path;
+	}
+
+	/** Where a command is documented: `/reference/cli/config/#cmd-set`. */
+	function hrefOf(path: string): string | undefined {
+		const page = pageOf(path);
+		if (!page) return undefined;
+		const own = pageCommand(page);
+		const base = `/reference/cli/${page}/`;
+		if (path === own || own.startsWith(`${path} `)) return base;
+		return `${base}#cmd-${path.slice(own.length).trim().replace(/\s+/g, '-')}`;
+	}
+
+	/**
+	 * An entry's anchor. On the page of the command itself: `#arg-name`,
+	 * `#flag-unlock`; for a subcommand on the same page: `#arg-set-key`.
+	 */
+	function anchor(path: string, kind: 'arg' | 'flag', id: string): string {
+		const page = pageOf(path);
+		const own = page ? pageCommand(page) : '';
+		const rest = path === own ? '' : path.slice(own.length).trim();
+		const sub = rest ? `${rest.replace(/\s+/g, '-')}-` : '';
+		return `${kind}-${sub}${id}`;
+	}
+
+	/** Checks overlay.yaml against main.json; throws on any gap either way. */
+	function checkOverlay(overlay: Record<string, OverlayCommand>) {
+		const problems: string[] = [];
+		const commands: [string, CliArg[], CliArg[]][] = [
+			[GLOBAL, [], data.global],
+			...data.commands.map((c): [string, CliArg[], CliArg[]] => [c.path, c.arguments, c.options]),
+		];
+		for (const [path, args, opts] of commands) {
+			const o = overlay[path];
+			if (!o) {
+				problems.push(`"${path}": no entry`);
+				continue;
+			}
+			if (path !== GLOBAL && !o.summary) problems.push(`"${path}": no summary`);
+			for (const [kind, list, given] of [
+				['arguments', args, o.arguments ?? {}],
+				['options', opts, o.options ?? {}],
+			] as const) {
+				const name = (a: CliArg) => (kind === 'options' ? overlayKey(a) : a.id);
+				for (const a of list) if (!given[name(a)]?.text) problems.push(`"${path}" ${kind}.${name(a)}: no text`);
+				for (const id of Object.keys(given))
+					if (!list.some((a) => name(a) === id)) problems.push(`"${path}" ${kind}.${id}: not in the CLI`);
+			}
 		}
-		if (path !== GLOBAL && !o.summary) problems.push(`"${path}": no summary`);
-		for (const [kind, list, given] of [
-			['arguments', args, o.arguments ?? {}],
-			['options', opts, o.options ?? {}],
-		] as const) {
-			const name = (a: CliArg) => (kind === 'options' ? overlayKey(a) : a.id);
-			for (const a of list) if (!given[name(a)]?.text) problems.push(`"${path}" ${kind}.${name(a)}: no text`);
-			for (const id of Object.keys(given))
-				if (!list.some((a) => name(a) === id)) problems.push(`"${path}" ${kind}.${id}: not in the CLI`);
+		for (const path of Object.keys(overlay))
+			if (!commands.some(([p]) => p === path)) problems.push(`"${path}": not a command in the CLI`);
+		if (problems.length) {
+			throw new Error(
+				`src/data/cli/overlay.yaml and the CLI data differ (add text for new flags, remove old ones):\n  ${problems.join('\n  ')}`,
+			);
 		}
 	}
-	for (const path of Object.keys(overlay))
-		if (!commands.some(([p]) => p === path)) problems.push(`"${path}": not a command in the CLI`);
-	if (problems.length) {
-		throw new Error(
-			`src/data/cli/overlay.yaml and main.json differ (add text for new flags, remove old ones):\n  ${problems.join('\n  ')}`,
-		);
+
+	/** How an entry shows its default, as inline Markdown. */
+	function defaultText(o: CliArg, given?: string): string {
+		if (given) return given;
+		if (o.action === 'flag') return o.default === 'true' ? 'on' : 'off';
+		const d = o.default;
+		if (d === null || (Array.isArray(d) && d.length === 0)) return 'not set';
+		const list = Array.isArray(d) ? d : [d];
+		return list
+			.map((v) => (data.placeholders[v] ? data.placeholders[v] : `\`${v}\``))
+			.join(', ');
 	}
+
+	return { cli: data, release, mark, getCommand, pageCommand, hrefOf, anchor, checkOverlay, defaultText };
 }
 
-/** How an entry shows its default, as inline Markdown. */
-export function defaultText(o: CliArg, given?: string): string {
-	if (given) return given;
-	if (o.action === 'flag') return o.default === 'true' ? 'on' : 'off';
-	const d = o.default;
-	if (d === null || (Array.isArray(d) && d.length === 0)) return 'not set';
-	const list = Array.isArray(d) ? d : [d];
-	return list
-		.map((v) => (cli.placeholders[v] ? cli.placeholders[v] : `\`${v}\``))
-		.join(', ');
+export type Cli = ReturnType<typeof createCli>;
+
+const mainCli = createCli(main as CliData, latestRelease);
+const releaseClis = new Map<string, Cli>();
+
+/** The CLI data of a release (a snapshot's), or main's without one. */
+export function cliFor(release?: string): Cli {
+	if (!release) return mainCli;
+	let c = releaseClis.get(release);
+	if (!c) {
+		const r = releases.find((x) => x.version === release);
+		if (!r) throw new Error(`src/data/cli/releases/${release}.json is missing (a version snapshot documents ${release}).`);
+		c = createCli(r.data, release);
+		releaseClis.set(release, c);
+	}
+	return c;
 }
+
+/** The CLI data for the page being rendered: its snapshot's release, or main. */
+export function cliOf(locals: App.Locals): Cli {
+	return cliFor(snapshotOf(locals.starlightRoute?.entry.id ?? '')?.release);
+}
+
+/** Main's data and helpers. */
+export const { cli, mark, getCommand, pageCommand, hrefOf, anchor, checkOverlay, defaultText } = mainCli;

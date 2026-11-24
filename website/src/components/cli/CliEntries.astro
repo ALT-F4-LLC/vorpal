@@ -14,19 +14,7 @@
 // behave the same.
 import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
 import Props from '../Props.astro';
-import {
-	GLOBAL,
-	anchor,
-	blocks,
-	cli,
-	defaultText,
-	flagName,
-	getCommand,
-	inline,
-	mark,
-	overlayKey,
-	type CliArg,
-} from '../../data/cli';
+import { GLOBAL, blocks, cliOf, flagName, inline, overlayKey, type CliArg } from '../../data/cli';
 import { getOverlay } from './overlay';
 
 interface Props {
@@ -39,7 +27,9 @@ interface Props {
 }
 
 const { command, kind, level = 3 } = Astro.props;
-const overlay = (await getOverlay())[command];
+// Main's data, or the release's on a version snapshot's page.
+const { cli, anchor, defaultText, getCommand, mark } = cliOf(Astro.locals);
+const overlay = (await getOverlay(Astro.locals))[command];
 const list: CliArg[] =
 	command === GLOBAL ? cli.global : kind === 'arguments' ? getCommand(command).arguments : getCommand(command).options;
 const items = kind === 'options' ? [...list].sort((a, b) => flagName(a).localeCompare(flagName(b))) : list;

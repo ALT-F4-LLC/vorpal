@@ -72,15 +72,29 @@ const overlayItem = z
  * The hand-written text of the generated CLI reference: one entry per
  * command path ("build", "system services start"), plus `_global`.
  */
+const overlayCommand = z
+	.object({
+		summary: z.string().optional(),
+		arguments: z.record(z.string(), overlayItem).optional(),
+		options: z.record(z.string(), overlayItem).optional(),
+	})
+	.strict();
 const cliOverlay = defineCollection({
 	loader: file('src/data/cli/overlay.yaml'),
-	schema: z
-		.object({
-			summary: z.string().optional(),
-			arguments: z.record(z.string(), overlayItem).optional(),
-			options: z.record(z.string(), overlayItem).optional(),
-		})
-		.strict(),
+	schema: overlayCommand,
+});
+
+/**
+ * Version snapshots keep their own copy of the data their pages render
+ * (src/versions.mjs). Ids keep the dots of the version: `0.6` and
+ * `0.6/source-changed`.
+ */
+const snapshotId = ({ entry }: { entry: string }) => entry.replace(/\.yaml$/, '').replace(/\/(errors|cli-overlay)(?=\/|$)/, '');
+
+/** src/snapshots/<x.y>/cli-overlay.yaml: one entry per snapshot, id `<x.y>`. */
+const snapshotCliOverlay = defineCollection({
+	loader: glob({ pattern: '*/cli-overlay.yaml', base: './src/snapshots', generateId: snapshotId }),
+	schema: z.record(z.string(), overlayCommand),
 });
 
 /** Where a message is raised: CI checks that `match` is still in `file`. */
@@ -105,9 +119,7 @@ const errorStep = z.union([
  * script/website-checks/reference.mjs checks each `sources[].match` against
  * the Rust and SDK sources.
  */
-const errors = defineCollection({
-	loader: glob({ pattern: '*.yaml', base: './src/content/errors' }),
-	schema: z
+const errorSchema = z
 		.object({
 			group: z.enum(['lockfile', 'config', 'settings', 'connection']),
 			order: z.number().int(),
@@ -120,7 +132,16 @@ const errors = defineCollection({
 			links: z.array(z.object({ text: z.string(), href: z.string() }).strict()).default([]),
 			sources: z.array(errorSource).min(1),
 		})
-		.strict(),
+		.strict();
+const errors = defineCollection({
+	loader: glob({ pattern: '*.yaml', base: './src/content/errors' }),
+	schema: errorSchema,
+});
+
+/** src/snapshots/<x.y>/errors/<id>.yaml, id `<x.y>/<id>`. Not checked against the sources. */
+const snapshotErrors = defineCollection({
+	loader: glob({ pattern: '*/errors/*.yaml', base: './src/snapshots', generateId: snapshotId }),
+	schema: errorSchema,
 });
 
 export const collections = {
@@ -130,4 +151,6 @@ export const collections = {
 	}),
 	cliOverlay,
 	errors,
+	snapshotCliOverlay,
+	snapshotErrors,
 };

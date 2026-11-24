@@ -14,12 +14,20 @@ import { getCollection } from 'astro:content';
 import { Code } from '@astrojs/starlight/components';
 import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
 import { esc, inline } from '../data/inline';
+import { snapshotOf } from '../versions.mjs';
 
 interface Props {
 	group: 'lockfile' | 'config' | 'settings' | 'connection';
 }
 
-const all = await getCollection('errors');
+// Main's entries, or a version snapshot's frozen copy
+// (src/snapshots/<x.y>/errors/, ids `<x.y>/<id>`).
+const snapshot = snapshotOf(Astro.locals.starlightRoute.entry.id);
+const all = snapshot
+	? (await getCollection('snapshotErrors'))
+			.filter((e) => e.id.startsWith(`${snapshot.slug}/`))
+			.map((e) => ({ ...e, id: e.id.slice(snapshot.slug.length + 1) }))
+	: await getCollection('errors');
 const entries = all.filter((e) => e.data.group === Astro.props.group).sort((a, b) => a.data.order - b.data.order);
 
 /** A message as code, with `<placeholders>` dashed like Expected output. */

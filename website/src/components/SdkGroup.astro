@@ -27,6 +27,7 @@
 //   `example` is then optional.
 import { Code } from '@astrojs/starlight/components';
 import { SDKS, type Sdk } from '../scripts/sdk-head';
+import { snapshotOf } from '../versions.mjs';
 
 interface Props {
 	/** Folder under src/examples; optional when every SDK has a slot. */
@@ -49,11 +50,15 @@ const FILES: Record<Sdk, { ext: string; lang: string }> = {
 	rust: { ext: 'rs', lang: 'rust' },
 };
 
-const sources = import.meta.glob<string>('../examples/*/*.{py,ts,go,rs}', {
+const sources = import.meta.glob<string>(['../examples/*/*.{py,ts,go,rs}', '../snapshots/*/examples/*/*.{py,ts,go,rs}'], {
 	query: '?raw',
 	import: 'default',
 	eager: true,
 });
+// A version snapshot's pages show its frozen copy of the examples
+// (src/snapshots/<x.y>/examples/).
+const snapshot = snapshotOf(Astro.locals.starlightRoute.entry.id);
+const dir = snapshot ? `../snapshots/${snapshot.slug}/examples` : '../examples';
 
 const slots = Object.fromEntries(
 	await Promise.all(
@@ -62,10 +67,10 @@ const slots = Object.fromEntries(
 ) as Partial<Record<Sdk, string>>;
 
 const panels = SDKS.map((sdk) => {
-	const code = example ? sources[`../examples/${example}/${sdk}.${FILES[sdk].ext}`] : undefined;
+	const code = example ? sources[`${dir}/${example}/${sdk}.${FILES[sdk].ext}`] : undefined;
 	if (code === undefined && !missing[sdk] && slots[sdk] === undefined) {
 		throw new Error(
-			`SdkGroup: src/examples/${example}/${sdk}.${FILES[sdk].ext} is missing; add it or give missing.${sdk}`,
+			`SdkGroup: src/${dir.slice(3)}/${example}/${sdk}.${FILES[sdk].ext} is missing; add it or give missing.${sdk}`,
 		);
 	}
 	return { sdk, name: NAMES[sdk], code: code?.replace(/\n$/, ''), lang: FILES[sdk].lang, html: slots[sdk] };

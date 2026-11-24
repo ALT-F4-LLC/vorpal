@@ -7,7 +7,7 @@
 // <CliSynopsis command="build" />
 // <CliSynopsis command="config set" title="vorpal config set" />
 import { Code } from '@astrojs/starlight/components';
-import { getCommand, mark, synopsis } from '../../data/cli';
+import { cliOf, synopsis } from '../../data/cli';
 import { getOverlay } from './overlay';
 
 interface Props {
@@ -18,7 +18,8 @@ interface Props {
 }
 
 const { command, title } = Astro.props;
-await getOverlay();
+const { getCommand, mark } = cliOf(Astro.locals);
+await getOverlay(Astro.locals);
 const c = getCommand(command);
 const m = mark(`cmd:${command}`);
 const unreleased = !!m && 'unreleased' in m;

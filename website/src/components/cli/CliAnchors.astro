@@ -7,7 +7,13 @@
 //   to its page. The other old ids land at the top.
 // - With JavaScript, this script sends every old anchor to its new page
 //   and entry. IA §2 "Fragment map".
-import { hrefOf, cli } from '../../data/cli';
+import { cliOf } from '../../data/cli';
+import { prefixOf, snapshotOf } from '../../versions.mjs';
+
+const { cli, hrefOf } = cliOf(Astro.locals);
+// On a version snapshot's page, the snapshot's pages (a script, so the
+// link rewrite in src/middleware.ts does not see these).
+const prefix = prefixOf(snapshotOf(Astro.locals.starlightRoute.entry.id));
 
 // Old section ids (github-slugger order of the old page's headings) by the
 // command whose section they were in, then where that part now lives.
@@ -37,6 +43,7 @@ for (const c of cli.commands) {
 	const href = hrefOf(c.path);
 	if (href) OLD[`vorpal-${c.path.replace(/ /g, '-')}`] = href;
 }
+if (prefix) for (const k of Object.keys(OLD)) OLD[k] = prefix + OLD[k];
 ---
 
 <script is:inline define:vars={{ map: OLD }}>

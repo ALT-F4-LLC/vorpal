@@ -13,11 +13,27 @@
  *   column; they always use the disclosure under the title.
  */
 import { defineRouteMiddleware } from '@astrojs/starlight/route-data';
-import { SEQUENTIAL_SECTIONS, buildNav, flatten } from './nav';
+import { SEQUENTIAL_SECTIONS, buildNav, flatten, type SidebarEntry } from './nav';
+import { SNAPSHOTS, snapshotGroupLabel, snapshotOf } from './versions.mjs';
+
+const snapshotGroups = new Set(SNAPSHOTS.map(snapshotGroupLabel));
 
 export const onRequest = defineRouteMiddleware((context) => {
 	const route = context.locals.starlightRoute;
-	const nav = buildNav(route.sidebar);
+	// Version snapshots (src/versions.mjs): Starlight's sidebar holds main's
+	// groups, then one group per snapshot. A snapshot's page sees only its
+	// snapshot's tree; main's pages never see the snapshots.
+	const snapshot = snapshotOf(route.entry.id);
+	let tree: SidebarEntry[];
+	if (snapshot) {
+		const own = route.sidebar.find((e) => e.type === 'group' && e.label === snapshotGroupLabel(snapshot));
+		tree = own?.type === 'group' ? own.entries : [];
+	} else {
+		tree = route.sidebar.filter((e) => !(e.type === 'group' && snapshotGroups.has(e.label)));
+	}
+	route.sidebar = tree;
+	const nav = buildNav(tree);
+	nav.snapshot = snapshot;
 	nav.toc = route.toc?.items.filter((item) => item.slug !== '_top');
 	context.locals.vorpalNav = nav;
 

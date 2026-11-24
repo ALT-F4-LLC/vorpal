@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "0.4.10",
+    "@astrojs/sitemap": "3.7.5",
     "@astrojs/starlight": "0.43.1",
     "astro": "7.4.13",
     "hast-util-from-html": "2.1.0",
