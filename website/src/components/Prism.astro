@@ -1,0 +1,104 @@
+---
+// Prism, compact form (docs-redesign stage 3 signature 2 rev 2; stage 4
+// template 6 "Try it"): one artifact written in each SDK, its canonical JSON
+// and that JSON's SHA-256. A value change (the version, `docs`, the build
+// machine) changes the digest; a style change (names, quotes, line breaks)
+// does not.
+//
+// - The end state is rendered here, at build time, with the same functions
+//   the browser uses (src/scripts/prism-core.js), digest included.
+// - The language follows the site SDK both ways: all four cards are in the
+//   HTML, and <html data-sdk> picks one before first paint, like SdkGroup.
+//   Without JavaScript only Python shows, with a line saying the others
+//   write the same bytes.
+// - src/scripts/prism.js loads after `load` or on the first interaction
+//   and makes the version, `docs`, the style toggles, Built on and Copy work.
+//   Reduced motion: no flashes.
+import { createHash } from 'node:crypto';
+import { SDKS } from '../scripts/sdk-head';
+import { LANGS, SYS, bandHtml, canon, canonHtml, codeHtml, hexHtml, initial, langOf } from '../scripts/prism-core.js';
+import './prism.css';
+
+const st = initial('python');
+const json = canon(st);
+const hex = createHash('sha256').update(json).digest('hex');
+const bytes = Buffer.byteLength(json);
+const cards = SDKS.map((id) => ({ ...langOf(id), code: codeHtml(id, st, false) }));
+// Site order (Python, TypeScript, Go, Rust), not the prototype's.
+const radios = SDKS.map((id) => LANGS.find((l: { id: string }) => l.id === id));
+---
+
+<section class="pz pz-compact not-content" data-prism aria-labelledby="pz-t">
+	<div class="pzc-top">
+		<h3 id="pz-t">Same artifact, any SDK</h3>
+		<fieldset class="seg js-only">
+			<legend class="sr">Show the example in (follows the site SDK)</legend>
+			{
+				radios.map((l) => (
+					<label data-l={l.id}>
+						<input type="radio" name="pz-lang" value={l.id} checked={l.id === 'python'} />
+						{l.name}
+					</label>
+				))
+			}
+		</fieldset>
+	</div>
+	<div class="pzc-body">
+		<div class="pz-cards">
+			{
+				cards.map((c) => (
+					<article class="pz-card" data-lang={c.id} aria-labelledby={`pz-${c.id}-h`}>
+						<header class="pz-ch">
+							<h4 id={`pz-${c.id}-h`}>{c.name}</h4>
+							<span class="pz-pkg">{c.pkg}</span>
+							<div class="pz-tools js-only" role="group" aria-label={`Style only, does not change the definition, ${c.name}`}>
+								<span aria-hidden="true">Style only:</span>
+								<button type="button" class="tg" data-act="names" aria-pressed="false" aria-label={`Rename variables, ${c.name}`}>Rename variables</button>
+								<button type="button" class="tg" data-act="fmt" aria-pressed="false" aria-label={`Reformat, ${c.name}`}>Reformat</button>
+							</div>
+						</header>
+						<pre class="pz-code"><code set:html={c.code} /></pre>
+					</article>
+				))
+			}
+		</div>
+		<div class="pzc-side">
+			<p class="pzc-mini">
+				<svg width="64" height="40" viewBox="0 0 64 40" aria-hidden="true" focusable="false"><g fill="none" stroke-width="2" stroke-linecap="round"><path d="M2 4L30 26" stroke="var(--l-py)"></path><path d="M2 14L30 27" stroke="var(--l-go)"></path><path d="M2 24L30 28" stroke="var(--l-rs)"></path><path d="M2 34L30 29" stroke="var(--l-ts)"></path></g><path d="M28 14H46L37 36Z" fill="var(--prism-fill)" stroke="var(--prism-edge)" stroke-width="1.3"></path><path d="M42 27H63" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round"></path></svg>
+				<span><span class="js-only">Switch language: the digest stays. Edit the version or <code>docs</code>: it changes.</span><span class="nojs-only">Python, TypeScript, Go and Rust write this definition as the same bytes.</span></span>
+			</p>
+			<div class="pz-digest">
+				<p class="pz-dlabel"><b>Digest</b><span class="js-only">SHA-256 of these bytes, computed in your browser from this example definition</span><span class="nojs-only">SHA-256 of these bytes, computed when this page was built</span></p>
+				<p class="pz-hex" data-hex set:html={hexHtml(hex)} />
+				<div class="pz-band" data-band aria-hidden="true" set:html={bandHtml(hex)} />
+				<div class="pz-dfoot">
+					<p class="pz-delta" data-delta data-k=""><span>The same bytes give the same digest, in any language.</span></p>
+					<button type="button" class="btn sm js-only" data-act="copy">Copy the JSON</button>
+				</div>
+			</div>
+			<label class="pz-target js-only">Built on <select data-target>{SYS.map((s: string, i: number) => <option value={String(i + 1)} selected={i + 1 === st.target}>{s}</option>)}</select></label>
+			<details>
+				<summary>The exact bytes hashed (<span data-bytes>{bytes}</span> bytes)</summary>
+				<pre class="pz-json" tabindex="0" role="group" aria-label="The JSON that is hashed"><code data-canon set:html={canonHtml(st, [])} /></pre>
+				<p class="pz-honest"><code>"digest":null</code>: the source is not hashed yet. Before building, Vorpal hashes the files in <code>.</code>, fills in that digest and hashes the definition again; that digest names the artifact in the store.</p>
+			</details>
+		</div>
+	</div>
+</section>
+
+<script>
+	// Load the interactive part after `load`, or at once on the first
+	// interaction with the element.
+	const root = document.querySelector<HTMLElement>('[data-prism]');
+	if (root) {
+		let started = false;
+		const start = () => {
+			if (started) return;
+			started = true;
+			import('../scripts/prism.js').then(({ mountPrism }) => mountPrism(root));
+		};
+		for (const type of ['pointerdown', 'focusin', 'keydown']) root.addEventListener(type, start, { capture: true, once: true });
+		if (document.readyState === 'complete') start();
+		else addEventListener('load', start, { once: true });
+	}
+</script>
