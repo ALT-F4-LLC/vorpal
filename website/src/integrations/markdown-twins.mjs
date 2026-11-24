@@ -177,6 +177,22 @@ function prepare(article, sdk) {
 			visit(node.children);
 			return [h('ul', items)];
 		}
+		// A route card (Home, SDK hubs): "[Title](href): text", the arrow and
+		// the type label dropped.
+		if (node.tagName === 'li' && hasClass(node, 'vp-card')) {
+			const a = select('a', node);
+			if (!a) return undefined;
+			const title = toString(a).replace('→', '').trim();
+			const rest = node.children
+				.filter((c) => c !== a && !(c.type === 'element' && hasClass(c, 'vp-card-type')))
+				.map((c) => toString(c))
+				.join('')
+				.trim();
+			/** @type {Element} */
+			const link = h('a', [text(title)]);
+			link.properties.href = a.properties.href;
+			return [h('li', rest ? [link, text(`: ${rest}`)] : [link])];
+		}
 		// The "Error" tag before an error message.
 		if (hasClass(node, 'vp-etag')) return [text(`${toString(node).trim()}: `)];
 		// Bench steps: the list holds headings, so unwrap it, and write the
