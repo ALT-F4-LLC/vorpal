@@ -1,0 +1,9 @@
+# Lychee configuration for the website "Links and anchors" check.
+# The repo-root lychee.toml excludes every file:// URL, which is how
+# --root-dir resolves internal links in website/dist, so this check
+# would skip every internal link. Use this file instead.
+
+exclude = [
+  # Absolute links to the production site are checked by test-website-docs.
+  "^https://docs\\.vorpal\\.build/",
+]
