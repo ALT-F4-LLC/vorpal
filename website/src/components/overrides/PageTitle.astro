@@ -29,6 +29,7 @@ const KINDS: Record<string, string> = {
 	'reference-errors': 'Reference · Errors',
 	troubleshooting: 'Troubleshooting',
 	'sdk-hub': 'SDK hub',
+	'not-found': '404 · Not found',
 };
 const kind = data.kind ? KINDS[data.kind] : undefined;
 const summary = data.summary ?? data.description;
@@ -66,7 +67,7 @@ const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal
 	{summary && <p class="vp-summary">{summary}</p>}
 	<p class="vp-pmeta">
 		{kind && <span class="vp-kind">{kind}</span>}
-		<span>{data.metaNote ? `${applies} · ${data.metaNote}` : applies}</span>
+		{data.kind !== 'not-found' && <span>{data.metaNote ? `${applies} · ${data.metaNote}` : applies}</span>}
 	</p>
 	{
 		hasToc && (

@@ -21,12 +21,16 @@
 //   one module for the header, the SDK choice and the groups.
 // - An SDK without the file shows `missing[sdk]` instead: its tab stays and
 //   the panel says why.
+// - Prose instead of code: a slot named after the SDK
+//   (`<Fragment slot="python">…</Fragment>`) fills that panel, for content
+//   that differs by SDK but is not a program (TLS trust, for example).
+//   `example` is then optional.
 import { Code } from '@astrojs/starlight/components';
 import { SDKS, type Sdk } from '../scripts/sdk-head';
 
 interface Props {
-	/** Folder under src/examples. */
-	example: string;
+	/** Folder under src/examples; optional when every SDK has a slot. */
+	example?: string;
 	/** File name shown above each panel, such as `src/vorpal.py`. */
 	titles?: Partial<Record<Sdk, string>>;
 	/** Why an SDK has no example ("No separate method: …"). */
@@ -51,14 +55,20 @@ const sources = import.meta.glob<string>('../examples/*/*.{py,ts,go,rs}', {
 	eager: true,
 });
 
+const slots = Object.fromEntries(
+	await Promise.all(
+		SDKS.filter((sdk) => Astro.slots.has(sdk)).map(async (sdk) => [sdk, await Astro.slots.render(sdk)]),
+	),
+) as Partial<Record<Sdk, string>>;
+
 const panels = SDKS.map((sdk) => {
-	const code = sources[`../examples/${example}/${sdk}.${FILES[sdk].ext}`];
-	if (code === undefined && !missing[sdk]) {
+	const code = example ? sources[`../examples/${example}/${sdk}.${FILES[sdk].ext}`] : undefined;
+	if (code === undefined && !missing[sdk] && slots[sdk] === undefined) {
 		throw new Error(
 			`SdkGroup: src/examples/${example}/${sdk}.${FILES[sdk].ext} is missing; add it or give missing.${sdk}`,
 		);
 	}
-	return { sdk, name: NAMES[sdk], code: code?.replace(/\n$/, ''), lang: FILES[sdk].lang };
+	return { sdk, name: NAMES[sdk], code: code?.replace(/\n$/, ''), lang: FILES[sdk].lang, html: slots[sdk] };
 });
 
 const locals = Astro.locals as { vpSdkGroups?: number };
@@ -91,7 +101,9 @@ const Heading = `h${level}`;
 		panels.map((p) => (
 			<div class="vp-sdk-p" id={`${id}-p-${p.sdk}`} data-sdk-panel={p.sdk} data-tab={`${id}-t-${p.sdk}`}>
 				<Heading class="vp-sdk-h">{p.name}</Heading>
-				{p.code !== undefined ? (
+				{p.html !== undefined ? (
+					<Fragment set:html={p.html} />
+				) : p.code !== undefined ? (
 					<Code code={p.code} lang={p.lang} title={titles[p.sdk]} />
 				) : (
 					<p class="vp-sdk-na">{missing[p.sdk]}</p>

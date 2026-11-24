@@ -21,7 +21,8 @@ import { flatten } from '../../nav';
 import pkg from '../../../package.json';
 
 const { entry, lang, editUrl } = Astro.locals.starlightRoute;
-const { sections } = Astro.locals.vorpalNav;
+const { sections, extra } = Astro.locals.vorpalNav;
+const allSections = [...sections, ...extra];
 const isSplash = entry.data.template === 'splash';
 
 const lastUpdated = entry.data.lastUpdated instanceof Date ? entry.data.lastUpdated : undefined;
@@ -31,7 +32,7 @@ const related = (
 ).flatMap((page) => {
 	if (!page) return [];
 	const href = page.id === 'index' ? '/' : `/${page.id}/`;
-	const section = sections.find(
+	const section = allSections.find(
 		(s) => s.group && flatten(s.group.entries).some((l) => l.href.endsWith(href)),
 	);
 	return [
@@ -94,7 +95,7 @@ const related = (
 	<nav class="vp-sitefoot print:hidden" aria-label="Site map">
 		<div class="vp-sitemap vp-nojsonly">
 			{
-				sections.map((s) => (
+				allSections.map((s) => (
 					<div>
 						<h2>
 							<a href={s.href}>{s.label}</a>

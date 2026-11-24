@@ -25,13 +25,20 @@ interface SectionConfig {
 	fallback?: string;
 }
 
+/**
+ * Groups that are not header sections but still narrow the sidebar and
+ * show in the Menu and the site map: the SDK hubs, which sit beside the
+ * sections (ia-proposal §1).
+ */
+export const EXTRA_SECTIONS: SectionConfig[] = [{ label: 'SDKs', group: 'SDKs' }];
+
 export const SECTIONS: SectionConfig[] = [
 	{ label: 'Get started', group: 'Get started' },
 	{ label: 'Guides', group: 'Guides' },
 	{ label: 'Reference', group: 'Reference' },
 	{ label: 'Troubleshooting', group: 'Troubleshooting' },
 	{ label: 'Concepts', group: 'Concepts' },
-	{ label: 'Self-hosting', fallback: '/concepts/architecture/#services-in-detail' },
+	{ label: 'Self-hosting', group: 'Self-hosting' },
 ];
 
 /** Sections whose pages form an ordered sequence keep Previous and Next. */
@@ -47,7 +54,10 @@ export interface Section {
 export interface VorpalNav {
 	/** The whole sidebar tree, before it is narrowed to the current section. */
 	sidebar: SidebarEntry[];
+	/** The six header sections. */
 	sections: Section[];
+	/** Sections outside the header (EXTRA_SECTIONS), for the Menu and site map. */
+	extra: Section[];
 	/** The current section, when the page belongs to one. */
 	section?: Section;
 	/** Groups between the section and the page, for the breadcrumb. */
@@ -75,7 +85,7 @@ function pathToCurrent(entries: SidebarEntry[]): SidebarGroup[] | undefined {
 
 export function buildNav(sidebar: SidebarEntry[]): VorpalNav {
 	const path = pathToCurrent(sidebar) ?? [];
-	const sections = SECTIONS.map((s): Section => {
+	const toSection = (s: SectionConfig): Section => {
 		const group = s.group
 			? sidebar.find((e): e is SidebarGroup => e.type === 'group' && e.label === s.group)
 			: undefined;
@@ -86,11 +96,14 @@ export function buildNav(sidebar: SidebarEntry[]): VorpalNav {
 			current: !!group && path[0] === group,
 			group,
 		};
-	});
+	};
+	const sections = SECTIONS.map(toSection);
+	const extra = EXTRA_SECTIONS.map(toSection);
 	return {
 		sidebar,
 		sections,
-		section: sections.find((s) => s.current),
+		extra,
+		section: [...sections, ...extra].find((s) => s.current),
 		trail: path.slice(1),
 	};
 }

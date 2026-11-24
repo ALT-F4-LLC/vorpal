@@ -27,7 +27,7 @@ const redesign = z.object({
 	kind: z
 		// The templates' kind badges, in order: Tutorial, How-to, Operator
 		// how-to, Concept, Reference · CLI / Config / SDK / Errors,
-		// Troubleshooting, SDK hub; plus the home page.
+		// Troubleshooting, SDK hub; plus the home page and the 404 page.
 		.enum([
 			'tutorial',
 			'how-to',
@@ -40,6 +40,7 @@ const redesign = z.object({
 			'troubleshooting',
 			'sdk-hub',
 			'home',
+			'not-found',
 		])
 		.optional(),
 	summary: z.string().optional(),
