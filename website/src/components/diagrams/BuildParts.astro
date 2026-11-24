@@ -1,0 +1,30 @@
+---
+// Concepts › How a build runs: the CLI and the three services it calls
+// (docs-redesign stage 4, template 5, "The parts").
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram title="The CLI calls three services" width={760} height={250} marker="dg-parts-ah">
+	<rect class="vp-dg-box hot" x="20" y="95" width="150" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="40" y="122">CLI</text>
+	<text class="vp-dg-m" x="40" y="142">vorpal build</text>
+	<rect class="vp-dg-box" x="300" y="14" width="190" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="318" y="41">Agent daemon</text>
+	<text class="vp-dg-s" x="318" y="61">prepares and pins sources</text>
+	<rect class="vp-dg-box" x="300" y="176" width="190" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="318" y="203">Worker</text>
+	<text class="vp-dg-s" x="318" y="223">runs the steps</text>
+	<rect class="vp-dg-box" x="570" y="95" width="170" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="588" y="122">Registry</text>
+	<text class="vp-dg-s" x="588" y="142">sources and archives</text>
+	<path class="vp-dg-l hot" d="M170 112 C230 112 240 44 300 44" marker-end="url(#dg-parts-ah)"></path>
+	<path class="vp-dg-l hot" d="M170 138 C230 138 240 206 300 206" marker-end="url(#dg-parts-ah)"></path>
+	<path class="vp-dg-l hot" d="M172 125 H568" marker-start="url(#dg-parts-ah)"></path>
+	<path class="vp-dg-l" d="M490 44 C540 44 540 105 568 108" marker-end="url(#dg-parts-ah)"></path>
+	<path class="vp-dg-l" d="M490 206 C540 206 540 145 568 142" marker-start="url(#dg-parts-ah)" marker-end="url(#dg-parts-ah)"></path>
+	<Fragment slot="words">
+		<li>The CLI asks the agent daemon to prepare each source; the agent daemon checks it against <code>Vorpal.lock</code> and pushes it to the registry if it is missing.</li>
+		<li>The CLI asks the worker to build each missing artifact and shows its logs. The worker pulls sources from the registry and pushes the archive back.</li>
+		<li>The CLI checks its store, then the registry, for each artifact, and pulls archives from the registry. Files never go from the CLI to the worker directly.</li>
+	</Fragment>
+</Diagram>

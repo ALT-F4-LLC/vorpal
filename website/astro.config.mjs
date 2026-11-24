@@ -94,6 +94,7 @@ const sidebar = [
 		label: 'Concepts',
 		items: [
 			{ label: 'Architecture', slug: 'concepts/architecture' },
+			{ label: 'How a build runs', slug: 'concepts/how-a-build-runs' },
 			{ label: 'Artifacts', slug: 'concepts/artifacts' },
 			{ label: 'Caching', slug: 'concepts/caching' },
 			{ label: 'Environments', slug: 'concepts/environments' },
