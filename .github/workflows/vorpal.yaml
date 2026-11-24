@@ -671,6 +671,8 @@ jobs:
           args: >-
             --root-dir ${{ env.VORPAL_WEBSITE_PATH }}
             --exclude-path ${{ env.VORPAL_WEBSITE_PATH }}/pagefind
+            --exclude-path [.]md$
+            --exclude-path /llms[^/]*[.]txt$
             --max-retries 3
             --no-progress
             --retry-wait-time 5
@@ -1132,6 +1134,8 @@ jobs:
           args: >-
             --root-dir ${{ env.VORPAL_WEBSITE_PATH }}
             --exclude-path ${{ env.VORPAL_WEBSITE_PATH }}/pagefind
+            --exclude-path [.]md$
+            --exclude-path /llms[^/]*[.]txt$
             --max-retries 3
             --no-progress
             --retry-wait-time 5
