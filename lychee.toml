@@ -9,4 +9,7 @@ exclude = [
   "^https://docs\\.vorpal\\.build/",
   # "Edit this page" links: GitHub's editor needs a signed-in session
   "^https://github\\.com/ALT-F4-LLC/vorpal/edit/",
+  # npm's website answers 403 to link checkers. The package itself is
+  # checked by name in the registry (registry.npmjs.org), not here.
+  "^https://www\\.npmjs\\.com/package/",
 ]
