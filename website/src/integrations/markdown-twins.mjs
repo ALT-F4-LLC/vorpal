@@ -13,6 +13,8 @@
  *   so the URL pattern always works.
  * - `/llms.txt` lists every page by section, linking the `.md` copies
  *   (https://llmstxt.org); `/llms-full.txt` is every page in one file.
+ *   Both are main's, the latest docs, and llms.txt points to each version
+ *   snapshot's own `/v/<x.y>/llms.txt` and `llms-full.txt`.
  *
  * Why from the built HTML and not from the .mdx source: the CLI reference,
  * the error reference and the configuration keys are rendered from data by
@@ -280,10 +282,10 @@ function convert(html, pageUrl, sdk) {
 
 
 /**
- * @param {{ sidebar: SidebarItem[], title: string }} options
+ * @param {{ sidebar: SidebarItem[], snapshots?: import('../versions.mjs').Snapshot[], title: string }} options
  * @returns {import('astro').AstroIntegration}
  */
-export default function markdownTwins({ sidebar, title }) {
+export default function markdownTwins({ sidebar, snapshots = [], title }) {
 	/** @type {URL} */
 	let site;
 	let base = '/';
@@ -327,47 +329,81 @@ export default function markdownTwins({ sidebar, title }) {
 					for (const sdk of SDKS) await write(markdownPath(page.path, sdk), page.sdkMarkdown[sdk]);
 				}
 
-				// llms.txt: pages by sidebar group, in sidebar order; then the rest.
+				// llms.txt and llms-full.txt for main at the root, and for each
+				// version snapshot under /v/<x.y>/ (src/versions.mjs), each from
+				// its own sidebar. Main's lists only main's pages, then points to
+				// the snapshots.
 				const mdUrl = (/** @type {string} */ path) => new URL(markdownPath(path).slice(1), siteRoot).href;
-				const listed = new Set();
-				const line = (/** @type {Page} */ p) => {
-					listed.add(p.path);
-					return `- [${p.title}](${mdUrl(p.path)})${p.description ? `: ${p.description}` : ''}`;
-				};
-				/** @param {SidebarItem[]} items @returns {Page[]} */
-				const pagesIn = (items) =>
-					items.flatMap((item) => {
-						if (item.items) return pagesIn(item.items);
-						const page = item.slug !== undefined ? pages.get(`/${item.slug}/`.replace('//', '/')) : undefined;
-						return page ? [page] : [];
-					});
-				const home = pages.get('/');
-				const sections = sidebar
-					.map((group) => ({ label: group.label, pages: pagesIn(group.items ?? [group]) }))
-					.filter((s) => s.pages.length);
-				const llms = [`# ${title}`, ''];
-				if (home) llms.push(`> ${home.description}`, '');
-				llms.push(
-					'Every page of these docs is also plain Markdown: add `.md` to its path (for example',
-					`${mdUrl('/getting-started/quickstart/')}). Examples appear in all four SDKs;`,
-					'for one SDK only, use `.python.md`, `.typescript.md`, `.go.md` or `.rust.md` instead.',
-					`All pages in one file: ${new URL('llms-full.txt', siteRoot).href}`,
-					'',
-				);
-				if (home) llms.push('## Start', '', line(home), '');
-				for (const s of sections) llms.push(`## ${s.label}`, '', ...s.pages.map(line), '');
-				const rest = [...pages.values()].filter((p) => !listed.has(p.path));
-				if (rest.length) llms.push('## Optional', '', ...rest.map(line), '');
-				await write('llms.txt', llms.join('\n'));
+				/**
+				 * @param {string} prefix '' for main, `/v/0.6` for a snapshot
+				 * @param {SidebarItem[]} tree the version's sidebar config (main-tree slugs)
+				 * @param {string} heading
+				 * @param {string[]} note lines after the intro
+				 */
+				const writeLlms = async (prefix, tree, heading, note) => {
+					const inVersion = (/** @type {string} */ path) =>
+						prefix ? path.startsWith(`${prefix}/`) : !snapshots.some((v) => path.startsWith(`/v/${v.slug}/`));
+					const listed = new Set();
+					const line = (/** @type {Page} */ p) => {
+						listed.add(p.path);
+						return `- [${p.title}](${mdUrl(p.path)})${p.description ? `: ${p.description}` : ''}`;
+					};
+					/** @param {SidebarItem[]} items @returns {Page[]} */
+					const pagesIn = (items) =>
+						items.flatMap((item) => {
+							if (item.items) return pagesIn(item.items);
+							const page = item.slug !== undefined ? pages.get(`${prefix}/${item.slug}/`.replace('//', '/')) : undefined;
+							return page ? [page] : [];
+						});
+					const home = pages.get(`${prefix}/`);
+					const sections = tree
+						.map((group) => ({ label: group.label, pages: pagesIn(group.items ?? [group]) }))
+						.filter((s) => s.pages.length);
+					const llms = [`# ${heading}`, ''];
+					if (home) llms.push(`> ${home.description}`, '');
+					llms.push(
+						'Every page of these docs is also plain Markdown: add `.md` to its path (for example',
+						`${mdUrl(`${prefix}/getting-started/quickstart/`)}). Examples appear in all four SDKs;`,
+						'for one SDK only, use `.python.md`, `.typescript.md`, `.go.md` or `.rust.md` instead.',
+						`All pages in one file: ${new URL(`${prefix}/llms-full.txt`.slice(1), siteRoot).href}`,
+						'',
+						...note,
+					);
+					if (home) llms.push('## Start', '', line(home), '');
+					for (const s of sections) llms.push(`## ${s.label}`, '', ...s.pages.map(line), '');
+					const rest = [...pages.values()].filter((p) => !listed.has(p.path) && inVersion(p.path));
+					if (rest.length) llms.push('## Optional', '', ...rest.map(line), '');
+					await write(`${prefix}/llms.txt`.slice(1), llms.join('\n'));
 
-				const ordered = [...(home ? [home] : []), ...sections.flatMap((s) => s.pages), ...rest];
-				const seen = new Set();
-				const full = ordered
-					.filter((p) => !seen.has(p.path) && seen.add(p.path))
-					.map((p) => p.markdown.trim())
-					.join('\n\n---\n\n');
-				await write('llms-full.txt', `${full}\n`);
-				logger.info(`Wrote ${pages.size} Markdown pages (x${SDKS.length + 1}), llms.txt and llms-full.txt.`);
+					const ordered = [...(home ? [home] : []), ...sections.flatMap((s) => s.pages), ...rest];
+					const seen = new Set();
+					const full = ordered
+						.filter((p) => !seen.has(p.path) && seen.add(p.path))
+						.map((p) => p.markdown.trim())
+						.join('\n\n---\n\n');
+					await write(`${prefix}/llms-full.txt`.slice(1), `${full}\n`);
+				};
+
+				const versionsNote = snapshots.length
+					? [
+							'These are the docs for main, the latest. Docs frozen at each release:',
+							'',
+							...snapshots.map(
+								(v) => `- ${v.release}: ${new URL(`v/${v.slug}/llms.txt`, siteRoot).href}`,
+							),
+							'',
+						]
+					: [];
+				await writeLlms('', sidebar, title, versionsNote);
+				for (const v of snapshots) {
+					await writeLlms(`/v/${v.slug}`, v.sidebar, `${title} ${v.release}`, [
+						`These docs are frozen at release ${v.release}. The docs for main: ${new URL('llms.txt', siteRoot).href}`,
+						'',
+					]);
+				}
+				logger.info(
+					`Wrote ${pages.size} Markdown pages (x${SDKS.length + 1}), llms.txt and llms-full.txt (main and ${snapshots.length} snapshot(s)).`,
+				);
 			},
 		},
 	};
