@@ -856,6 +856,31 @@ h1 .vp-vb {
 	transform: translateY(-2px);
 }
 
+/* ===== Version snapshot banner (PageTitle.astro) ===== */
+.vp-vbanner {
+	margin: 0 0 1.25rem;
+	padding: 0.625rem 0.875rem;
+	border: 1px solid var(--vp-line);
+	border-left: 4px solid var(--vp-line-strong);
+	border-radius: var(--vp-r-md);
+	background: var(--vp-bench);
+	color: var(--vp-ink);
+	font-size: var(--vp-fs-ui);
+	line-height: 1.5;
+}
+.vp-vbanner p {
+	margin: 0;
+}
+.vp-vbanner b {
+	font-weight: 650;
+}
+.vp-vbanner a {
+	color: var(--vp-accent);
+	font-weight: 600;
+	text-underline-offset: 0.2em;
+	white-space: nowrap;
+}
+
 /* ===== On this page ===== */
 /* Below 72rem, and on wide pages at every width: a disclosure under the
    title. From 72rem Starlight's right-hand column (restyled below). */
