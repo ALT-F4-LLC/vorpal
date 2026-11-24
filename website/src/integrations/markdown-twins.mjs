@@ -100,6 +100,8 @@ function prepare(article, sdk) {
 		if (['script', 'style', 'link', 'button', 'template', 'form'].includes(tag)) return [];
 		if (hasClass(node, 'sl-anchor-link') || hasClass(node, 'vp-sdkg-top') || hasClass(node, 'vp-jsonly'))
 			return [];
+		// An interactive scene (the Home hero) says nothing in Markdown.
+		if (node.properties?.dataTwinSkip !== undefined) return [];
 		if (tag === 'svg') {
 			// A diagram keeps its name; its "In words" list follows it.
 			const title = select('title', node);
@@ -237,7 +239,10 @@ function convert(html, pageUrl, sdk) {
 	const tree = fromHtml(html);
 	const article = select('main .sl-markdown-content', tree);
 	if (!article) return undefined;
-	const title = toString(select('main h1', tree) ?? h('span')).trim();
+	const h1 = select('main h1', tree);
+	// A line break in the title (the Home hero's) reads as a space.
+	if (h1) rewrite(h1, (node) => (node.tagName === 'br' ? [text(' ')] : undefined));
+	const title = toString(h1 ?? h('span')).replace(/\s+/g, ' ').trim();
 	const summaryEl = select('main .vp-summary', tree);
 	const summary = summaryEl ? toString(summaryEl).trim() : '';
 	const meta = select('meta[name="description"]', tree);

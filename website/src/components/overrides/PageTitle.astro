@@ -39,6 +39,8 @@ const PAGE_TITLE_ID = '_top';
 const hasToc = !!toc && toc.length > 0;
 // A CLI command page's title is the command itself, shown as code.
 const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal');
+// Home has no page header: its hero holds the h1 (components/home/Hero.astro).
+const isHome = data.kind === 'home';
 /** The type tag on search results (Search.astro). */
 const SEARCH_TAGS: Record<string, string> = {
 	tutorial: 'Tutorial',
@@ -57,6 +59,7 @@ const searchSection = section?.label;
 const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
 ---
 
+{!isHome && (
 <header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
 	{searchSection && <span hidden data-pagefind-meta={`section:${searchSection}`} />}
 	{searchKind && <span hidden data-pagefind-meta={`kind:${searchKind}`} />}
@@ -98,3 +101,4 @@ const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
 		)
 	}
 </header>
+)}
