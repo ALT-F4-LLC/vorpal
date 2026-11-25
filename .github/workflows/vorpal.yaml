@@ -137,6 +137,7 @@ jobs:
       - build
     permissions:
       contents: read
+      id-token: write
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -165,15 +166,17 @@ jobs:
           tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::677459762413:role/altf4llc-gha-vorpal-vorpal
+
       - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
           use-local-build: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Prepare lockfile
         id: prepare_lock
@@ -471,6 +474,7 @@ jobs:
       - build-artifacts
     permissions:
       contents: read
+      id-token: write
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -499,15 +503,17 @@ jobs:
           tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::677459762413:role/altf4llc-gha-vorpal-vorpal
+
       - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
           use-local-build: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       # The marker and the visibility token reach the watcher only through this
       # environment and files written by shell builtins, never through a process
@@ -620,6 +626,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -638,15 +645,17 @@ jobs:
           tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::677459762413:role/altf4llc-gha-vorpal-vorpal
+
       - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
           use-local-build: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - run: |
           VORPAL_WEBSITE_PATH=$(vorpal build --path "vorpal-website")
@@ -771,15 +780,17 @@ jobs:
           tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::677459762413:role/altf4llc-gha-vorpal-vorpal
+
       - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
           use-local-build: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - run: |
           ARTIFACT_PATH=$(vorpal build --path "vorpal-container-image")
@@ -926,6 +937,7 @@ jobs:
       contents: read
       deployments: write
       pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -944,15 +956,17 @@ jobs:
           tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-west-2
+          role-to-assume: arn:aws:iam::677459762413:role/altf4llc-gha-vorpal-vorpal
+
       - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
           use-local-build: true
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - run: |
           VORPAL_WEBSITE_PATH=$(vorpal build --path "vorpal-website")
