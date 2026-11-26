@@ -1,4 +1,5 @@
 use crate::command::{
+    listen::bind_tcp_tokio,
     start::{
         agent::AgentServer,
         registry::{
@@ -14,6 +15,7 @@ use anyhow::{bail, Context as _, Result};
 use fs4::fs_std::FileExt;
 use std::fs::File;
 use std::io::Read;
+use std::net::IpAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -40,6 +42,9 @@ pub struct RunArgs {
     pub archive_cache_ttl: u64,
     pub health_check: bool,
     pub health_check_port: u16,
+    /// Address the TCP listeners bind to; `None` binds every interface
+    /// (`[::]`, or `0.0.0.0` without IPv6).
+    pub host: Option<IpAddr>,
     pub issuer: Option<String>,
     pub issuer_audience: Option<String>,
     pub issuer_client_id: Option<String>,
@@ -417,7 +422,7 @@ async fn serve_uds(
 /// Binds the plaintext-TCP health-check listener and its own single-service
 /// router, when `args.health_check` is set. Returns the router, listener, and
 /// its bound address for the caller to spawn once the main server is ready.
-async fn prepare_health_check(
+fn prepare_health_check(
     args: &RunArgs,
     health_reporter: &tonic_health::server::HealthReporter,
 ) -> Result<Option<(tonic::transport::server::Router, TcpListener, String)>> {
@@ -429,11 +434,13 @@ async fn prepare_health_check(
     let health_service_plaintext =
         HealthServer::new(HealthService::from_health_reporter(health_reporter.clone()));
 
-    let health_address = format!("[::]:{}", args.health_check_port);
+    let health_listener = bind_tcp_tokio(args.host, args.health_check_port)
+        .context("failed to bind health server")?;
 
-    let health_listener = TcpListener::bind(&health_address).await.map_err(|err| {
-        anyhow::anyhow!("failed to bind health server on {health_address}: {err}")
-    })?;
+    let health_address = health_listener
+        .local_addr()
+        .context("failed to read health server address")?
+        .to_string();
 
     let health_router = Server::builder().add_service(health_service_plaintext);
 
@@ -483,6 +490,28 @@ fn resolve_effective_port(
     Ok(effective_port)
 }
 
+/// Binds the main TCP listener when the server runs over TCP, before any
+/// service initializes, so a bind failure stops start-up early and the logged
+/// address is the one bound. Returns the listener (`None` in UDS mode) and the
+/// transport label for the service logs.
+fn bind_main_tcp(
+    host: Option<IpAddr>,
+    effective_port: Option<u16>,
+) -> Result<(Option<TcpListener>, String)> {
+    let Some(port) = effective_port else {
+        return Ok((None, get_socket_path().display().to_string()));
+    };
+
+    let listener = bind_tcp_tokio(host, port).context("failed to bind main server")?;
+
+    let label = listener
+        .local_addr()
+        .context("failed to read main server address")?
+        .to_string();
+
+    Ok((Some(listener), label))
+}
+
 async fn serve_with_shutdown(
     serve_future: impl std::future::Future<Output = Result<(), tonic::transport::Error>>,
     sigterm: &mut tokio::signal::unix::Signal,
@@ -530,12 +559,9 @@ pub async fn run(args: RunArgs) -> Result<()> {
         Server::builder().add_service(health_service)
     };
 
-    let health_prepared = prepare_health_check(&args, &health_reporter).await?;
+    let health_prepared = prepare_health_check(&args, &health_reporter)?;
 
-    let transport_label = match effective_port {
-        Some(port) => format!("[::]:{port}"),
-        None => get_socket_path().display().to_string(),
-    };
+    let (main_tcp_listener, transport_label) = bind_main_tcp(args.host, effective_port)?;
 
     let has_agent = args.services.contains(&"agent".to_string());
 
@@ -610,12 +636,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .map_err(|err| anyhow::anyhow!("failed to register SIGTERM handler: {err}"))?;
 
     // Bind and serve: UDS when no port specified, TCP otherwise
-    let result = if let Some(port) = effective_port {
-        let address = format!("[::]:{port}");
-        let main_listener = TcpListener::bind(&address)
-            .await
-            .map_err(|err| anyhow::anyhow!("failed to bind main server on {address}: {err}"))?;
-        info!("listening on TCP: {}", address);
+    let result = if let Some(main_listener) = main_tcp_listener {
+        info!("listening on TCP: {}", transport_label);
         let main_incoming = TcpListenerStream::new(main_listener);
         serve_with_shutdown(router.serve_with_incoming(main_incoming), &mut sigterm).await
     } else {

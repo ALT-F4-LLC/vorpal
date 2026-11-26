@@ -1,6 +1,6 @@
+use crate::command::listen::free_port;
 use anyhow::{anyhow, bail, Context, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
-use port_selector::random_free_port;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -443,7 +443,7 @@ pub async fn start(
     registry: &str,
 ) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
-    let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
+    let command_port = free_port()?;
     let command_port = command_port.to_string();
 
     let mut command = process::Command::new(config_file);

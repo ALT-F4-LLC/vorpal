@@ -39,6 +39,7 @@ mod config;
 mod config_cmd;
 mod init;
 mod inspect;
+mod listen;
 mod lock;
 mod run;
 mod start;
@@ -68,6 +69,13 @@ pub enum CommandSystemServices {
         /// Plaintext (non-TLS) port for gRPC health checks
         #[arg(default_value = "23152", long)]
         health_check_port: u16,
+
+        /// IP address the TCP listeners (the main listener when `--port` or
+        /// `--tls` is set, and the health-check listener) bind to, for example
+        /// `127.0.0.1` or `::1`. If omitted, binds every interface: `[::]`,
+        /// falling back to `0.0.0.0` when the host has no IPv6.
+        #[arg(env = "VORPAL_HOST", long)]
+        host: Option<std::net::IpAddr>,
 
         #[arg(long)]
         issuer: Option<String>,
@@ -735,6 +743,53 @@ mod unlock_parse_tests {
     }
 
     #[test]
+    fn services_start_host_defaults_to_none_and_parses_ip() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for (args, expected) in [
+            (vec!["system", "services", "start"], None),
+            (
+                vec!["system", "services", "start", "--host", "127.0.0.1"],
+                Some("127.0.0.1".parse::<std::net::IpAddr>()?),
+            ),
+            (
+                vec!["system", "services", "start", "--host", "::1"],
+                Some("::1".parse::<std::net::IpAddr>()?),
+            ),
+        ] {
+            let cli = parse(&args)?;
+            let Command::System(CommandSystem::Services(CommandSystemServices::Start {
+                host, ..
+            })) = cli.command
+            else {
+                return Err("expected system services start command".into());
+            };
+            assert_eq!(host, expected, "{args:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn services_start_rejects_non_ip_host() {
+        assert!(parse(&["system", "services", "start", "--host", "localhost"]).is_err());
+    }
+
+    #[test]
+    fn services_start_reads_host_from_env() -> Result<(), Box<dyn std::error::Error>> {
+        let command = Cli::command();
+        let start = command
+            .find_subcommand("system")
+            .and_then(|c| c.find_subcommand("services"))
+            .and_then(|c| c.find_subcommand("start"))
+            .ok_or("expected system services start subcommand")?;
+        let arg = start
+            .get_arguments()
+            .find(|a| a.get_id() == "host")
+            .ok_or("expected host argument")?;
+        assert_eq!(arg.get_env().and_then(|e| e.to_str()), Some("VORPAL_HOST"));
+        Ok(())
+    }
+
+    #[test]
     fn services_start_reads_secret_file_path_from_env() -> Result<(), Box<dyn std::error::Error>> {
         let command = Cli::command();
         let start = command
@@ -1290,6 +1345,7 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 archive_cache_ttl,
                 health_check,
                 health_check_port,
+                host,
                 issuer,
                 issuer_audience,
                 issuer_client_id,
@@ -1325,6 +1381,7 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                     archive_cache_ttl,
                     health_check,
                     health_check_port,
+                    host,
                     issuer,
                     issuer_audience,
                     issuer_client_id,

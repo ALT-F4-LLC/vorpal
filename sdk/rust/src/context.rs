@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
     collections::{BTreeMap, HashMap},
-    net::{Ipv6Addr, SocketAddr},
+    io::ErrorKind,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -27,7 +28,7 @@ use tokio::{
 };
 use tonic::{
     metadata::{Ascii, MetadataValue},
-    transport::{Certificate, Channel, ClientTlsConfig, Server},
+    transport::{server::TcpIncoming, Certificate, Channel, ClientTlsConfig, Server},
     Code::NotFound,
     Request, Response, Status,
 };
@@ -667,20 +668,53 @@ impl ConfigContext {
     ///
     /// # Errors
     ///
-    /// Returns an error if the server fails to serve on the configured port.
+    /// Returns an error if the configured port cannot be bound, or if the
+    /// server fails while serving.
     pub async fn run(self) -> Result<()> {
         let service = ContextServiceServer::new(ConfigServer::new(self.store));
 
-        let service_addr_str = format!("[::]:{}", self.port);
-        let service_addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, self.port));
+        let (incoming, service_addr) = bind_context_listener(self.port)?;
 
-        emit(format!("context service: {service_addr_str}"));
+        emit(format!("context service: {service_addr}"));
 
         Server::builder()
             .add_service(service)
-            .serve(service_addr)
+            .serve_with_incoming(incoming.with_nodelay(Some(true)))
             .await
             .map_err(|e| anyhow::anyhow!("failed to serve: {e}"))
+    }
+}
+
+/// Binds the context service listener on every interface at `port`.
+///
+/// Tries the IPv6 wildcard `[::]` first, which also accepts IPv4 on
+/// dual-stack hosts. When the host has no IPv6 (the bind fails with
+/// `EAFNOSUPPORT` or `EADDRNOTAVAIL`), falls back to `0.0.0.0`. A port that
+/// is already in use is reported as is, without trying IPv4.
+fn bind_context_listener(port: u16) -> Result<(TcpIncoming, SocketAddr)> {
+    let v6_addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
+
+    let v6_err = match TcpIncoming::bind(v6_addr) {
+        Ok(incoming) => {
+            let addr = incoming.local_addr().unwrap_or(v6_addr);
+            return Ok((incoming, addr));
+        }
+        Err(err) if err.kind() == ErrorKind::AddrInUse => {
+            bail!("failed to bind context service on {v6_addr}: {err}")
+        }
+        Err(err) => err,
+    };
+
+    let v4_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
+
+    match TcpIncoming::bind(v4_addr) {
+        Ok(incoming) => {
+            let addr = incoming.local_addr().unwrap_or(v4_addr);
+            Ok((incoming, addr))
+        }
+        Err(v4_err) => {
+            bail!("failed to bind context service on {v6_addr} ({v6_err}) or {v4_addr} ({v4_err})")
+        }
     }
 }
 
@@ -1133,5 +1167,45 @@ mod tests {
         assert_eq!(parsed.scopes, vec!["openid", "offline_access"]);
 
         Ok(())
+    }
+
+    fn io_runtime() -> Result<tokio::runtime::Runtime> {
+        Ok(tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()?)
+    }
+
+    /// Binding succeeds whether or not the host has IPv6 (falls back to
+    /// `0.0.0.0` without it) and reports the port the OS assigned.
+    #[test]
+    fn bind_context_listener_binds_on_any_host() -> Result<()> {
+        io_runtime()?.block_on(async {
+            let (_incoming, addr) = bind_context_listener(0)?;
+
+            assert!(addr.ip().is_unspecified(), "bound {addr}");
+            assert_ne!(addr.port(), 0);
+
+            Ok(())
+        })
+    }
+
+    /// A port already held by another listener is an error, not a hang or a
+    /// silent bind elsewhere.
+    #[test]
+    fn bind_context_listener_rejects_port_in_use() -> Result<()> {
+        io_runtime()?.block_on(async {
+            let (_held, addr) = bind_context_listener(0)?;
+
+            let Err(err) = bind_context_listener(addr.port()) else {
+                bail!("second bind of port {} succeeded", addr.port());
+            };
+
+            assert!(
+                err.to_string().contains("failed to bind context service"),
+                "unexpected error: {err}"
+            );
+
+            Ok(())
+        })
     }
 }
