@@ -3,7 +3,7 @@ title: Installation
 description: Install Vorpal on macOS or Linux and get the background services running.
 ---
 
-Vorpal provides a single install script that downloads a Vorpal release (`0.6.0` unless you choose another version), generates TLS keys for secure communication between components, and starts the background services.
+Vorpal provides a single install script that downloads a Vorpal release (`0.6.1` unless you choose another version), generates TLS keys for secure communication between components, and starts the background services.
 
 ## Requirements
 
@@ -41,7 +41,7 @@ The installer accepts the following flags. When piping through `curl`, pass flag
 | Flag | Description |
 |------|-------------|
 | `-y`, `--yes` | Run in non-interactive mode (skip prompts) |
-| `-v`, `--version <ver>` | Version to install (default: `0.6.0`) |
+| `-v`, `--version <ver>` | Version to install (default: `0.6.1`) |
 | `--services <list>` | Comma-separated services to install (default: `agent,registry,worker`) |
 | `--no-service` | Skip service installation |
 | `--no-path` | Skip PATH configuration |
@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/insta
 To install a specific version without starting any services:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version 0.6.0 --no-service
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version 0.6.1 --no-service
 ```
 
 #### Environment variables
@@ -73,7 +73,7 @@ As an alternative, the installer also accepts environment variables. These are u
 |----------|--------|
 | `VORPAL_NONINTERACTIVE=1` | Enable non-interactive mode |
 | `CI=true` | Enable non-interactive mode |
-| `VORPAL_VERSION=<ver>` | Version to install (default: `0.6.0`) |
+| `VORPAL_VERSION=<ver>` | Version to install (default: `0.6.1`) |
 | `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
 | `VORPAL_NO_SERVICE=1` | Skip service installation |
 | `VORPAL_NO_PATH=1` | Skip PATH configuration |
