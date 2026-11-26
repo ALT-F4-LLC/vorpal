@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Listen address for services**: `vorpal system services start --host <IP>`
+  (env `VORPAL_HOST`) binds the main TCP listener and the health-check
+  listener to one address, such as `127.0.0.1` or `::1`.
+
+### Fixed
+
+- **No-IPv6 hosts**: `vorpal prepare` and `vorpal build` no longer hang on
+  hosts without IPv6 (#580). The CLI picks the config server's port with a
+  single OS-assigned bind instead of `port-selector`, which looped forever
+  when `[::]` could not be bound. The Rust and TypeScript SDK context
+  servers, and `vorpal system services start`, now bind `[::]` and fall back
+  to `0.0.0.0` when the host has no IPv6. Config binaries built with older
+  Rust or TypeScript SDKs still cannot bind on such hosts; rebuild them with
+  this release.
+
 ## [0.6.0] - 2026-11-14
 
 ### Added

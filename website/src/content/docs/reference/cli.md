@@ -389,6 +389,7 @@ vorpal system services start [OPTIONS]
 | `--archive-cache-ttl <SECONDS>` | `300` | TTL for caching archive check results (0 to disable) |
 | `--health-check` | `false` | Enable plaintext gRPC health check endpoint |
 | `--health-check-port <PORT>` | `23152` | Port for health check listener |
+| `--host <IP>` | | IP address the TCP listeners (main and health check) bind to, for example `127.0.0.1` or `::1`. Omit to bind every interface: `[::]`, or `0.0.0.0` when the host has no IPv6. Env: `VORPAL_HOST` |
 | `--issuer <URL>` | | OIDC issuer URL for JWT validation |
 | `--issuer-audience <AUDIENCE>` | | Expected JWT audience |
 | `--issuer-client-id <ID>` | | OAuth2 client ID for worker-to-registry auth |
@@ -403,7 +404,7 @@ vorpal system services start [OPTIONS]
 ### Transport Modes
 
 - **Unix domain socket** (default): Listens on `/var/lib/vorpal/vorpal.sock`. Override with `VORPAL_SOCKET_PATH` environment variable.
-- **TCP**: When `--port` is specified. Listens on `[::]:<port>`.
+- **TCP**: When `--port` is specified. Listens on `[::]:<port>`, or `0.0.0.0:<port>` when the host has no IPv6. Set `--host` to bind one address instead.
 - **TLS over TCP**: When `--tls` is enabled. Defaults to port 23151 if `--port` is not specified.
 
 ```bash
@@ -415,6 +416,9 @@ vorpal system services start --tls
 
 # Start on a specific TCP port
 vorpal system services start --port 23151
+
+# Listen on IPv4 loopback only
+vorpal system services start --port 23151 --host 127.0.0.1
 
 # Start with S3 registry backend
 vorpal system services start --registry-backend s3 --registry-backend-s3-bucket my-bucket
@@ -438,6 +442,7 @@ vorpal system services start \
 | Variable | Description |
 |----------|-------------|
 | `VORPAL_SOCKET_PATH` | Override the default Unix domain socket path (`/var/lib/vorpal/vorpal.sock`) |
+| `VORPAL_HOST` | IP address the TCP listeners of `vorpal system services start` bind to (same as `--host`) |
 | `VORPAL_ISSUER_CLIENT_SECRET_FILE` | Path to the issuer client secret file for `vorpal system services start` (same as `--issuer-client-secret-file`) |
 
 ## Exit Codes

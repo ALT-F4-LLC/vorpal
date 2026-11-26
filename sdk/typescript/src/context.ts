@@ -984,7 +984,8 @@ export class ConfigContext {
    * Starts the ContextService gRPC server.
    * Matches Rust ConfigContext::run() and Go ConfigContext.Run().
    *
-   * Prints "context service: [::]:PORT" to stdout for CLI detection.
+   * Prints "context service: ADDRESS:PORT" to stdout for CLI detection,
+   * where ADDRESS is `[::]`, or `0.0.0.0` on hosts without IPv6.
    */
   async run(): Promise<void> {
     const server = new grpc.Server();
@@ -1028,24 +1029,7 @@ export class ConfigContext {
       },
     });
 
-    const addr = `[::]:${this._port}`;
-
-    await new Promise<void>((resolve, reject) => {
-      server.bindAsync(addr, grpc.ServerCredentials.createInsecure(), (err) => {
-        if (err) {
-          reject(new Error(
-            `Failed to bind context service to ${addr}: ${err.message}\n\n` +
-            `  The TypeScript config's gRPC context server could not start.\n` +
-            `  This usually means the port is already in use by another process.\n\n` +
-            `  To fix this:\n` +
-            `    1. Check if another Vorpal config process is still running\n` +
-            `    2. Try running 'vorpal build' again (a new port will be selected)\n`,
-          ));
-          return;
-        }
-        resolve();
-      });
-    });
+    const addr = await bindContextServer(server, this._port);
 
     console.log(`context service: ${addr}`);
 
@@ -1066,4 +1050,61 @@ export class ConfigContext {
       process.on("SIGTERM", shutdown);
     });
   }
+}
+
+function bindAsync(server: grpc.Server, addr: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.bindAsync(addr, grpc.ServerCredentials.createInsecure(), (err, port) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(port);
+    });
+  });
+}
+
+/**
+ * Binds `server` on every interface at `port` and returns the bound address.
+ *
+ * Tries the IPv6 wildcard `[::]` first, which also accepts IPv4 on dual-stack
+ * hosts, then `0.0.0.0` when that fails (hosts without IPv6 reject `[::]`
+ * with EAFNOSUPPORT or EADDRNOTAVAIL). A port already in use is reported as
+ * is, without trying IPv4. Mirrors the Rust SDK's `bind_context_listener`.
+ */
+export async function bindContextServer(server: grpc.Server, port: number): Promise<string> {
+  const v6Addr = `[::]:${port}`;
+
+  let v6Error: Error;
+  try {
+    const bound = await bindAsync(server, v6Addr);
+    return `[::]:${bound}`;
+  } catch (err) {
+    v6Error = err as Error;
+  }
+
+  const v4Addr = `0.0.0.0:${port}`;
+  let v4Error: Error | undefined;
+
+  if (!v6Error.message.includes("EADDRINUSE")) {
+    try {
+      const bound = await bindAsync(server, v4Addr);
+      return `0.0.0.0:${bound}`;
+    } catch (err) {
+      v4Error = err as Error;
+    }
+  }
+
+  const detail = v4Error
+    ? `${v6Addr}: ${v6Error.message}; ${v4Addr}: ${v4Error.message}`
+    : `${v6Addr}: ${v6Error.message}`;
+
+  throw new Error(
+    `Failed to bind context service on port ${port} (${detail})\n\n` +
+    `  The TypeScript config's gRPC context server could not start.\n` +
+    `  The port may already be in use by another process.\n\n` +
+    `  To fix this:\n` +
+    `    1. Check if another Vorpal config process is still running\n` +
+    `    2. Try running 'vorpal build' again (a new port will be selected)\n`,
+  );
 }

@@ -8,8 +8,10 @@ import {
   ArtifactSystem,
 } from "../api/artifact/artifact.js";
 import { ArtifactStep, secretsToProto } from "../artifact.js";
+import * as grpc from "@grpc/grpc-js";
 import {
   artifactToJsonBytes,
+  bindContextServer,
   clientAuthHeader,
   computeArtifactDigest,
   serializeArtifactStepSecret,
@@ -269,5 +271,37 @@ describe("step secret values", () => {
     expect(step.secrets).toHaveLength(1);
     expect(step.secrets[0]!.name).toBe("BINARY");
     expect([...step.secrets[0]!.value]).toEqual([...NON_UTF8_SECRET]);
+  });
+});
+
+describe("bindContextServer", () => {
+  const servers: grpc.Server[] = [];
+
+  afterEach(() => {
+    for (const server of servers.splice(0)) {
+      server.forceShutdown();
+    }
+  });
+
+  function newServer(): grpc.Server {
+    const server = new grpc.Server();
+    servers.push(server);
+    return server;
+  }
+
+  // Passes with or without IPv6: falls back to 0.0.0.0 when [::] is rejected.
+  test("binds every interface and reports the assigned port", async () => {
+    const addr = await bindContextServer(newServer(), 0);
+
+    expect(addr).toMatch(/^(\[::\]|0\.0\.0\.0):[1-9][0-9]*$/);
+  });
+
+  test("rejects a port already in use", async () => {
+    const addr = await bindContextServer(newServer(), 0);
+    const port = Number(addr.slice(addr.lastIndexOf(":") + 1));
+
+    await expect(bindContextServer(newServer(), port)).rejects.toThrow(
+      `Failed to bind context service on port ${port}`,
+    );
   });
 });
