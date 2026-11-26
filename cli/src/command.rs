@@ -35,6 +35,8 @@ use vorpal_sdk::{
 };
 
 mod build;
+#[cfg(test)]
+mod cli_reference;
 mod config;
 mod config_cmd;
 mod init;

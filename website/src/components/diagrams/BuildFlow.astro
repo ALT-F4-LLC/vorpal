@@ -1,0 +1,77 @@
+---
+// Concepts › Architecture: where sources and built archives travel during
+// `vorpal build` (docs-redesign step 6). Every file goes through the
+// registry: the agent daemon pushes sources (cli/src/command/start/agent.rs,
+// push), the worker pulls them and pushes the built archive
+// (start/worker.rs:293-312), and the CLI pulls archives
+// (cli/src/command/build.rs:137, pull_archive). The CLI's only call to the
+// worker is the build request, whose reply is the build's log lines
+// (build.rs:290, build_artifact).
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram
+	title="Sources and built archives go through the registry; the CLI sends the worker only build requests"
+	width={680}
+	height={318}
+	marker="dg-flow-ah"
+>
+	<rect class="vp-dg-box" x="10" y="10" width="170" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="28" y="36">Config program</text>
+	<text class="vp-dg-s" x="28" y="57">your SDK code</text>
+
+	<rect class="vp-dg-box" x="270" y="10" width="200" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="288" y="36">Agent daemon</text>
+	<text class="vp-dg-s" x="288" y="57">pins and pushes sources</text>
+
+	<rect class="vp-dg-box hot" x="10" y="130" width="170" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="28" y="156">CLI</text>
+	<text class="vp-dg-m" x="28" y="177">vorpal build</text>
+
+	<rect class="vp-dg-box" x="500" y="130" width="170" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="518" y="156">Registry</text>
+	<text class="vp-dg-s" x="518" y="177">sources and archives</text>
+
+	<rect class="vp-dg-box" x="270" y="248" width="200" height="60" rx="8"></rect>
+	<text class="vp-dg-t" x="288" y="274">Worker</text>
+	<text class="vp-dg-s" x="288" y="295">runs the steps</text>
+
+	<path class="vp-dg-l" d="M95 130 V74" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="103" y="106">starts</text>
+
+	<path class="vp-dg-l" d="M180 40 H266" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="186" y="32">declares</text>
+
+	<path class="vp-dg-l hot" d="M470 40 C560 40 585 80 585 126" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="596" y="84">sources</text>
+
+	<path class="vp-dg-l hot" d="M500 160 H184" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="262" y="152">archives, pulled by the CLI</text>
+
+	<path class="vp-dg-l hot" d="M470 278 C560 278 585 236 585 194" marker-start="url(#dg-flow-ah)" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="480" y="306">pull and push</text>
+
+	<path class="vp-dg-l vp-dg-req" d="M95 190 C95 250 180 278 266 278" marker-end="url(#dg-flow-ah)"></path>
+	<text class="vp-dg-s" x="40" y="290">build request</text>
+
+	<Fragment slot="words">
+		<li>
+			The CLI builds your config program and starts it. The config program declares each
+			artifact to the agent daemon.
+		</li>
+		<li>
+			The agent daemon checks each source against <code>Vorpal.lock</code>, hashes it, and pushes
+			it to the registry.
+		</li>
+		<li>
+			For each artifact, the CLI looks in its local store, then pulls the built archive from the
+			registry if the registry has it.
+		</li>
+		<li>
+			For an artifact neither has, the CLI sends the worker a build request and shows the build's
+			log lines. The worker pulls the sources and dependency outputs from the registry, runs the
+			steps, and pushes the archive to the registry, where the CLI pulls it.
+		</li>
+		<li>No source or archive passes between the CLI and the worker; every file goes through the registry.</li>
+	</Fragment>
+</Diagram>

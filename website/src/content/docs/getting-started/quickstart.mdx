@@ -1,0 +1,159 @@
+---
+title: Quickstart
+description: Create, pin, build and run your first Vorpal project, then open its development environment.
+summary: Create a project, pin its sources, build it, run the program and open its development environment. Every command shows what you should see.
+kind: tutorial
+wide: true
+lastUpdated: 2026-11-24
+related:
+  - guides/development-environment
+  - concepts/architecture
+  - reference/cli/prepare
+  - sdks/python
+---
+
+import SdkGroup from '../../../components/SdkGroup.astro';
+
+<dl class="vp-facts" id="before">
+<dt>You need</dt>
+<dd>Vorpal 0.6.0 [installed](/getting-started/installation/), with its services running.</dd>
+<dt>You end up with</dt>
+<dd>A project called `hello-world`, its built program, and a development environment with its toolchain pinned.</dd>
+<dt>Time</dt>
+<dd>The first build downloads toolchains (and, on Linux, the `linux-vorpal` root filesystem). Time to be measured.</dd>
+</dl>
+
+## Create the project {#step-1}
+
+`vorpal init` asks which SDK to write your config program in (Go, Python, Rust or TypeScript), then writes a working project into the current folder: a `Vorpal.toml` manifest and a config program in that language.
+
+<p class="vp-iffail">If this fails: [Installation](/getting-started/installation/) checks that `vorpal` is on your `PATH`.</p>
+
+```bash prompt
+mkdir hello-world && cd hello-world
+vorpal init hello-world
+```
+
+```text output title="Expected output, after you choose Python"
+> Which language would you like to use? Python
+ INFO Created file: .gitignore
+ INFO Created file: Vorpal.toml
+ INFO Created file: pyproject.toml
+ INFO Created file: src/main.py
+ INFO Created file: src/vorpal.py
+ INFO Created file: uv.lock
+```
+
+## Read the config program {#step-2}
+
+The config program defines two artifacts: `hello-world`, your program, and `hello-world-dev`, a development environment. `init` replaces `example` in its templates with your project name.
+
+Each SDK's `vorpal init` writes a program like this. The same definition gives the same digest in every SDK, at the same SDK version.
+
+<SdkGroup
+	example="quickstart"
+	titles={{
+		python: 'src/vorpal.py',
+		typescript: 'src/vorpal.ts',
+		go: 'cmd/vorpal/main.go',
+		rust: 'src/vorpal.rs',
+	}}
+/>
+
+## Pin the sources {#step-3}
+
+`vorpal build` runs in locked mode: it uses a remote source, such as the Python interpreter, only if `Vorpal.lock` pins it to a digest. A new project has no `Vorpal.lock`, so pin its sources first. `vorpal prepare` downloads each remote source, writes its digest to `Vorpal.lock`, and builds nothing but the config program.
+
+Commit `Vorpal.lock`. Everyone who builds the project, whether an AI agent, a teammate or CI, then gets identical sources, or a clear error if one changed.
+
+<p class="vp-iffail">If this fails: skipping this step stops the build with [source '&lt;name&gt;' is unpinned](/troubleshooting/errors/#err-source-unpinned).</p>
+
+```bash prompt
+vorpal prepare hello-world
+```
+
+```text output
+mint: cpython (<platform>) -> <digest>
+mint: uv (<platform>) -> <digest>
+<digest>
+```
+
+One `mint:` line for each remote source; on Linux you also see the `linux-vorpal` sources. The last line is the digest of `hello-world`. See [`vorpal prepare`](/reference/cli/prepare/) for `update:` and `verify:` lines.
+
+## Build it {#step-4}
+
+The CLI compiles the config program, asks it for the artifact graph, and builds anything not already in your store. It prints the artifact's digest: the SHA-256 of its definition.
+
+On the first build, Vorpal downloads the toolchains for your system. Later builds use the local store: unchanged inputs resolve straight away, with nothing downloaded or compiled again.
+
+<p class="vp-iffail">If this fails: [selected 'artifact' not found](/troubleshooting/errors/#err-selected-artifact-not-found) means the name doesn't match one in the config program.</p>
+
+```bash prompt
+vorpal build hello-world
+```
+
+```text output
+<digest>
+```
+
+Progress lines go to stderr first, starting with `INFO mode: locked`. The digest is the last line, on stdout.
+
+To build again from scratch and skip the store, add [`--rebuild`](/reference/cli/build/#flag-rebuild). See [`vorpal build`](/reference/cli/build/) for every option.
+
+## Run the program {#step-5}
+
+[`--path`](/reference/cli/build/#flag-path) prints the artifact output's folder in the store instead of the digest. The program is in its `bin` folder, named after your project.
+
+<p class="vp-iffail">If this fails: "no such file" means the build in step 4 didn't finish; `--path` prints the folder only for a built artifact.</p>
+
+```bash prompt
+$(vorpal build --path hello-world)/bin/hello-world
+```
+
+```text output
+Hello, world!
+```
+
+The same path works with any tool, for example to look inside the output or copy it into a deployment pipeline:
+
+```bash prompt
+ls $(vorpal build --path hello-world)
+```
+
+:::caution
+The Vorpal store is immutable. Do not modify, add or remove files in an artifact output folder outside of a Vorpal build.
+:::
+
+## Open the development environment {#step-6}
+
+Sourcing `bin/activate` puts the pinned toolchain on your `PATH` in this shell, the same on every machine. Run `deactivate` or close the shell to leave it. Its sources are already pinned: step 3 wrote them to `Vorpal.lock`.
+
+<p class="vp-iffail">If this fails: [source '&lt;name&gt;' is unpinned](/troubleshooting/errors/#err-source-unpinned) means a source isn't in `Vorpal.lock`: run `vorpal prepare hello-world-dev`.</p>
+
+```bash prompt
+source "$(vorpal build --path hello-world-dev)/bin/activate"
+```
+
+```text output title="Your prompt now starts with"
+(hello-world-dev) $
+```
+
+See [Environments](/concepts/environments/) for development and user environments.
+
+## Check it worked {#done}
+
+Build again. Nothing changed, so Vorpal finds every artifact in the store, runs no steps, and prints the same digest as in step 4.
+
+```bash prompt
+vorpal build hello-world
+```
+
+```text output
+<the-same-digest-as-step-4>
+```
+
+## Next steps
+
+- Every guide in your SDK, on one page: [Python](/guides/python/), [TypeScript](/guides/typescript/), [Go](/guides/go/) or [Rust](/guides/rust/).
+- [Add a development environment](/guides/development-environment/) gives the team pinned tools such as `protoc`.
+- [Architecture](/concepts/architecture/) explains what each service did in step 4.

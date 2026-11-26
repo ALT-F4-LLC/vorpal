@@ -1,0 +1,121 @@
+---
+slug: v/0.6/concepts/how-vorpal-compares
+title: How Vorpal compares
+description: Vorpal next to Nix, Docker, Bazel and Dagger, on the same rows, each row sourced from that tool's own documentation.
+summary: Vorpal next to Nix, Docker, Bazel and Dagger, on the same rows. Each entry ends with when to choose which.
+kind: concept
+metaNote: Reviewed each release
+lastUpdated: 2026-11-24
+related:
+  - v/0.6/concepts/architecture
+  - v/0.6/concepts/artifacts
+  - v/0.6/getting-started/quickstart
+  - v/0.6/self-hosting/tls
+---
+
+## In short {#short}
+
+Vorpal builds tools, environments, jobs and services from a program you write in Python, TypeScript, Go or Rust. Every remote source is pinned in `Vorpal.lock`, every artifact is named by the digest of its definition, and a built-in registry with optional OIDC sign-in shares the results with AI agents, teammates and CI.
+
+Each row about another tool cites that tool's own documentation, checked on 2026-11-24. Each Vorpal entry links to the page that documents it. Rows we could not source were cut.
+
+
+## Vorpal and Nix {#vs-nix}
+
+<dl class="vp-cmp">
+<dt>What you write</dt>
+<dd><span class="vp-vs"><b>Nix:</b> The Nix language, for creating and composing derivations<a class="vp-fn" href="#src-nix-1" aria-label="Nix source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#why-config-as-code">A config program in Python, TypeScript, Go or Rust</a></span></dd>
+<dt>What is pinned</dt>
+<dd><span class="vp-vs"><b>Nix:</b> A source fetched during a build is a fixed-output derivation: its hash is declared in advance<a class="vp-fn" href="#src-nix-2" aria-label="Nix source 2">[2]</a><a class="vp-fn" href="#src-nix-3" aria-label="Nix source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/reference/configuration/#lockfile-vorpallock">Every remote source by digest in <code>Vorpal.lock</code>, per system</a></span></dd>
+<dt>Cache and reuse</dt>
+<dd><span class="vp-vs"><b>Nix:</b> Binary caches, called substituters, with signing keys<a class="vp-fn" href="#src-nix-3" aria-label="Nix source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/caching/#cache-lookup-order">Local store plus a built-in registry (local or S3)</a></span></dd>
+<dt>Access control</dt>
+<dd><span class="vp-vs"><b>Nix:</b> Cache credentials go in a netrc file; access rules come from the server<a class="vp-fn" href="#src-nix-3" aria-label="Nix source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/reference/cli/system/services/#flag-issuer">Optional OIDC sign-in: read and write roles per namespace, plus trusted service clients</a></span></dd>
+<dt>Build isolation</dt>
+<dd><span class="vp-vs"><b>Nix:</b> Sandbox on by default on Linux, off on other platforms. Builds get a private network namespace, except fixed-output derivations<a class="vp-fn" href="#src-nix-3" aria-label="Nix source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#worker">Bubblewrap on Linux, with network access in steps; sources are fetched and pinned before steps run. macOS steps are not sandboxed</a> <span class="vp-pln">Planned · <b>ENG-364</b></span></span></dd>
+</dl>
+
+<div class="vp-choose">
+<p><b>Choose Vorpal when</b>You want one language for builds across all your projects, and the SDK your team already writes.</p>
+<p><b>Choose Nix when</b>You need the Nixpkgs package set, or build steps with no network access.</p>
+</div>
+
+<ol class="vp-srcs" aria-label="Sources for Nix">
+<li id="src-nix-1"><a href="https://nix.dev/manual/nix/stable/language/">Nix manual: the Nix language</a></li>
+<li id="src-nix-2"><a href="https://nix.dev/manual/nix/stable/language/advanced-attributes.html">Nix manual: advanced attributes (outputHash, fixed-output derivations)</a></li>
+<li id="src-nix-3"><a href="https://nix.dev/manual/nix/stable/command-ref/conf-file.html">Nix manual: nix.conf (sandbox, substituters, netrc-file)</a></li>
+</ol>
+
+## Vorpal and Docker {#vs-docker}
+
+<dl class="vp-cmp">
+<dt>What you write</dt>
+<dd><span class="vp-vs"><b>Docker:</b> A Dockerfile; each instruction becomes an image layer<a class="vp-fn" href="#src-docker-1" aria-label="Docker source 1">[1]</a><a class="vp-fn" href="#src-docker-2" aria-label="Docker source 2">[2]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#why-config-as-code">A config program in Python, TypeScript, Go or Rust</a></span></dd>
+<dt>What is pinned</dt>
+<dd><span class="vp-vs"><b>Docker:</b> A base image by digest if you write <code>FROM image@digest</code>; without a tag or digest, <code>latest</code><a class="vp-fn" href="#src-docker-1" aria-label="Docker source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/reference/configuration/#lockfile-vorpallock">Every remote source, per system</a></span></dd>
+<dt>Cache and reuse</dt>
+<dd><span class="vp-vs"><b>Docker:</b> Layer cache: when a layer changes, every later layer rebuilds<a class="vp-fn" href="#src-docker-2" aria-label="Docker source 2">[2]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/caching/#what-triggers-a-cache-miss">Per-artifact digests: an artifact rebuilds only if its definition, or a dependency, changed</a></span></dd>
+<dt>Remote builds</dt>
+<dd><span class="vp-vs"><b>Docker:</b> BuildKit builders: in the Docker daemon, in a container, on Kubernetes or a remote daemon<a class="vp-fn" href="#src-docker-3" aria-label="Docker source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/self-hosting/tls/">Worker service, local or on another machine</a></span></dd>
+<dt>Platforms</dt>
+<dd><span class="vp-vs"><b>Docker:</b> Linux and Windows containers<a class="vp-fn" href="#src-docker-4" aria-label="Docker source 4">[4]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/reference/configuration/#supported-systems">macOS and Linux, x86_64 and ARM64. Windows</a> <span class="vp-pln">Planned · <b>ENG-367</b></span></span></dd>
+</dl>
+
+<div class="vp-choose">
+<p><b>Choose Vorpal when</b>You want the same pinned tools on a laptop shell, in CI and on a build machine, without a container.</p>
+<p><b>Choose Docker when</b>You ship container images, or need Windows builds (Vorpal: Planned, ENG-367).</p>
+</div>
+
+<ol class="vp-srcs" aria-label="Sources for Docker">
+<li id="src-docker-1"><a href="https://docs.docker.com/reference/dockerfile/">Dockerfile reference (FROM)</a></li>
+<li id="src-docker-2"><a href="https://docs.docker.com/build/cache/">Docker docs: build cache</a></li>
+<li id="src-docker-3"><a href="https://docs.docker.com/build/builders/">Docker docs: builders</a></li>
+<li id="src-docker-4"><a href="https://learn.microsoft.com/en-us/virtualization/windowscontainers/about/">Microsoft Learn: Windows containers</a></li>
+</ol>
+
+## Vorpal and Bazel {#vs-bazel}
+
+<dl class="vp-cmp">
+<dt>What you write</dt>
+<dd><span class="vp-vs"><b>Bazel:</b> BUILD files in Starlark that declare rules and targets<a class="vp-fn" href="#src-bazel-1" aria-label="Bazel source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#why-config-as-code">A config program in a general-purpose language</a></span></dd>
+<dt>Cache and reuse</dt>
+<dd><span class="vp-vs"><b>Bazel:</b> Remote cache: an action cache and a content-addressable store of outputs<a class="vp-fn" href="#src-bazel-2" aria-label="Bazel source 2">[2]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/caching/#cache-lookup-order">Artifact store plus registry</a></span></dd>
+<dt>Remote builds</dt>
+<dd><span class="vp-vs"><b>Bazel:</b> Remote execution distributes build and test actions across machines<a class="vp-fn" href="#src-bazel-3" aria-label="Bazel source 3">[3]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/self-hosting/tls/">Worker service, local or on another machine</a></span></dd>
+<dt>Granularity</dt>
+<dd><span class="vp-vs"><b>Bazel:</b> Per action<a class="vp-fn" href="#src-bazel-2" aria-label="Bazel source 2">[2]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/caching/#what-triggers-a-cache-miss">Per artifact</a></span></dd>
+</dl>
+
+<div class="vp-choose">
+<p><b>Choose Vorpal when</b>You want environments and tools pinned for a whole project, with little build-graph code.</p>
+<p><b>Choose Bazel when</b>You need fine-grained incremental builds in a very large monorepo.</p>
+</div>
+
+<ol class="vp-srcs" aria-label="Sources for Bazel">
+<li id="src-bazel-1"><a href="https://bazel.build/concepts/build-files">Bazel docs: BUILD files</a></li>
+<li id="src-bazel-2"><a href="https://bazel.build/remote/caching">Bazel docs: remote caching</a></li>
+<li id="src-bazel-3"><a href="https://bazel.build/remote/rbe">Bazel docs: remote execution</a></li>
+</ol>
+
+## Vorpal and Dagger {#vs-dagger}
+
+<dl class="vp-cmp">
+<dt>What you write</dt>
+<dd><span class="vp-vs"><b>Dagger:</b> Code in native SDKs for Go, Python, TypeScript, PHP, Java, .NET, Elixir and Rust<a class="vp-fn" href="#src-dagger-1" aria-label="Dagger source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#why-config-as-code">A config program in Python, TypeScript, Go or Rust</a></span></dd>
+<dt>Runs in</dt>
+<dd><span class="vp-vs"><b>Dagger:</b> Containers, orchestrated by sandboxed functions; needs a container runtime<a class="vp-fn" href="#src-dagger-1" aria-label="Dagger source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/architecture/#services-in-detail">Vorpal services: agent daemon, registry, worker</a></span></dd>
+<dt>Cache and reuse</dt>
+<dd><span class="vp-vs"><b>Dagger:</b> Content-addressed caching, across local runs and CI<a class="vp-fn" href="#src-dagger-1" aria-label="Dagger source 1">[1]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/caching/#cache-lookup-order">Digest-addressed store and registry</a></span></dd>
+<dt>Development environments</dt>
+<dd><span class="vp-vs"><b>Dagger:</b> An interactive shell to inspect intermediate results<a class="vp-fn" href="#src-dagger-2" aria-label="Dagger source 2">[2]</a></span><span class="vp-vs"><b>Vorpal:</b> <a href="/concepts/environments/#development-environments">Environments you activate in your own shell (<code>source bin/activate</code>)</a></span></dd>
+</dl>
+
+<div class="vp-choose">
+<p><b>Choose Vorpal when</b>You want the same definitions for CI and for the shell you develop in.</p>
+<p><b>Choose Dagger when</b>Your pipelines are already container-first.</p>
+</div>
+
+<ol class="vp-srcs" aria-label="Sources for Dagger">
+<li id="src-dagger-1"><a href="https://github.com/dagger/dagger">Dagger README</a></li>
+<li id="src-dagger-2"><a href="https://docs.dagger.io/">Dagger docs</a></li>
+</ol>

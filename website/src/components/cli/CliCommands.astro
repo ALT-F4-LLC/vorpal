@@ -1,0 +1,47 @@
+---
+// Every `vorpal` command, generated from src/data/cli/main.json, each linked
+// to its reference page. A row's id is the old single-page CLI reference's
+// anchor for that command (`#vorpal-build`), so old links still land on it.
+import { getEntry } from 'astro:content';
+import { cliOf, inline, pageOf } from '../../data/cli';
+import { snapshotOf, VERSION_DIR } from '../../versions.mjs';
+import { getOverlay } from './overlay';
+
+const { cli, hrefOf, mark } = cliOf(Astro.locals);
+const overlay = await getOverlay(Astro.locals);
+const snapshot = snapshotOf(Astro.locals.starlightRoute.entry.id);
+const pageDir = snapshot ? `${VERSION_DIR}/${snapshot.slug}/reference/cli` : 'reference/cli';
+const rows = [];
+for (const c of cli.commands) {
+	const page = pageOf(c.path);
+	if (page && !(await getEntry('docs', `${pageDir}/${page}`))) {
+		throw new Error(`The CLI reference has no page for "vorpal ${c.path}": add src/content/docs/${pageDir}/${page}.mdx`);
+	}
+	const m = mark(`cmd:${c.path}`);
+	rows.push({
+		id: `vorpal-${c.path.replace(/ /g, '-')}`,
+		name: `${cli.name} ${c.path}`,
+		href: hrefOf(c.path),
+		summary: overlay[c.path]?.summary ?? '',
+		unreleased: !!m && 'unreleased' in m,
+	});
+}
+---
+
+<ul class="vp-cmdlist">
+	{
+		rows.map((r) => (
+			<li id={r.id}>
+				{r.href ? (
+					<a href={r.href}>
+						<code>{r.name}</code>
+					</a>
+				) : (
+					<code>{r.name}</code>
+				)}
+				{r.unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
+				<span class="vp-cmdlist-s" set:html={inline(r.summary)} />
+			</li>
+		))
+	}
+</ul>

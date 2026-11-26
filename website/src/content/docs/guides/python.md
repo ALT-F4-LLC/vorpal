@@ -1,5 +1,5 @@
 ---
-title: Python SDK
+title: Every guide in Python
 description: Build artifacts and environments with the Vorpal Python SDK.
 ---
 

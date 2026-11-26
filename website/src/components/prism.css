@@ -1,0 +1,130 @@
+/*
+ * Prism, compact form (src/components/Prism.astro). The prototype's rules
+ * (stage 4 templates/concept-artifacts.html), scoped under .pz, on aliases
+ * of the site tokens. The four language colours and the prism's own
+ * colours are local to the element.
+ */
+.pz{
+ --bench:var(--vp-bench);--surface:var(--vp-surface);--code:var(--vp-code);--hover:var(--vp-hover);
+ --ink:var(--vp-ink);--ink-2:var(--vp-ink-2);--line:var(--vp-line);--line-strong:var(--vp-line-strong);
+ --accent:var(--vp-accent);--accent-fill:var(--vp-accent-fill);--accent-tint:var(--vp-accent-tint);--focus:var(--vp-focus);
+ --k-str:var(--vp-k-str);--k-fn:var(--vp-k-fn);--k-num:var(--vp-k-num);--k-kw:var(--vp-k-kw);--mono:var(--vp-mono);
+ --l-py:#5a44cf;--l-go:#1463c4;--l-rs:#18794a;--l-ts:#b04e0b;--prism-fill:rgba(255,255,255,.72);--prism-edge:#8a877e;--glow:rgba(27,26,23,0);--band-s:68%;--band-l:50%;--mark:#fde3cf;
+ color:var(--ink);font-size:16px;line-height:1.6
+}
+:root.vp-js[data-theme="dark"] .pz{--l-py:#a896ff;--l-go:#6aa8ff;--l-rs:#5fd08e;--l-ts:#ff9a57;--prism-fill:rgba(236,233,225,.07);--prism-edge:#a8a499;--glow:rgba(236,233,225,.07);--band-s:72%;--band-l:62%;--mark:#4a2f1d}
+@media (prefers-color-scheme:dark){:root:not(.vp-js) .pz{--l-py:#a896ff;--l-go:#6aa8ff;--l-rs:#5fd08e;--l-ts:#ff9a57;--prism-fill:rgba(236,233,225,.07);--prism-edge:#a8a499;--glow:rgba(236,233,225,.07);--band-s:72%;--band-l:62%;--mark:#4a2f1d}}
+.pz .sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pz :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.pz fieldset{min-width:0}
+.pz .btn{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface);color:var(--ink);font:600 13px/1 var(--vp-sans);cursor:pointer}
+.pz .btn:hover{background:var(--hover)}
+.vp-js .pz .nojs-only{display:none}
+html:not(.vp-js) .pz .js-only{display:none!important}
+/* One card shows: the site SDK's (Python without JavaScript). */
+.pz .pz-card{display:none}
+:root:not([data-sdk]) .pz .pz-card[data-lang="python"],
+:root[data-sdk="python"] .pz .pz-card[data-lang="python"],
+:root[data-sdk="typescript"] .pz .pz-card[data-lang="typescript"],
+:root[data-sdk="go"] .pz .pz-card[data-lang="go"],
+:root[data-sdk="rust"] .pz .pz-card[data-lang="rust"]{display:flex}
+.pz .pz-cards{min-width:0}
+/* ================= The Prism element ================= */
+.pz{--r:12px;position:relative;background:radial-gradient(55% 38% at 50% 56%,var(--glow),transparent 70%),var(--bench);border:1px solid var(--line-strong);border-radius:16px;padding:20px;min-width:0}
+.pz-card{--lc:var(--ink-2);display:flex;flex-direction:column;min-width:0;background:var(--code);border:1px solid var(--line-strong);border-top:4px solid var(--lc);border-radius:var(--r);box-shadow:0 1px 0 rgba(0,0,0,.03),0 10px 24px -18px rgba(0,0,0,.4)}
+.pz-card[data-lang="python"]{--lc:var(--l-py)}
+.pz-card[data-lang="go"]{--lc:var(--l-go)}
+.pz-card[data-lang="rust"]{--lc:var(--l-rs)}
+.pz-card[data-lang="typescript"]{--lc:var(--l-ts)}
+.pz-ch{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;padding:10px 12px 8px;border-bottom:1px solid var(--line)}
+.pz-ch h4{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.pz-ch h4::before{content:"";display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:2px;background:var(--lc);transform:rotate(45deg) translateY(-1px)}
+.pz-pkg{font:12px/1.4 var(--mono);color:var(--ink-2);overflow-wrap:anywhere}
+.pz-tools{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--ink-2)}
+.pz .tg{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 9px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);font-size:12px;font-weight:600;cursor:pointer;color:var(--ink)}
+.pz .tg::before{content:"";width:10px;height:10px;border:1.5px solid currentColor;border-radius:3px;flex:none}
+.pz .tg[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.pz .tg[aria-pressed="true"]::before{content:"✓"/"";border:0;width:auto;height:auto;font-size:11px;line-height:1}
+.pz .tg:hover{background:var(--hover)}
+.pz .tg[aria-pressed="true"]:hover{background:var(--ink)}
+.pz-code{flex:1;margin:0;padding:10px 12px 12px;font-size:13px;line-height:1.72;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;min-width:0}
+.pz-code .ln{display:block;padding-left:4ch;text-indent:-4ch;min-height:1.72em}
+.pz .t-s{color:var(--k-str)}
+.pz .t-f{color:var(--k-fn)}
+.pz .t-y{color:var(--k-num)}
+.pz .t-k{color:var(--k-kw)}
+.pz .j-k{color:var(--ink-2)}
+.pz .j-n{color:var(--k-num)}
+.pz .slot{font:inherit;line-height:20px;min-height:24px;margin:0 1px;padding:1px 3px;border-radius:4px;vertical-align:baseline;text-indent:0}
+.pz .slot.sv{color:var(--ink);background:var(--accent-tint);border:0;border-bottom:2px solid var(--accent-fill);font-weight:650;min-width:4ch;max-width:100%}
+.pz .slot.sv:hover{border-bottom-style:dashed}
+.pz .slot.si{display:inline;cursor:pointer;background:transparent;border:1.5px dashed var(--line-strong);color:var(--ink-2)}
+.pz .slot.si .t-s{color:inherit}
+.pz .slot.si[aria-pressed="true"]{border:0;border-bottom:2px solid var(--accent-fill);background:var(--accent-tint);color:var(--ink);font-weight:650}
+.pz .slot.si[aria-pressed="true"] .t-s{color:var(--k-str)}
+.pz .slot:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.pz .slot-s{border-bottom:2px solid var(--accent-fill)}
+/* Convergence: beams, prism, out-beam */
+/* Result: one definition, one digest */
+.pz-target{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.pz-target select{min-height:30px;padding:0 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink);font:13px var(--mono)}
+.pz-json{margin:0;padding:12px 16px;font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;background:var(--code);border-bottom:1px solid var(--line)}
+.pz-json mark{background:var(--mark);color:inherit;border-radius:3px;box-shadow:inset 0 -2px 0 var(--accent-fill);padding:1px 0}
+.pz-digest{padding:14px 16px 12px}
+.pz-dlabel{margin:0 0 4px;font-size:12px;letter-spacing:.02em;color:var(--ink-2)}
+.pz-dlabel b{color:var(--ink);font-weight:650;letter-spacing:.06em;text-transform:uppercase;margin-right:6px}
+.pz-hex{margin:0;font:650 clamp(14px,1.55vw,19px)/1.4 var(--mono);letter-spacing:.02em;color:var(--ink);overflow-wrap:anywhere;display:flex;flex-wrap:wrap;column-gap:.7ch}
+.pz-band{display:flex;height:12px;margin:10px 0 8px;border-radius:4px;overflow:hidden;gap:1px}
+.pz-band i{flex:1;background:hsl(var(--h) var(--band-s) var(--band-l))}
+.pz-dfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px}
+.pz-delta{margin:0;font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+.pz-delta::before{content:"#"/"";font:700 12px/1 var(--mono);width:18px;height:18px;display:inline-grid;place-items:center;border-radius:4px;border:1px solid var(--line-strong);flex:none}
+.pz-delta[data-k="changed"]{color:var(--ink)}
+.pz-delta[data-k="changed"]::before{content:"≠"/"";border-color:var(--accent-fill)}
+.pz-delta[data-k="same"]{color:var(--ink)}
+.pz-delta[data-k="same"]::before{content:"="/""}
+.pz-honest{margin:0;padding:10px 16px 12px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+/* Motion: one-shot only. Nothing loops; reduced motion removes all of it (JS also skips). */
+/* Compact (in-page) form */
+.pz-compact{padding:16px}
+.pzc-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin-bottom:12px}
+.pzc-top h3{margin:0;font-size:16px;font-weight:700}
+.pz .seg{display:flex;flex-wrap:wrap;gap:2px;margin:0;padding:3px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface)}
+.pz .seg label{position:relative;display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 10px;border-radius:5px;font-size:13px;cursor:pointer;color:var(--ink-2)}
+.pz .seg input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.pz .seg label:has(input:checked){background:var(--ink);color:var(--surface);font-weight:650}
+.pz .seg label:has(input:checked)::before{content:"✓"/"";font-size:11px}
+.pz .seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.pz .seg label::after{content:"";width:8px;height:8px;border-radius:2px;transform:rotate(45deg);background:var(--lc);order:-1}
+.pz .seg [data-l="python"]{--lc:var(--l-py)}
+.pz .seg [data-l="go"]{--lc:var(--l-go)}
+.pz .seg [data-l="rust"]{--lc:var(--l-rs)}
+.pz .seg [data-l="typescript"]{--lc:var(--l-ts)}
+.pzc-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:14px;align-items:start}
+.pzc-side{min-width:0;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden}
+.pzc-mini{display:flex;align-items:center;gap:10px;padding:10px 16px 0;font-size:12px;color:var(--ink-2)}
+.pzc-mini svg{flex:none}
+.pzc-side details{border-top:1px solid var(--line)}
+.pzc-side summary{cursor:pointer;padding:6px 16px;min-height:32px;line-height:20px;font-size:13px;font-weight:600}
+.pzc-side .pz-json{border-top:1px solid var(--line);border-bottom:0}
+.pzc-side .pz-hex{font-size:14px}
+.pzc-side .pz-target{padding:0 16px 12px}
+.pzc-side .pz-honest{border-top:0;padding-top:0}
+.pz-compact{container-type:inline-size}
+@container (max-width:759px){
+.pzc-body{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:640px){
+.pz{padding:14px 12px;border-radius:12px}
+.pz-code{font-size:12.5px}
+}
+.pz p code,.pz li code,.pz summary code{font-size:max(.88em,12px);background:var(--hover);padding:.08em .32em;border-radius:4px}
+
+/* Motion: one-shot only, never with reduced motion (the script skips it too). */
+@keyframes pz-flash{0%{box-shadow:0 0 0 3px var(--lc)}100%{box-shadow:0 0 0 0 transparent}}
+@keyframes pz-dflash{0%{background:var(--mark)}100%{background:transparent}}
+@media (prefers-reduced-motion:no-preference){
+ .pz .pz-card.flash{animation:pz-flash .7s .1s ease-out both}
+ .pz .pz-digest.flash{animation:pz-dflash .9s .15s ease-out both}
+}
+@media (forced-colors:active){.pz .seg label:has(input:checked){outline:2px solid Highlight;outline-offset:-2px}}

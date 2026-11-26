@@ -10,11 +10,19 @@
     "astro": "bun x astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.38.2",
-    "astro": "6.4.8",
-    "sharp": "0.34.5"
+    "@astrojs/markdown-satteri": "0.4.10",
+    "@astrojs/sitemap": "3.7.5",
+    "@astrojs/starlight": "0.43.1",
+    "astro": "7.4.13",
+    "hast-util-from-html": "2.1.0",
+    "hast-util-select": "6.0.5",
+    "hast-util-to-mdast": "10.1.4",
+    "hast-util-to-string": "3.0.1",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-to-markdown": "2.2.4",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
-    "wrangler": "4.162.0"
+    "wrangler": "4.167.0"
   }
 }

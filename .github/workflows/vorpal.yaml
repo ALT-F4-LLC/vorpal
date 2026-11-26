@@ -121,6 +121,15 @@ jobs:
           fi
 
       - run: ./script/dev.sh make TARGET=release test
+
+      # The docs' generated CLI reference (website/src/data/cli/main.json)
+      # must match the clap definitions. `make test` already runs this test;
+      # it is repeated here (already compiled) so a drift shows up as its
+      # own step. Fix: VORPAL_CLI_REFERENCE_WRITE=1 cargo test -p vorpal-cli cli_reference
+      - name: CLI reference data is current
+        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        run: ./script/dev.sh cargo test --offline --release -p vorpal-cli cli_reference
+
       - run: ./script/dev.sh make TARGET=release dist
 
       - run: |
@@ -671,11 +680,168 @@ jobs:
           args: >-
             --root-dir ${{ env.VORPAL_WEBSITE_PATH }}
             --exclude-path ${{ env.VORPAL_WEBSITE_PATH }}/pagefind
+            --exclude-path [.]md$
+            --exclude-path /llms[^/]*[.]txt$
             --max-retries 3
             --no-progress
             --retry-wait-time 5
             --timeout 30
             ${{ env.VORPAL_WEBSITE_PATH }}
+
+  # Docs guardrails: size budgets, accessibility (axe), links and anchors
+  # (lychee) and Lighthouse lab metrics. They build the site directly with
+  # Bun, so they don't wait for the Vorpal artifact builds, and do real work
+  # only when website/, script/website-checks/ or this file change. The tools
+  # live in script/website-checks, outside website/, so the vorpal-website
+  # artifact's sources and install are unchanged.
+  test-website-changes:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA"...HEAD -- \
+            website script/website-checks .github/workflows/vorpal.yaml | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Error reference and CLI reference data: each message in
+  # website/src/content/errors must still be in the Rust or SDK source it
+  # cites, and the generated CLI data is compared with the latest release's
+  # (the Unreleased marks). Runs on every pull request, because a change in
+  # cli/ or sdk/ alone can break a quoted message. Bun only, no install.
+  test-website-reference:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Error messages and CLI version marks
+        run: bun script/website-checks/reference.mjs
+
+  test-website-checks:
+    if: ${{ needs.test-website-changes.outputs.changed == 'true' }}
+    needs:
+      - test-website-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      # Same Bun as the vorpal-website artifact (DEFAULT_BUN_VERSION in the SDKs).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - id: build
+        working-directory: website
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - working-directory: script/website-checks
+        run: |
+          bun install --frozen-lockfile
+          node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Size budgets
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: script/website-checks
+        run: node size.mjs
+
+      # Internal links and #fragments only; test-website-docs checks external links.
+      - name: Links and anchors
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: v0.24.2
+          args: >-
+            --config ${{ github.workspace }}/script/website-checks/lychee.toml
+            --offline
+            --include-fragments
+            --index-files index.html
+            --root-dir ${{ github.workspace }}/website/dist
+            --exclude-path ${{ github.workspace }}/website/dist/pagefind
+            --no-progress
+            ${{ github.workspace }}/website/dist
+
+      - name: Accessibility (axe)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: script/website-checks
+        run: node a11y.mjs
+
+  test-website-lighthouse:
+    if: ${{ needs.test-website-changes.outputs.changed == 'true' }}
+    needs:
+      - test-website-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - working-directory: website
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - working-directory: script/website-checks
+        run: bun install --frozen-lockfile
+
+      - name: Lighthouse CI
+        working-directory: script/website-checks
+        run: node_modules/.bin/lhci autorun --config=lighthouserc.json
+
+      - name: Lighthouse summary
+        if: ${{ !cancelled() && hashFiles('script/website-checks/.lighthouseci/reports/manifest.json') != '' }}
+        working-directory: script/website-checks
+        run: node lighthouse-summary.mjs
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: lighthouse-reports
+          path: script/website-checks/.lighthouseci/reports
+          retention-days: 14
+          include-hidden-files: true
 
   release-gate-check:
     needs:
@@ -982,6 +1148,8 @@ jobs:
           args: >-
             --root-dir ${{ env.VORPAL_WEBSITE_PATH }}
             --exclude-path ${{ env.VORPAL_WEBSITE_PATH }}/pagefind
+            --exclude-path [.]md$
+            --exclude-path /llms[^/]*[.]txt$
             --max-retries 3
             --no-progress
             --retry-wait-time 5

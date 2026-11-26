@@ -1,0 +1,4 @@
+{
+	"$comment": "Known axe violations: \"<page> <scheme> <width> <rule>\" -> affected node count. The check fails on any new key or a higher count. Regenerate with node a11y.mjs --update-baseline, and only to record a deliberate, reviewed exception.",
+	"known": {}
+}

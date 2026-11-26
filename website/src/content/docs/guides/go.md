@@ -1,5 +1,5 @@
 ---
-title: Go SDK
+title: Every guide in Go
 description: Build artifacts and environments with the Vorpal Go SDK.
 ---
 

@@ -1,0 +1,87 @@
+---
+title: Python SDK
+description: "Write your Vorpal config program in Python: install the SDK, see the project layout, then follow any guide with Python already chosen."
+summary: "Write your Vorpal config program in Python: install the SDK, see the project layout, then follow any guide with Python already chosen."
+kind: sdk-hub
+lastUpdated: 2026-11-24
+related:
+  - sdks/typescript
+  - sdks/go
+  - sdks/rust
+  - reference/configuration
+---
+
+<ul class="vp-cards">
+<li class="vp-card"><span class="vp-card-type">Start</span><a href="/getting-started/quickstart/?sdk=python">Quickstart in Python<span class="vp-card-arrow" aria-hidden="true">→</span></a><code>vorpal init</code> with the Python template.</li>
+<li class="vp-card"><span class="vp-card-type">One page</span><a href="/guides/python/">Every guide in Python<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every task, Python examples only, on one page.</li>
+<li class="vp-card"><span class="vp-card-type">API</span><a href="https://pypi.org/project/vorpal-sdk/">vorpal-sdk on PyPI<span class="vp-card-arrow" aria-hidden="true">→</span></a>Version 0.6.0, Python 3.14.</li>
+</ul>
+
+## Install the SDK {#install}
+
+```bash prompt
+uv add vorpal-sdk
+```
+
+Or with pip: `pip install vorpal-sdk`. The package needs Python 3.14 (`>=3.14,<3.15`).
+
+## Project layout {#layout}
+
+This is what `vorpal init` writes for Python, plus the `Vorpal.lock` that [`vorpal prepare`](/reference/cli/prepare/) adds.
+
+```text title="Project layout"
+hello-world/
+├── .gitignore
+├── Vorpal.lock        # written by vorpal prepare; commit it
+├── Vorpal.toml        # language = "python", includes, entrypoint
+├── pyproject.toml     # requires-python = ">=3.14,<3.15", vorpal-sdk>=0.6.0
+├── uv.lock
+└── src/
+    ├── vorpal.py      # the config program
+    └── main.py        # your program
+```
+
+```toml title="Vorpal.toml"
+language = "python"
+
+[source]
+includes = [
+    "pyproject.toml",
+    "uv.lock",
+    "src",
+]
+
+[source.python]
+directory = "."
+entrypoint = "src/vorpal.py"
+```
+
+`language` tells Vorpal to use the Python SDK. `includes` lists only the files the config program needs; keeping it short keeps more builds cached. `[source.python]` sets the folder and the config program's entrypoint. Every key is in the [configuration reference](/reference/configuration/).
+
+## Python facts {#facts}
+
+- Python packages are installed with `uv sync --frozen`, so they are pinned by `uv.lock`.
+- The development environment builder adds the built-in `cpython` and `uv` artifacts, and sets `UV_PYTHON_DOWNLOADS=never` so the shell never fetches its own interpreter.
+- The built-in interpreter is CPython 3.14.7. <span class="vp-pln">Planned: more CPython versions · <b>ENG-366</b></span>
+- `OciImage` in the Python SDK needs `crane` and `rsync` passed in with `with_crane` and `with_rsync`. <span class="vp-pln">Planned · <b>ENG-371</b></span>
+
+## Every guide, in Python {#guides}
+
+Each link opens with Python chosen. Python is the default SDK on this site.
+
+<ul class="vp-ilist">
+<li><a href="/getting-started/quickstart/?sdk=python">Quickstart</a><span>Your first build, with the <code>vorpal init</code> template.</span></li>
+<li><a href="/guides/development-environment/?sdk=python">Add a development environment</a><span>Pinned tools in your shell.</span></li>
+<li><a href="/guides/python/#define-an-artifact">Define an artifact</a><span>Sources, steps and systems.</span></li>
+<li><a href="/guides/python/#define-artifact-dependencies">Define artifact dependencies</a><span>Use one artifact in another.</span></li>
+<li><a href="/guides/python/#secrets">Secrets</a><span>Values a step reads from <code>$VORPAL_SECRET_DIR</code>.</span></li>
+<li><a href="/guides/python/#define-jobs">Define jobs</a><span>Tests and checks as artifacts.</span></li>
+<li><a href="/guides/python/#define-processes">Define processes</a><span>Long-running services.</span></li>
+<li><a href="/guides/python/#define-user-environments">Define user environments</a><span>Tools in every shell, not one project.</span></li>
+<li><a href="/guides/python/#custom-executors">Custom executors</a><span>Run steps with another entrypoint.</span></li>
+<li><a href="/guides/python/#building">Building</a><span>Build, inspect and run artifacts.</span></li>
+</ul>
+
+## API docs {#api}
+
+[vorpal-sdk on PyPI](https://pypi.org/project/vorpal-sdk/). The [SDK concepts](/concepts/artifacts/) and the [CLI reference](/reference/cli/) are shared by all four SDKs.

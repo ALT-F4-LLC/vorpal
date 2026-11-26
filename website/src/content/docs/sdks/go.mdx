@@ -1,0 +1,83 @@
+---
+title: Go SDK
+description: "Write your Vorpal config program in Go: install the SDK, see the project layout, then follow any guide with Go already chosen."
+summary: "Write your Vorpal config program in Go: install the SDK, see the project layout, then follow any guide with Go already chosen."
+kind: sdk-hub
+lastUpdated: 2026-11-24
+related:
+  - sdks/python
+  - sdks/typescript
+  - sdks/rust
+  - reference/configuration
+---
+
+<ul class="vp-cards">
+<li class="vp-card"><span class="vp-card-type">Start</span><a href="/getting-started/quickstart/?sdk=go">Quickstart in Go<span class="vp-card-arrow" aria-hidden="true">→</span></a><code>vorpal init</code> with the Go template.</li>
+<li class="vp-card"><span class="vp-card-type">One page</span><a href="/guides/go/">Every guide in Go<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every task, Go examples only, on one page.</li>
+<li class="vp-card"><span class="vp-card-type">API</span><a href="https://pkg.go.dev/github.com/ALT-F4-LLC/vorpal/sdk/go">The Go SDK on pkg.go.dev<span class="vp-card-arrow" aria-hidden="true">→</span></a>Module github.com/ALT-F4-LLC/vorpal/sdk/go.</li>
+</ul>
+
+## Install the SDK {#install}
+
+```bash prompt
+go get github.com/ALT-F4-LLC/vorpal/sdk/go
+```
+
+## Project layout {#layout}
+
+This is what `vorpal init` writes for Go, plus the `Vorpal.lock` that [`vorpal prepare`](/reference/cli/prepare/) adds.
+
+```text title="Project layout"
+hello-world/
+├── Vorpal.lock        # written by vorpal prepare; commit it
+├── Vorpal.toml        # language = "go", includes, directory
+├── go.mod
+├── go.sum
+└── cmd/
+    ├── vorpal/
+    │   └── main.go    # the config program
+    └── hello-world/
+        └── main.go    # your program
+```
+
+```toml title="Vorpal.toml"
+language = "go"
+
+[source]
+includes = [
+    "cmd/vorpal",
+    "go.mod",
+    "go.sum",
+    "internal/vorpal"
+]
+
+[source.go]
+directory = "cmd/vorpal"
+```
+
+`language` tells Vorpal to use the Go SDK. `includes` lists only the files the config program needs; keeping it short keeps more builds cached. `[source.go]` sets the folder of the config program's `main` package. The layout follows the <a href="https://github.com/golang-standards/project-layout">Standard Go Project Layout</a>. Every key is in the [configuration reference](/reference/configuration/).
+
+## Go facts {#facts}
+
+- The development environment builder adds Go, `goimports`, `gopls`, `staticcheck` and `protoc`. `WithoutProtoc()` leaves `protoc` out.
+
+## Every guide, in Go {#guides}
+
+Each link opens with Go chosen.
+
+<ul class="vp-ilist">
+<li><a href="/getting-started/quickstart/?sdk=go">Quickstart</a><span>Your first build, with the <code>vorpal init</code> template.</span></li>
+<li><a href="/guides/development-environment/?sdk=go">Add a development environment</a><span>Pinned tools in your shell.</span></li>
+<li><a href="/guides/go/#define-an-artifact">Define an artifact</a><span>Sources, steps and systems.</span></li>
+<li><a href="/guides/go/#define-artifact-dependencies">Define artifact dependencies</a><span>Use one artifact in another.</span></li>
+<li><a href="/guides/go/#secrets">Secrets</a><span>Values a step reads from <code>$VORPAL_SECRET_DIR</code>.</span></li>
+<li><a href="/guides/go/#define-jobs">Define jobs</a><span>Tests and checks as artifacts.</span></li>
+<li><a href="/guides/go/#define-processes">Define processes</a><span>Long-running services.</span></li>
+<li><a href="/guides/go/#define-user-environments">Define user environments</a><span>Tools in every shell, not one project.</span></li>
+<li><a href="/guides/go/#custom-executors">Custom executors</a><span>Run steps with another entrypoint.</span></li>
+<li><a href="/guides/go/#building">Building</a><span>Build, inspect and run artifacts.</span></li>
+</ul>
+
+## API docs {#api}
+
+[The Go SDK on pkg.go.dev](https://pkg.go.dev/github.com/ALT-F4-LLC/vorpal/sdk/go). The [SDK concepts](/concepts/artifacts/) and the [CLI reference](/reference/cli/) are shared by all four SDKs.

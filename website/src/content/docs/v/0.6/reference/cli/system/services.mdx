@@ -1,0 +1,54 @@
+---
+slug: v/0.6/reference/cli/system/services
+title: vorpal system services start
+description: Start the agent daemon, registry and worker on a Unix socket or a TCP port.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - v/0.6/reference/cli/system/keys
+  - v/0.6/concepts/architecture
+---
+
+import CliSynopsis from '../../../../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="system services start" />
+
+## Options {#options}
+
+<CliEntries command="system services start" kind="options" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Transport {#transport}
+
+- **Unix socket** (the default): `/var/lib/vorpal/vorpal.sock`. `VORPAL_SOCKET_PATH` changes the path.
+- **TCP:** with `--port`, on `[::]:<port>`.
+- **TLS over TCP:** with `--tls`; the port is 23151 unless `--port` sets another.
+
+## Examples {#examples}
+
+```bash prompt
+# Start every service on the Unix socket
+vorpal system services start
+# Start with TLS
+vorpal system services start --tls
+# Start on a TCP port
+vorpal system services start --port 23151
+# Store archives in S3
+vorpal system services start --registry-backend s3 --registry-backend-s3-bucket my-bucket
+# Start only the registry
+vorpal system services start --services registry
+# Turn on health checks
+vorpal system services start --health-check
+# Check tokens from an OIDC issuer
+vorpal system services start \
+  --issuer https://id.example.com/realms/vorpal \
+  --issuer-audience vorpal \
+  --issuer-client-id worker \
+  --issuer-client-secret-file /etc/vorpal/client-secret
+```

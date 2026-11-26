@@ -1,0 +1,858 @@
+/*
+ * Content components (docs-redesign stage 4, design-system.md §5 to §11):
+ * SDK example groups, CLI blocks and expected output, callouts, bench steps,
+ * Check / Fix / Verify causes, reference entries and diagram frames.
+ * Colours, type and sizes come from tokens.css.
+ *
+ * Unlayered, so these win over Starlight's and Expressive Code's layered
+ * rules. The SDK hiding rule lives here, in the main stylesheet, so it
+ * applies before first paint (critique-engineering M1).
+ */
+
+/* ===== SDK example group (SdkGroup.astro) ===== */
+.vp-sdkg {
+	margin-block: 0.75rem 1rem;
+	border: 1px solid var(--vp-line-strong);
+	border-radius: var(--vp-r-lg);
+	background: var(--vp-code);
+	min-width: 0;
+}
+.vp-sdkg-top {
+	border-bottom: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-lg) var(--vp-r-lg) 0 0;
+	background: var(--vp-chrome);
+}
+.vp-sdk-tabs {
+	display: flex;
+	flex-wrap: wrap;
+}
+.vp-sdk-tabs [role='tab'] {
+	position: relative;
+	min-height: 2.5rem;
+	padding: 0 0.875rem;
+	border: 0;
+	background: none;
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-ui) / 1 var(--vp-sans);
+	cursor: pointer;
+}
+.vp-sdk-tabs [role='tab']:hover {
+	color: var(--vp-ink);
+}
+.vp-sdk-tabs [role='tab']:focus-visible {
+	outline-offset: -4px;
+}
+.vp-sdk-tabs [role='tab']::after {
+	content: '';
+	position: absolute;
+	inset: auto 0.625rem -1px;
+	height: 3px;
+	border-radius: 3px 3px 0 0;
+}
+/* The selected tab follows <html data-sdk>, so it is right before scripts run. */
+:root[data-sdk='python'] [role='tab'][data-sdk='python'],
+:root[data-sdk='typescript'] [role='tab'][data-sdk='typescript'],
+:root[data-sdk='go'] [role='tab'][data-sdk='go'],
+:root[data-sdk='rust'] [role='tab'][data-sdk='rust'] {
+	color: var(--vp-ink);
+}
+:root[data-sdk='python'] [role='tab'][data-sdk='python']::after,
+:root[data-sdk='typescript'] [role='tab'][data-sdk='typescript']::after,
+:root[data-sdk='go'] [role='tab'][data-sdk='go']::after,
+:root[data-sdk='rust'] [role='tab'][data-sdk='rust']::after {
+	background: var(--vp-accent-fill);
+}
+.sl-markdown-content .vp-sdkg > * {
+	margin-top: 0;
+}
+.vp-sdk-p + .vp-sdk-p {
+	border-top: 1px solid var(--vp-line);
+}
+.vp-sdkg .vp-sdk-h {
+	margin: 0;
+	padding: 0.5rem 0.75rem;
+	border-bottom: 1px solid var(--vp-line);
+	background: var(--vp-chrome);
+	color: var(--vp-ink-2);
+	font: 600 0.8125rem / 1.3 var(--vp-sans);
+}
+.vp-sdk-p:first-of-type .vp-sdk-h {
+	border-radius: var(--vp-r-lg) var(--vp-r-lg) 0 0;
+}
+.vp-sdkg .expressive-code {
+	margin: 0;
+}
+.vp-sdkg .expressive-code .frame {
+	--header-border-radius: 0;
+	box-shadow: none;
+}
+.vp-sdkg .expressive-code pre,
+.vp-sdkg .expressive-code .frame .header::before {
+	border: 0;
+	border-radius: 0 0 var(--vp-r-lg) var(--vp-r-lg);
+}
+.vp-sdk-na {
+	margin: 0;
+	padding: 0.875rem 1rem;
+}
+/* With JavaScript: one SDK's panels, headings kept for screen readers. */
+.vp-js .vp-sdk-p {
+	display: none;
+	border-top: 0;
+}
+.vp-js[data-sdk='python'] .vp-sdk-p[data-sdk-panel='python'],
+.vp-js[data-sdk='typescript'] .vp-sdk-p[data-sdk-panel='typescript'],
+.vp-js[data-sdk='go'] .vp-sdk-p[data-sdk-panel='go'],
+.vp-js[data-sdk='rust'] .vp-sdk-p[data-sdk-panel='rust'] {
+	display: block;
+}
+.vp-js .vp-sdkg .vp-sdk-h {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
+}
+.vp-js .vp-sdkg .expressive-code pre {
+	border-radius: 0 0 var(--vp-r-lg) var(--vp-r-lg);
+}
+
+/* ===== CLI block and Expected output (src/plugins/ec-cli.mjs) ===== */
+/* The prompt is drawn, not in the code, so Copy never takes it. */
+.vp-cli .ec-line.vp-cmd .code::before {
+	content: '$ ';
+	color: var(--vp-ink-2);
+	user-select: none;
+}
+.expressive-code:has(.vp-cli) + .expressive-code:has(.vp-output) {
+	margin-top: -1px;
+}
+.expressive-code:has(.vp-cli):has(+ .expressive-code .vp-output) pre {
+	border-end-start-radius: 0;
+	border-end-end-radius: 0;
+}
+.expressive-code:has(.vp-cli) + .expressive-code .vp-output .header,
+.expressive-code:has(.vp-cli) + .expressive-code .vp-output .header::before {
+	border-radius: 0;
+}
+.vp-output.frame.has-title .header {
+	background: var(--vp-bench);
+}
+.vp-output.frame.has-title .title {
+	margin: 0;
+	padding: 0.5rem 0.75rem 0;
+	border: 0;
+	background: none;
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.2 var(--vp-sans);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+.vp-output.frame.has-title .title::after {
+	content: none;
+}
+.vp-output.frame pre {
+	border-top: 0;
+	background: var(--vp-bench);
+}
+/* A value Vorpal fills in at run time: dashed, never an invented digest. */
+.vp-ph {
+	border-bottom: 1px dashed var(--vp-line-strong);
+	color: var(--vp-ink-2);
+}
+.vp-ph span {
+	color: inherit !important;
+}
+
+/* ===== Callouts (src/plugins/callouts.mjs) ===== */
+.vp-callout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	max-width: 68ch;
+	margin-block: 1rem;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--vp-line);
+	border-left: 4px solid var(--vp-line-strong);
+	border-radius: var(--vp-r-md);
+	background: var(--vp-bench);
+	font-size: 0.9375rem;
+}
+.sl-markdown-content .vp-callout-label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0;
+	color: var(--vp-ink);
+	font: 650 0.8125rem / 1.4 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.vp-callout-icon {
+	flex: none;
+	width: 1.25rem;
+	height: 1.25rem;
+	color: var(--vp-ink-2);
+}
+.sl-markdown-content .vp-callout-body {
+	margin: 0.25rem 0 0 1.75rem;
+}
+.vp-callout-body > :first-child {
+	margin-top: 0;
+}
+.vp-callout--warn {
+	border-left-color: var(--vp-warn);
+	background: var(--vp-warn-tint);
+}
+.vp-callout--warn .vp-callout-icon,
+.vp-callout--warn .vp-callout-label {
+	color: var(--vp-warn);
+}
+.vp-callout--danger {
+	border-left-color: var(--vp-err);
+	background: var(--vp-err-tint);
+}
+.vp-callout--danger .vp-callout-icon,
+.vp-callout--danger .vp-callout-label {
+	color: var(--vp-err);
+}
+.vp-callout--plan {
+	border-style: dashed;
+	border-left: 4px solid var(--vp-ink-2);
+	background: transparent;
+}
+.vp-callout-issue {
+	padding: 1px 6px;
+	border: 1px dashed var(--vp-line-strong);
+	border-radius: var(--vp-r-sm);
+	font: 600 var(--vp-fs-label) / 1.3 var(--vp-mono);
+	letter-spacing: 0;
+}
+
+/* ===== Bench steps (kind: tutorial, how-to; src/plugins/sectionize.mjs) ===== */
+.sl-markdown-content .vp-steps {
+	counter-reset: vp-step;
+	margin: 1rem 0 0;
+	padding: 0;
+	list-style: none;
+}
+.sl-markdown-content .vp-step {
+	container-type: inline-size;
+	counter-increment: vp-step;
+	margin: 0 0 0.5rem;
+	padding: 1.25rem 0 0.75rem;
+	border-top: 1px solid var(--vp-line);
+}
+.vp-step-g {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 0.25rem 2rem;
+}
+.vp-step-t > :first-child,
+.vp-step-c > :first-child {
+	margin-top: 0;
+}
+.vp-step-t p {
+	max-width: 60ch;
+}
+.vp-step .sl-heading-wrapper.level-h2 {
+	display: flex;
+	align-items: baseline;
+	gap: 0.625rem;
+}
+/* The number is the list's; drawn beside the heading, not in its text. */
+.vp-step .sl-heading-wrapper.level-h2::before {
+	content: counter(vp-step) / '';
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 1.625rem;
+	height: 1.625rem;
+	border: 1.5px solid var(--vp-ink);
+	border-radius: 50%;
+	font: 650 0.8125rem / 1 var(--vp-sans);
+	transform: translateY(-2px);
+}
+.vp-step h2 {
+	font-size: var(--vp-fs-h3);
+}
+.vp-step-c {
+	align-self: start;
+	min-width: 0;
+}
+.vp-step-c > * + * {
+	margin-top: 0.75rem;
+}
+@container (min-width: 760px) {
+	.vp-step-g:not(.vp-step-g--text) {
+		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+	}
+	.vp-step-c {
+		padding: 0.75rem;
+		border: 1px solid var(--vp-line);
+		border-radius: var(--vp-r-lg);
+		background: var(--vp-bench);
+	}
+}
+
+/* ===== Check / Fix / Verify (kind: troubleshooting) ===== */
+.sl-markdown-content {
+	counter-reset: vp-cause;
+}
+.vp-cause {
+	counter-increment: vp-cause;
+}
+/* Causes are numbered, most likely first; the number is beside the heading. */
+.vp-cause > .sl-heading-wrapper::before {
+	content: counter(vp-cause) '.' / '';
+	margin-inline-end: 0.5rem;
+	font: 650 var(--vp-fs-h3) / 1.25 var(--vp-sans);
+}
+.vp-cause > .sl-heading-wrapper {
+	display: flex;
+	align-items: baseline;
+}
+.vp-cause {
+	margin: 0.875rem 0 1.375rem;
+	border: 1px solid var(--vp-line-strong);
+	border-top: 3px solid var(--vp-ink);
+	border-radius: 0 0 var(--vp-r-md) var(--vp-r-md);
+	background: var(--vp-surface);
+}
+.sl-markdown-content .vp-cause > .sl-heading-wrapper {
+	margin: 0;
+	padding: 0.75rem 1rem 0.625rem;
+}
+.sl-markdown-content .vp-cause-why {
+	margin: 0;
+	padding: 0 1rem 0.75rem;
+	color: var(--vp-ink-2);
+	font-size: 0.9375rem;
+}
+.sl-markdown-content .vp-cfv {
+	display: grid;
+	grid-template-columns: 6.75rem minmax(0, 1fr);
+	margin: 0;
+}
+.sl-markdown-content .vp-cfv :is(dt, dd) {
+	margin: 0;
+	padding: 0.75rem 1rem;
+	border-top: 1px solid var(--vp-line);
+}
+.sl-markdown-content .vp-cfv dt {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.5rem;
+	color: var(--vp-ink);
+	font: 650 0.78125rem / 1.6 var(--vp-sans);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+.vp-cfv dt svg {
+	flex: none;
+	width: 1.125rem;
+	height: 1.125rem;
+	margin-top: 1px;
+}
+.vp-cfv dd {
+	min-width: 0;
+}
+.vp-cfv dd > :first-child {
+	margin-top: 0;
+}
+.vp-cfv .vp-cfv-fix {
+	background: var(--vp-bench);
+}
+.sl-markdown-content .vp-cfv dt.vp-cfv-verify {
+	color: var(--vp-accent);
+}
+@media (max-width: 35rem) {
+	.sl-markdown-content .vp-cfv {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sl-markdown-content .vp-cfv dd {
+		border-top: 0;
+		padding-top: 0;
+	}
+}
+
+/* ===== Reference entries (kind: reference-*) and <Props> ===== */
+.sl-markdown-content .vp-refent {
+	margin-top: 1rem;
+	padding: 1.125rem 0 0.875rem;
+	border-top: 1px solid var(--vp-line);
+}
+.vp-refent:has(:target) {
+	padding-left: 0.875rem;
+	background: linear-gradient(var(--vp-accent-tint), var(--vp-accent-tint)) no-repeat 0 0 / 4px 100%;
+}
+.sl-markdown-content .vp-refent > .sl-heading-wrapper {
+	margin-top: 0;
+}
+.vp-refent :is(h3, h4) code {
+	padding: 0;
+	background: none;
+	font: 650 1rem / 1.4 var(--vp-mono);
+}
+/* The link control: Starlight's anchor link, shown as a 28px button. */
+.sl-markdown-content .vp-refent > .sl-heading-wrapper {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+}
+.sl-markdown-content .vp-refent > .sl-heading-wrapper > :first-child {
+	padding-inline-end: 0;
+}
+.sl-markdown-content .vp-refent .sl-anchor-link {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	margin-inline-start: auto;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-sm);
+	background: var(--vp-surface);
+	color: var(--vp-ink-2);
+	opacity: 1;
+}
+.sl-markdown-content .vp-refent .sl-anchor-link:hover {
+	border-color: var(--vp-line-strong);
+	color: var(--vp-ink);
+}
+.sl-markdown-content .vp-props {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem 1.125rem;
+	margin: 0.5rem 0;
+	font-size: var(--vp-fs-ui);
+}
+.sl-markdown-content .vp-props > div {
+	display: flex;
+	margin: 0;
+	align-items: baseline;
+	gap: 0.375rem;
+}
+.sl-markdown-content .vp-props :is(dt, dd) {
+	margin: 0;
+	min-width: 0;
+}
+.vp-props dt {
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.4 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+/* Generated CLI entries (components/cli): the value after the flag, the
+   flag index and the "Why" line. */
+.vp-refent .vp-argv {
+	margin-inline-start: 0.375rem;
+	color: var(--vp-ink-2);
+	font: 500 0.9375rem / 1.4 var(--vp-mono);
+}
+.sl-markdown-content .vp-findex {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 1rem;
+	margin: 0.75rem 0 0.5rem;
+	padding: 0;
+	list-style: none;
+	font: 500 var(--vp-fs-ui) / 1.6 var(--vp-mono);
+}
+.sl-markdown-content .vp-findex li {
+	margin: 0;
+}
+.sl-markdown-content .vp-why {
+	color: var(--vp-ink-2);
+	font-size: var(--vp-fs-ui);
+}
+.sl-markdown-content .vp-cmdlist {
+	padding: 0;
+	list-style: none;
+}
+.sl-markdown-content .vp-cmdlist li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.25rem 0.75rem;
+	margin: 0;
+	padding: 0.5rem 0;
+	border-top: 1px solid var(--vp-line);
+	scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+}
+.vp-cmdlist-s {
+	flex: 1 1 20rem;
+	color: var(--vp-ink-2);
+}
+
+/* Error entries (ErrorEntries.astro): the Error tag, per-SDK wording and
+   the Printed by / What it means / Fix rows. */
+.vp-errent h3 {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.25rem 0.625rem;
+	overflow-wrap: anywhere;
+}
+.vp-etag {
+	padding: 1px 6px;
+	border: 1px solid var(--vp-err);
+	border-radius: var(--vp-r-sm);
+	color: var(--vp-err);
+	font: 600 var(--vp-fs-label) / 1.4 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.sl-markdown-content .vp-variants {
+	margin: 0.5rem 0;
+	padding: 0;
+	list-style: none;
+	font-size: var(--vp-fs-ui);
+}
+.sl-markdown-content .vp-variants li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.125rem 0.625rem;
+	margin: 0.25rem 0;
+}
+.vp-who {
+	min-width: 9rem;
+	color: var(--vp-ink-2);
+	font-weight: 600;
+}
+.sl-markdown-content .vp-errdl {
+	display: grid;
+	grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+	gap: 0.5rem 1rem;
+	margin: 0.75rem 0 0;
+}
+.sl-markdown-content .vp-errdl dt {
+	margin: 0;
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.9 var(--vp-sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.sl-markdown-content .vp-errdl dd {
+	margin: 0;
+	min-width: 0;
+}
+.sl-markdown-content .vp-errdl dd > :first-child {
+	margin-top: 0;
+}
+@media (max-width: 50rem) {
+	.sl-markdown-content .vp-errdl {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.125rem;
+	}
+	.sl-markdown-content .vp-errdl dd {
+		margin-bottom: 0.5rem;
+	}
+}
+
+/* ===== Diagram frame (Diagram.astro) ===== */
+.vp-dfig {
+	margin-block: 1.125rem;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-lg);
+	background: var(--vp-bench);
+}
+.vp-dfig figure {
+	margin: 0;
+	padding: 1.125rem;
+}
+.vp-dfig svg {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	margin-inline: auto;
+}
+.vp-dtext {
+	padding: 0.75rem 1.125rem 0.875rem;
+	border-top: 1px solid var(--vp-line);
+	font-size: 0.90625rem;
+}
+.vp-dtext-h {
+	margin: 0 0 0.375rem;
+	color: var(--vp-ink-2);
+	font: 650 var(--vp-fs-label) / 1.3 var(--vp-sans);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+.vp-dtext ul {
+	margin: 0;
+	padding-left: 1.25rem;
+}
+.vp-dg-box {
+	fill: var(--vp-tile);
+	stroke: var(--vp-line-strong);
+	stroke-width: 1.5;
+}
+.vp-dg-box.hot {
+	stroke: var(--vp-accent-fill);
+	stroke-width: 2;
+}
+.vp-dg-t {
+	fill: var(--vp-ink);
+	font: 600 15px var(--vp-sans);
+}
+.vp-dg-s {
+	fill: var(--vp-ink-2);
+	font: 13px var(--vp-sans);
+}
+.vp-dg-m {
+	fill: var(--vp-ink-2);
+	font: 13px var(--vp-mono);
+}
+.vp-dg-l {
+	fill: none;
+	stroke: var(--vp-route);
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+.vp-dg-l.hot {
+	stroke: var(--vp-accent-fill);
+}
+/* A request with no files on it (the CLI's build request to the worker). */
+.vp-dg-l.vp-dg-req {
+	stroke-dasharray: 6 5;
+}
+.vp-dg-a {
+	fill: var(--vp-route);
+}
+
+/* ===== Content pages (docs-redesign step 6) ===== */
+/* Facts box: "You need / You end up with / Time" (tutorial and how-to). */
+.sl-markdown-content .vp-facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 4px 16px;
+	padding: 12px 16px;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-lg);
+	background: var(--vp-bench);
+	font-size: var(--vp-fs-small);
+}
+.sl-markdown-content .vp-facts > * {
+	margin: 0;
+}
+.sl-markdown-content .vp-facts dt {
+	color: var(--vp-ink);
+	font-weight: 650;
+}
+.sl-markdown-content .vp-facts dd {
+	color: var(--vp-ink-2);
+}
+@media (max-width: 35rem) {
+	.sl-markdown-content .vp-facts {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sl-markdown-content .vp-facts dd {
+		margin-bottom: 6px;
+	}
+}
+/* "If this fails:" under a step's text. */
+.sl-markdown-content .vp-iffail {
+	color: var(--vp-ink-2);
+	font-size: var(--vp-fs-small);
+}
+
+/* Inline Planned mark, for an item in a list or row (the block form is a
+   callout). Word, dashed border and issue id; never colour alone. */
+.vp-pln {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	min-height: 22px;
+	padding: 1px 7px;
+	border: 1px dashed var(--vp-line-strong);
+	border-radius: var(--vp-r-sm);
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.2 var(--vp-sans);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	vertical-align: middle;
+}
+.vp-pln b {
+	color: var(--vp-ink);
+	font-weight: 650;
+	letter-spacing: 0;
+	text-transform: none;
+}
+
+/* Index lists: a link and its one line (SDK hubs). */
+.sl-markdown-content .vp-ilist {
+	padding: 0;
+	border-top: 1px solid var(--vp-line);
+	list-style: none;
+}
+.sl-markdown-content .vp-ilist li {
+	display: grid;
+	grid-template-columns: minmax(0, 15em) minmax(0, 1fr);
+	gap: 2px 16px;
+	margin: 0;
+	padding: 9px 0;
+	border-bottom: 1px solid var(--vp-line);
+}
+.sl-markdown-content .vp-ilist a {
+	font-weight: 600;
+}
+.sl-markdown-content .vp-ilist span {
+	color: var(--vp-ink-2);
+}
+@media (max-width: 35rem) {
+	.sl-markdown-content .vp-ilist li {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* Route cards inside content (SDK hub, 404): the footer's Related cards. */
+.sl-markdown-content .vp-cards {
+	padding: 0;
+}
+.sl-markdown-content .vp-cards .vp-card {
+	margin: 0;
+}
+
+/* Comparison rows: one row per question, the other tool then Vorpal. */
+.sl-markdown-content .vp-cmp {
+	display: grid;
+	grid-template-columns: 11em minmax(0, 1fr);
+	border-top: 1px solid var(--vp-line);
+}
+.sl-markdown-content .vp-cmp > * {
+	margin: 0;
+	padding: 9px 0;
+	border-bottom: 1px solid var(--vp-line);
+}
+.sl-markdown-content .vp-cmp dt {
+	padding-inline-end: 16px;
+	color: var(--vp-ink);
+	font-weight: 650;
+}
+.sl-markdown-content .vp-cmp .vp-vs {
+	display: block;
+	margin-top: 2px;
+	color: var(--vp-ink-2);
+	font-size: var(--vp-fs-small);
+}
+.sl-markdown-content .vp-cmp .vp-vs b {
+	color: var(--vp-ink);
+	font-weight: 600;
+}
+@media (max-width: 35rem) {
+	.sl-markdown-content .vp-cmp {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sl-markdown-content .vp-cmp dt {
+		padding-bottom: 0;
+		border-bottom: 0;
+	}
+}
+.sl-markdown-content .vp-fn {
+	margin-inline-start: 3px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	line-height: 0;
+	text-decoration: none;
+	vertical-align: super;
+}
+.sl-markdown-content .vp-fn:hover {
+	text-decoration: underline;
+}
+.sl-markdown-content .vp-choose {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+}
+.sl-markdown-content .vp-choose > p {
+	margin: 0;
+	padding: 10px 14px;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-md);
+	font-size: var(--vp-fs-small);
+}
+.sl-markdown-content .vp-choose b {
+	display: block;
+}
+@media (max-width: 35rem) {
+	.sl-markdown-content .vp-choose {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+.sl-markdown-content .vp-srcs {
+	color: var(--vp-ink-2);
+	font-size: var(--vp-fs-small);
+}
+.sl-markdown-content .vp-srcs li {
+	margin: 0 0 2px;
+}
+
+/* 404: the label above the title, the search form and the site map. */
+.sl-markdown-content .vp-sbox {
+	display: flex;
+	gap: 8px;
+	max-width: 36rem;
+}
+.sl-markdown-content .vp-sbox input {
+	flex: 1;
+	min-width: 0;
+	min-height: 42px;
+	padding: 0 12px;
+	border: 1px solid var(--vp-line-strong);
+	border-radius: var(--vp-r-md);
+	background: var(--vp-surface);
+	color: var(--vp-ink);
+	font: inherit;
+}
+.sl-markdown-content .vp-sbox button {
+	min-height: 42px;
+	margin: 0;
+}
+.sl-markdown-content .vp-sbox {
+	margin-bottom: 1.5rem;
+}
+.sl-markdown-content .vp-sitemap > div {
+	margin-top: 0;
+}
+.sl-markdown-content .vp-sitemap h3 {
+	margin: 0.375rem 0 0.125rem;
+	color: var(--vp-ink-2);
+	font: 600 var(--vp-fs-label) / 1.3 var(--vp-sans);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+.sl-markdown-content .vp-sitemap ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.sl-markdown-content .vp-sitemap li {
+	margin: 0;
+}
+.sl-markdown-content .vp-sitemap a {
+	display: inline-flex;
+	min-height: 28px;
+	align-items: center;
+}
+
+/* ===== Forced colours ===== */
+@media (forced-colors: active) {
+	:root[data-sdk] .vp-sdk-tabs [role='tab'][aria-selected='true']::after {
+		background: Highlight;
+		forced-color-adjust: none;
+	}
+	.vp-callout,
+	.vp-cause,
+	.vp-refent,
+	.vp-dfig {
+		border: 1px solid CanvasText;
+	}
+}

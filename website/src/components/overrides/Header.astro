@@ -1,0 +1,316 @@
+---
+// Site header (docs-redesign stage 4, decision 5 and design-system.md §1).
+//
+// Order: Menu (below 50rem, JS only), logo, the six sections, Search, SDK,
+// version, GitHub, theme. Breakpoints are Starlight's own:
+// - from 72rem (1152px) the sections sit in the header;
+// - from 50rem (800px) to 72rem they sit in a native <details> "Sections"
+//   disclosure (no JS, no focus trap);
+// - below 50rem one Menu, a modal dialog, holds the sections, the current
+//   section's pages, SDK, theme, version and GitHub. Without JS the Menu
+//   cannot open, so the "Sections" disclosure stays instead.
+// Starlight's Search, SocialIcons and ThemeSelect are used as they are.
+import { Icon } from '@astrojs/starlight/components';
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+import Search from './Search.astro';
+import ThemeSelect from './ThemeSelect.astro';
+import SidebarTree from '../SidebarTree.astro';
+import { LATEST_RELEASE } from '../../versions.mjs';
+import { versionLinks } from '../../version-routes';
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+const { sections, extra, snapshot } = Astro.locals.vorpalNav;
+const version = LATEST_RELEASE;
+const github = 'https://github.com/ALT-F4-LLC/vorpal';
+const releaseNotes = `${github}/releases/tag/${version}`;
+
+// The version switcher (design-system.md §14): main, then each version
+// snapshot, each linking this page there, or that version's home when it
+// has no such page. `data-vp-version` keeps src/middleware.ts from moving
+// these links into the snapshot.
+const versions = await versionLinks(Astro.url.pathname);
+const current = snapshot ? snapshot.slug : 'main';
+const intro = snapshot
+	? `Docs for release ${snapshot.release}, frozen when it was released.`
+	: `Docs for main. Latest release ${version}. Anything not in ${version} is marked Unreleased.`;
+const vmeta = (v: (typeof versions)[number]) => {
+	const what = v.snapshot
+		? `${v.snapshot.release}${v.snapshot.release === version ? ', latest release' : ''}`
+		: 'updated on every push';
+	if (v.current) return `these docs, ${what}`;
+	return v.samePage ? what : `${what}; not on this page, opens its home`;
+};
+
+/** Site order for SDKs (team decision 2); Python is the default. */
+const sdks = [
+	{ value: 'python', label: 'Python' },
+	{ value: 'typescript', label: 'TypeScript' },
+	{ value: 'go', label: 'Go' },
+	{ value: 'rust', label: 'Rust' },
+];
+const themes = [
+	{ value: 'auto', label: 'Auto' },
+	{ value: 'light', label: 'Light' },
+	{ value: 'dark', label: 'Dark' },
+];
+---
+
+<div class="vp-header">
+	<vp-menu class="vp-menu vp-jsonly">
+		<button
+			type="button"
+			class="vp-btn vp-menu-btn"
+			aria-haspopup="dialog"
+			aria-expanded="false"
+			aria-controls="vp-menu-dialog"
+		>
+			<Icon name="bars" size="1rem" />
+			<span>Menu</span>
+		</button>
+		<dialog id="vp-menu-dialog" class="vp-menu-dialog" aria-labelledby="vp-menu-title">
+			<div class="vp-menu-head">
+				<h2 id="vp-menu-title" class="sr-only">Menu</h2>
+				<a class="vp-logo" href={siteTitleHref}>
+					<svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true" focusable="false">
+						<rect x="1.5" y="1.5" width="19" height="19" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+						<rect x="5" y="12" width="12" height="4" rx="1" fill="var(--vp-accent-fill)"></rect>
+						<rect x="5" y="6" width="7" height="2.4" rx="1" fill="currentColor"></rect>
+					</svg>
+					<span translate="no">{siteTitle}</span>
+				</a>
+				<button type="button" class="vp-btn" data-close>Close</button>
+			</div>
+			<div class="vp-menu-body">
+				<p class="vp-label" id="vp-menu-sections">Sections</p>
+				<ul class="vp-menu-sections" aria-labelledby="vp-menu-sections">
+					{
+						[...sections, ...extra].map((s) => (
+							<li>
+								<a href={s.href} aria-current={s.current ? 'true' : undefined}>
+									{s.label}
+								</a>
+								{s.current && s.group && <SidebarTree entries={s.group.entries} />}
+							</li>
+						))
+					}
+				</ul>
+				<fieldset class="vp-menu-set">
+					<legend>SDK for all examples</legend>
+					{
+						sdks.map((o) => (
+							<label>
+								<input type="radio" name="vp-menu-sdk" value={o.value} data-vp-sdk-radio />
+								{o.label}
+							</label>
+						))
+					}
+				</fieldset>
+				<fieldset class="vp-menu-set">
+					<legend>Theme</legend>
+					{
+						themes.map((o) => (
+							<label>
+								<input type="radio" name="vp-menu-theme" value={o.value} data-vp-theme-radio />
+								{o.label}
+							</label>
+						))
+					}
+				</fieldset>
+				<p class="vp-label" id="vp-menu-version">Version</p>
+				<p class="vp-menu-text">
+					{intro} <a href={releaseNotes} data-vp-version>Release notes</a>
+				</p>
+				<ul class="vp-menu-versions" aria-labelledby="vp-menu-version">
+					{
+						versions.map((v) => (
+							<li>
+								{v.current ? (
+									<span aria-current="true">{v.label}</span>
+								) : (
+									<a href={v.href} data-vp-version>
+										{v.label}
+									</a>
+								)}{' '}
+								<span class="vp-vmeta">{vmeta(v)}</span>
+							</li>
+						))
+					}
+				</ul>
+				<ul class="vp-menu-links">
+					<li><a href={github}>GitHub</a></li>
+				</ul>
+			</div>
+		</dialog>
+	</vp-menu>
+
+	<a class="vp-logo" href={siteTitleHref}>
+		<svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true" focusable="false">
+			<rect x="1.5" y="1.5" width="19" height="19" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+			<rect x="5" y="12" width="12" height="4" rx="1" fill="var(--vp-accent-fill)"></rect>
+			<rect x="5" y="6" width="7" height="2.4" rx="1" fill="currentColor"></rect>
+		</svg>
+		<span translate="no">{siteTitle}</span>
+	</a>
+
+	<nav class="vp-nav" aria-label="Sections">
+		{
+			sections.map((s) => (
+				<a href={s.href} aria-current={s.current ? 'true' : undefined}>
+					{s.label}
+				</a>
+			))
+		}
+	</nav>
+
+	<details class="vp-secs vp-pop-wrap">
+		<summary class="vp-btn">Sections</summary>
+		<nav class="vp-pop vp-secs-pop" aria-label="Sections, compact">
+			{
+				sections.map((s) => (
+					<a href={s.href} aria-current={s.current ? 'true' : undefined}>
+						{s.label}
+					</a>
+				))
+			}
+		</nav>
+	</details>
+
+	<div class="vp-tools print:hidden">
+		<Search />
+		<label class="vp-sdk vp-jsonly">
+			<span class="vp-sdk-label">SDK</span>
+			<select data-vp-sdk-select autocomplete="off">
+				{sdks.map((o) => <option value={o.value}>{o.label}</option>)}
+			</select>
+		</label>
+		{/* Shows the SDK the head script chose, before first paint. */}
+		<script
+			is:inline
+			set:html={`(() => {
+				const sdk = document.documentElement.dataset.sdk;
+				if (sdk) document.querySelectorAll('[data-vp-sdk-select]').forEach((s) => {
+					if (s.querySelector('option[value="' + sdk + '"]')) s.value = sdk;
+				});
+			})();`}
+		/>
+		<details class="vp-ver vp-pop-wrap" data-snapshot={snapshot ? '' : undefined}>
+			<summary>
+				<span class="vp-vdot" aria-hidden="true"></span>{current}<span class="sr-only"
+					>: {snapshot ? `docs for release ${snapshot.release}` : `docs for main, latest release ${version}`}.
+					Versions</span
+				>
+			</summary>
+			<div class="vp-pop vp-ver-pop">
+				<p set:html={intro.replace(/(main|\d+\.\d+\.\d+)(?=[.,])/g, '<b>$1</b>')} />
+				<ul>
+					{
+						versions.map((v) => (
+							<li>
+								{v.current ? (
+									<span class="vp-cur-v" aria-current="true">
+										{v.label} <span class="vp-vmeta">{vmeta(v)}</span>
+									</span>
+								) : (
+									<a href={v.href} data-vp-version>
+										{v.label} <span class="vp-vmeta">{vmeta(v)}</span>
+									</a>
+								)}
+							</li>
+						))
+					}
+					<li>
+						<a href={releaseNotes} data-vp-version>
+							Release notes <span class="vp-vmeta">{version}, on GitHub</span>
+						</a>
+					</li>
+				</ul>
+			</div>
+		</details>
+		<div class="vp-gh"><SocialIcons /></div>
+		<div class="vp-theme"><ThemeSelect /></div>
+	</div>
+</div>
+
+<script>
+	import { initSdkGroups, onSdk, setSdk } from '../../scripts/sdk';
+	import { onTheme, setTheme } from '../../scripts/theme';
+
+	const desktop = matchMedia('(min-width: 50rem)');
+
+	// The header select and the Menu radios follow the site SDK (set here, by
+	// an example group's tabs, or by another tab) and set it.
+	onSdk((sdk) => {
+		document.querySelectorAll<HTMLSelectElement>('[data-vp-sdk-select]').forEach((s) => {
+			s.value = sdk;
+		});
+		document.querySelectorAll<HTMLInputElement>('[data-vp-sdk-radio]').forEach((r) => {
+			r.checked = r.value === sdk;
+		});
+	});
+	document.querySelectorAll<HTMLSelectElement>('[data-vp-sdk-select]').forEach((s) =>
+		s.addEventListener('change', () => setSdk(s.value)),
+	);
+	document.querySelectorAll<HTMLInputElement>('[data-vp-sdk-radio]').forEach((r) =>
+		r.addEventListener('change', () => r.checked && setSdk(r.value)),
+	);
+
+	// The page's example groups (SdkGroup.astro).
+	initSdkGroups();
+
+	// The theme radios, in the header's segmented control (ThemeSelect.astro)
+	// and in the Menu, use Starlight's `starlight-theme` storage
+	// (src/scripts/theme.ts).
+	const themeRadios = () =>
+		document.querySelectorAll<HTMLInputElement>('[data-vp-theme-seg] input, [data-vp-theme-radio]');
+	onTheme((theme) => themeRadios().forEach((r) => (r.checked = r.value === theme)));
+	themeRadios().forEach((r) => r.addEventListener('change', () => r.checked && setTheme(r.value)));
+
+	// Disclosures (Sections, version) close on Escape, on a click outside and
+	// when focus leaves them.
+	document.querySelectorAll<HTMLDetailsElement>('.vp-pop-wrap').forEach((details) => {
+		const close = (refocus: boolean) => {
+			if (!details.open) return;
+			details.open = false;
+			if (refocus) details.querySelector('summary')?.focus();
+		};
+		details.addEventListener('focusout', (e) => {
+			if (!details.contains(e.relatedTarget as Node | null)) close(false);
+		});
+		details.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') close(details.contains(document.activeElement));
+		});
+		document.addEventListener('click', (e) => {
+			if (!details.contains(e.target as Node)) close(false);
+		});
+	});
+
+	class VorpalMenu extends HTMLElement {
+		constructor() {
+			super();
+			const button = this.querySelector<HTMLButtonElement>('.vp-menu-btn')!;
+			const dialog = this.querySelector<HTMLDialogElement>('dialog')!;
+			const close = () => dialog.open && dialog.close();
+			button.addEventListener('click', () => {
+				dialog.showModal();
+				button.setAttribute('aria-expanded', 'true');
+			});
+			dialog.addEventListener('close', () => {
+				button.setAttribute('aria-expanded', 'false');
+				button.focus();
+			});
+			dialog.querySelector('[data-close]')?.addEventListener('click', close);
+			// A click on the backdrop (outside the panel) closes it.
+			dialog.addEventListener('click', (e) => {
+				if (e.target === dialog) {
+					const r = dialog.getBoundingClientRect();
+					const inside =
+						e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+					if (!inside) close();
+				}
+			});
+			// The Menu exists only below 50rem.
+			desktop.addEventListener('change', () => desktop.matches && close());
+		}
+	}
+	customElements.define('vp-menu', VorpalMenu);
+</script>

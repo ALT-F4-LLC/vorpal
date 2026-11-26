@@ -1,0 +1,150 @@
+---
+// The Home hero (docs-redesign stage 3, home-hero.html rev 10 plus the
+// owner's edits; ported once into the site, stage 4 disposition M4).
+//
+// The HTML is the stage 1 picture: everything on your laptop, with the
+// cloud and the other CLI users drawn but out of reach. Without JavaScript
+// a sentence tells the rest of the story. With JavaScript, the story bar
+// (Pause and the 1/2/3 stage switch) shows from first paint (.vp-js), and
+// src/scripts/hero.js, started after the page's `load` event or on the first
+// interaction with the scene, draws the routes and plays the three stages:
+//
+//   1. All local: CLI, agent daemon, registry and worker on your laptop.
+//   2. Shared registry: the registry moves to the cloud, so other CLI users
+//      (AI agent, teammate, CI) re-use your artifacts.
+//   3. Shared worker: the worker moves too, so build machines are shared.
+//
+// The scene keeps to the architecture: the CLI sends build requests to the
+// worker and receives its logs, but files only move through the registry
+// (the agent daemon pushes sources, the worker pulls sources and pushes
+// archives, the CLI and other CLI users pull archives).
+//
+// Reduced motion: no autoplay; the module shows the end state of a stage at
+// once. The h1 keeps Starlight's `_top` id, the skip link's target.
+import './hero.css';
+---
+
+<div class="vp-hx not-content" data-twin-skip>
+	<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+		<symbol id="hxi-laptop" viewBox="0 0 24 24"><path d="M4 6h16v10H4zM2 19h20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-cloud" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"></circle><path d="M3 19c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 5a3 3 0 0 1 0 6M18 13.6c2 .6 3.4 2.6 3.4 5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></symbol>
+		<symbol id="hxi-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"></rect><path d="M7 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-agent" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path><path d="M8.8 12l2.2 2.2 4.2-4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-box" viewBox="0 0 24 24"><path d="M3.5 7.5L12 3l8.5 4.5v9L12 21l-8.5-4.5zM3.5 7.5L12 12l8.5-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v4h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"></rect><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.7"></path></symbol>
+		<symbol id="hxi-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"></circle><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></symbol>
+		<symbol id="hxi-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.8" fill="none" stroke="currentColor" stroke-width="1.7"></ellipse><path d="M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8" fill="none" stroke="currentColor" stroke-width="1.7"></path></symbol>
+		<symbol id="hxi-bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"></rect><path d="M12 4.5V8M9 13h.01M15 13h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></symbol>
+		<symbol id="hxi-ci" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 12-4.9M19 12a7 7 0 0 1-12 4.9M17 3.5v3.6h-3.6M7 20.5v-3.6h3.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></symbol>
+		<symbol id="hxi-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></symbol>
+		<symbol id="hxi-lk" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5.5" y="10.5" width="13" height="9.5" rx="1.5"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path></g></symbol>
+		<symbol id="hxi-ulk" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5.5" y="10.5" width="13" height="9.5" rx="1.5"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.8 -1.2"></path></g></symbol>
+		<symbol id="hxi-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor"></path></symbol>
+		<symbol id="hxi-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M6 6l12 12" stroke="currentColor" stroke-width="2"></path></symbol>
+	</svg>
+	<section class="scene" aria-labelledby="_top" data-hx>
+		<h1 id="_top">Real code in.<br />Identical builds out.</h1>
+		<div class="lede">
+			<p>
+				<strong>Build anywhere. Share securely.</strong>
+				<span>Pinned sources, sandboxed steps<a class="pln pln-a" href="/concepts/artifacts/#reproducible">macOS<span class="sr"> sandboxing</span> planned<span class="sr">, ENG-364</span></a> and cached artifacts in one registry, with roles for every person, AI agent and pipeline.</span>
+			</p>
+			<div class="ctas">
+				<a class="btn ink lg" href="/getting-started/installation/">Install</a>
+				<a class="btn lg" href="/getting-started/quickstart/">Quickstart</a>
+			</div>
+		</div>
+		<div class="story">
+			<button type="button" class="ctl" data-act="demo" aria-label="Pause animation"><svg aria-hidden="true"><use href="#hxi-pause"></use></svg><span>Pause</span></button>
+			<div class="stg" role="group" aria-label="Where services run">
+				<button type="button" data-stage="1" aria-pressed="true"><b>1</b><span class="wd">All </span>local</button>
+				<button type="button" data-stage="2" aria-pressed="false"><b>2</b><span class="wd">Shared </span>registry</button>
+				<button type="button" data-stage="3" aria-pressed="false"><b>3</b><span class="wd">Shared </span>worker</button>
+			</div>
+			<p class="cap" data-cap>All local: everything runs on your laptop. Builds work, but no one else can reach them.</p>
+		</div>
+		<div class="flow">
+			<svg class="links" aria-hidden="true" focusable="false"><g class="base"></g><g class="fx"></g></svg>
+			<section class="zone" data-zone="laptop" aria-labelledby="hx-z-l">
+				<div class="zl"><h2 id="hx-z-l"><svg aria-hidden="true"><use href="#hxi-laptop"></use></svg>Your laptop</h2></div>
+				<div class="machine">
+					<div class="tile cli" data-tile="cli"><svg class="ic" aria-hidden="true"><use href="#hxi-term"></use></svg><span class="t">CLI</span><span class="m" data-m="cli">you · store 0/5</span><button type="button" class="btn ink" data-act="build">Build</button></div>
+					<div class="tile" data-tile="agent"><svg class="ic" aria-hidden="true"><use href="#hxi-agent"></use></svg><span class="t">Agent daemon</span><span class="m" data-m="agent">local service · validates, packs, pushes</span></div>
+					<div class="tile" data-id="main" data-pick><svg class="ic" aria-hidden="true"><use href="#hxi-file"></use></svg><span class="t f">src/main.py</span><span class="m" data-m="main">local source</span></div>
+					<div class="tile" data-id="lock" data-pick><svg class="ic" aria-hidden="true"><use href="#hxi-lock"></use></svg><span class="t f">Vorpal.lock</span><span class="m" data-m="lock">pins uv 0.13.8</span></div>
+				</div>
+				<div class="slot extra" data-slot="laptop">
+					<div class="tile reg big mv" data-tile="registry" data-move="registry">
+						<div class="rh" data-id="registry" data-pick><svg class="ic" aria-hidden="true"><use href="#hxi-db"></use></svg><span class="t">Registry</span><span class="m" data-m="registry">local socket · this machine only</span></div>
+						<p class="shl"><span>Sources</span><span class="dg" data-count="src">0/3</span></p>
+						<ul class="shelf">
+							<li class="sh" data-k="s:cpython"><span class="n">cpython</span><span class="dg"></span></li><li class="sh" data-k="s:uv"><span class="n">uv</span><span class="dg"></span></li><li class="sh" data-k="s:greeter"><span class="n">greeter</span><span class="dg"></span></li>
+						</ul>
+						<p class="shl"><span>Artifacts</span><span class="dg" data-count="art">0/5</span></p>
+						<ul class="shelf">
+							<li class="sh" data-k="a:cpython"><span class="n">cpython</span><span class="dg"></span></li><li class="sh" data-k="a:uv"><span class="n">uv</span><span class="dg"></span></li><li class="sh" data-k="a:greeter"><span class="n">greeter</span><span class="dg"></span></li><li class="sh" data-k="a:greeter-dev"><span class="n">greeter-dev</span><span class="dg"></span></li><li class="sh" data-k="a:greeter-test"><span class="n">greeter-test</span><span class="dg"></span></li>
+						</ul>
+					</div>
+					<div class="ghost gr" data-ghost="registry-laptop" aria-hidden="true" hidden>The registry can run here</div>
+					<div class="tile wk big mv" data-id="w1" data-pick data-move="w1"><svg class="ic" aria-hidden="true"><use href="#hxi-gear"></use></svg><span class="t">Worker</span><span class="m" data-m="w1">builds in a sandbox</span><span class="now"><span>Artifact</span><span data-now="w1">none yet</span></span><span class="steps"><span class="stp">pull sources</span><span class="stp">run steps in sandbox</span><span class="stp">push archive</span></span><i class="prog" aria-hidden="true"></i></div>
+					<div class="ghost gw" data-ghost="w1-laptop" aria-hidden="true" hidden>The worker can run here</div>
+				</div>
+			</section>
+			<section class="zone" data-zone="cloud" aria-labelledby="hx-z-c">
+				<div class="zl"><h2 id="hx-z-c"><svg aria-hidden="true"><use href="#hxi-cloud"></use></svg>Cloud</h2><button type="button" class="add" data-add="worker">+ worker</button></div>
+				<div class="cloud" data-slot="cloud">
+					<div class="ghost gr" data-ghost="registry-cloud" aria-hidden="true">The registry can run here</div>
+					<div class="workers" data-workers>
+						<div class="ghost gw" data-ghost="w1-cloud" aria-hidden="true">The worker can run here</div>
+					</div>
+				</div>
+			</section>
+			<section class="zone" data-zone="cons" aria-labelledby="hx-z-a">
+				<div class="zl"><h2 id="hx-z-a"><svg aria-hidden="true"><use href="#hxi-users"></use></svg>Other CLI users</h2><button type="button" class="add" data-add="cons">+ consumer</button></div>
+				<div class="slot" data-cons>
+					<div class="tile off" data-static><svg class="ic" aria-hidden="true"><use href="#hxi-bot"></use></svg><span class="t">AI agent</span><span class="m">can't reach your laptop</span></div>
+					<div class="tile off" data-static><svg class="ic" aria-hidden="true"><use href="#hxi-users"></use></svg><span class="t">teammate</span><span class="m">can't reach your laptop</span></div>
+					<div class="tile off" data-static><svg class="ic" aria-hidden="true"><use href="#hxi-ci"></use></svg><span class="t">CI</span><span class="m">can't reach your laptop</span></div>
+				</div>
+			</section>
+		</div>
+		<p class="nojs">With JavaScript on, this plays as a story with a Pause control. First everything runs on your laptop: the CLI, the agent daemon (a local service), the registry and the worker, so builds work but other CLI users can't reach them. Then the registry moves to the cloud and everyone you allow re-uses your artifacts. Then the worker moves too, so build machines are shared.</p>
+	</section>
+</div>
+
+<script>
+	import { mount } from '../../scripts/hero.js';
+	// The module is one deferred script with this loader (no second request);
+	// the scene starts after the page's `load` event, or as soon as the reader
+	// points at, focuses or presses a key in it. A click that arrives before
+	// it has started is replayed once it has.
+	const scene = document.querySelector<HTMLElement>('[data-hx]');
+	if (scene && window.crypto?.subtle) {
+		let started: Promise<void> | undefined;
+		let pending: HTMLElement | null = null;
+		let user = false;
+		const start = () =>
+			(started ??= Promise.resolve().then(() => {
+				mount(scene, user);
+				const el = pending;
+				pending = null;
+				el?.click();
+			}));
+		const early = (event: Event) => {
+			if (event.type === 'pointerdown' || event.type === 'keydown') user = true;
+			if (event.type === 'click') {
+				const target = (event.target as Element).closest<HTMLElement>('button');
+				if (target && !scene.dataset.hxReady) {
+					event.preventDefault();
+					pending = target;
+				}
+			}
+			start();
+		};
+		for (const type of ['pointerdown', 'focusin', 'keydown', 'click']) scene.addEventListener(type, early, { capture: true });
+		if (document.readyState === 'complete') start();
+		else addEventListener('load', start, { once: true });
+	}
+</script>

@@ -1,0 +1,62 @@
+---
+// Diagram frame (docs-redesign stage 4, decision 9; design-system.md §11).
+//
+// A hand-made, static SVG, drawn with the page and themed by the tokens
+// (components.css, `.vp-dg-*`), with role="img" and a short name, plus an
+// "In words" list that names every part and connection. Nothing moves.
+//
+// <Diagram title="How a Job becomes an artifact" width={420} height={284}>
+//   …SVG shapes, using `url(#{marker})` for arrowheads…
+//   <Fragment slot="words"><li>…</li></Fragment>
+// </Diagram>
+//
+// The SVG draws at most at its own size, so its text is never larger than
+// 15px, and scales down to fit narrow columns; the list carries the detail.
+interface Props {
+	/** The accessible name: what the diagram shows, in a few words. */
+	title: string;
+	width: number;
+	height: number;
+	/** Arrowhead marker id for the shapes; must be unique on the page. */
+	marker: string;
+}
+
+const { title, width, height, marker } = Astro.props;
+const locals = Astro.locals as { vpDiagrams?: number };
+locals.vpDiagrams = (locals.vpDiagrams ?? 0) + 1;
+const id = `vp-dg-${locals.vpDiagrams}`;
+---
+
+<div class="vp-dfig not-content">
+	<figure>
+		<svg
+			viewBox={`0 0 ${width} ${height}`}
+			width={width}
+			height={height}
+			role="img"
+			aria-labelledby={`${id}-t`}
+		>
+			<title id={`${id}-t`}>{title}</title>
+			<defs>
+				<marker
+					id={marker}
+					viewBox="0 0 10 10"
+					refX="9"
+					refY="5"
+					markerWidth="7"
+					markerHeight="7"
+					orient="auto-start-reverse"
+				>
+					<path d="M0 0L10 5L0 10z" class="vp-dg-a"></path>
+				</marker>
+			</defs>
+			<slot />
+		</svg>
+	</figure>
+	<div class="vp-dtext">
+		<p class="vp-dtext-h" id={`${id}-w`}>In words</p>
+		<ul aria-labelledby={`${id}-w`}>
+			<slot name="words" />
+		</ul>
+	</div>
+</div>

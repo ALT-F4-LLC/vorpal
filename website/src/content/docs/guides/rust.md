@@ -1,5 +1,5 @@
 ---
-title: Rust SDK
+title: Every guide in Rust
 description: Build artifacts and environments with the Vorpal Rust SDK.
 ---
 

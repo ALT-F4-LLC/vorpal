@@ -1,0 +1,29 @@
+---
+title: vorpal system keys generate
+description: Create the CA, the service certificate and keys, and the service secret in /var/lib/vorpal/key/.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - reference/cli/system/services
+---
+
+import CliSynopsis from '../../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="system keys generate" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## What it writes {#output}
+
+In `/var/lib/vorpal/key/`:
+
+- the CA's private key and certificate;
+- the service's private key, public key and certificate, signed by the CA;
+- the service secret (a UUID v7).
+
+A file that already exists is kept, so it is safe to run more than once.

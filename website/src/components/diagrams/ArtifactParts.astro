@@ -1,0 +1,22 @@
+---
+// Concepts › Artifacts: the parts of an artifact (was a Mermaid graph).
+import Diagram from '../Diagram.astro';
+---
+
+<Diagram title="Parts of an artifact: sources, steps and target systems" width={560} height={230} marker="dg-art-ah">
+	<rect class="vp-dg-box hot" x="10" y="83" width="170" height="64" rx="8"></rect>
+	<text class="vp-dg-t" x="30" y="121">Artifact</text>
+	<path class="vp-dg-l" d="M180 105 C250 105 260 38 326 38" marker-end="url(#dg-art-ah)"></path>
+	<path class="vp-dg-l" d="M180 115 H326" marker-end="url(#dg-art-ah)"></path>
+	<path class="vp-dg-l" d="M180 125 C250 125 260 192 326 192" marker-end="url(#dg-art-ah)"></path>
+	<rect class="vp-dg-box" x="330" y="10" width="220" height="56" rx="8"></rect>
+	<text class="vp-dg-t" x="350" y="43">Sources</text>
+	<rect class="vp-dg-box" x="330" y="87" width="220" height="56" rx="8"></rect>
+	<text class="vp-dg-t" x="350" y="120">Steps</text>
+	<rect class="vp-dg-box" x="330" y="164" width="220" height="56" rx="8"></rect>
+	<text class="vp-dg-t" x="350" y="197">Target systems</text>
+	<Fragment slot="words">
+		<li>An artifact is made of three parts: its sources, its steps and its target systems.</li>
+		<li>Sources are the input files the steps work on; steps are the build instructions; target systems are the platforms it can be built for.</li>
+	</Fragment>
+</Diagram>

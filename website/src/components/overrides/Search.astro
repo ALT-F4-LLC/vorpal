@@ -1,0 +1,324 @@
+---
+// Site search (docs-redesign stage 4, design-system.md §15; critique M2,
+// option a). Replaces Starlight's Search and Pagefind's Default UI with a
+// small results list on the Pagefind JS API, which loads only when the
+// dialog first opens (or the pointer reaches the button), so it is outside
+// every page's first-load budget.
+//
+// - A modal dialog. Each result shows its title, then "section · page" or
+//   the section, then a type tag (Flag, Error, Key, or the page's kind).
+//   Flags, keys and errors come back as their own results, from Pagefind's
+//   sub-results for their `#flag-`, `#key-`, `#err-` anchors.
+// - With no words typed it lists a few pages to start from; with no match,
+//   routes to start from instead.
+// - Ctrl or Cmd K opens it; there is no single-key shortcut (WCAG 2.1.4).
+//   One Escape closes it, even with text in the field. Up and Down move
+//   through the results, Enter in the field opens the first one.
+// - The page's one polite live region (here, after the dialog) moves into
+//   the open dialog, so "3 results." is announced, then moves back.
+// - Without JavaScript the button is hidden; the footer site map and the
+//   header sections carry navigation.
+// - `window.vorpalOpenSearch(query)` and a `vorpal:search` event on
+//   `document` (detail: { query }) open it pre-filled; the 404 page uses it.
+//
+// Page metadata for the labels comes from `data-pagefind-meta` on the page
+// header (PageTitle.astro).
+//
+// Versions (src/versions.mjs): every page has a `version` Pagefind filter
+// (`main`, or a snapshot's `0.6`; PageTitle.astro), and search keeps to the
+// page's own version, so a reader of the 0.6 docs never lands on main.
+import { Icon } from '@astrojs/starlight/components';
+
+const { sections, extra, snapshot } = Astro.locals.vorpalNav;
+const version = snapshot?.slug ?? 'main';
+const versionText = snapshot ? `the ${snapshot.release} docs` : 'the docs for main';
+const byLabel = (label: string) => [...sections, ...extra].find((s) => s.label === label);
+
+/** Shown before anything is typed. Paths are checked by the links check. */
+const START = [
+	{ title: 'Quickstart', href: '/getting-started/quickstart/', meta: 'Get started', tag: 'Tutorial' },
+	{ title: 'vorpal build', href: '/reference/cli/build/', meta: 'Reference', tag: 'CLI' },
+	{ title: 'Error reference', href: '/troubleshooting/errors/', meta: 'Troubleshooting', tag: 'Errors' },
+	{ title: 'Configuration files', href: '/reference/configuration/', meta: 'Reference', tag: 'Config' },
+	{ title: 'Add a development environment', href: '/guides/development-environment/', meta: 'Guides', tag: 'How-to' },
+	{ title: 'Architecture', href: '/concepts/architecture/', meta: 'Concepts', tag: 'Concept' },
+];
+/** Where to go when nothing matches (design: Troubleshooting, errors, guides, all pages). */
+const ROUTES = [
+	{ label: 'Error reference', href: '/troubleshooting/errors/' },
+	{ label: 'Guides', href: byLabel('Guides')?.href ?? '/guides/development-environment/' },
+	{ label: 'CLI reference', href: '/reference/cli/' },
+	{ label: 'Get started', href: byLabel('Get started')?.href ?? '/getting-started/installation/' },
+];
+---
+
+<vp-search class="vp-search vp-jsonly" data-base={import.meta.env.BASE_URL} data-version={version}>
+	<button
+		type="button"
+		class="vp-search-btn"
+		aria-label="Search"
+		aria-haspopup="dialog"
+		aria-expanded="false"
+		aria-controls="vp-search-dialog"
+		aria-keyshortcuts="Control+K"
+	>
+		<Icon name="magnifier" />
+		<span class="vp-search-label" aria-hidden="true">Search</span>
+	</button>
+	<kbd class="vp-search-key" aria-hidden="true">Ctrl K</kbd>
+
+	<dialog id="vp-search-dialog" class="vp-sdlg" aria-labelledby="vp-search-h">
+		<h2 id="vp-search-h" class="sr-only">Search the docs</h2>
+		<form role="search" class="vp-sform">
+			<label class="sr-only" for="vp-sq">Search the docs</label>
+			<input
+				id="vp-sq"
+				type="search"
+				placeholder="Search: a page, a flag, or paste an error"
+				autocomplete="off"
+				autocapitalize="off"
+				spellcheck="false"
+				enterkeyhint="go"
+				aria-describedby="vp-sq-hint"
+			/>
+			<button type="button" class="vp-btn" data-close>Close</button>
+		</form>
+		<p id="vp-sq-hint" class="sr-only">
+			Searches {versionText}. Results update as you type. Each result shows its section and page type. Up and Down arrows
+			move through results; Escape closes.
+		</p>
+		<p class="vp-sres-h" id="vp-sres-h">Start here</p>
+		<ul class="vp-sres" id="vp-sres" aria-labelledby="vp-sres-h">
+			{
+				START.map((r) => (
+					<li>
+						<a href={r.href}>
+							<span class="vp-st-t">{r.title}</span>
+							<span class="vp-st-p">{r.meta}</span>
+							<span class="vp-st-k vp-kind">{r.tag}</span>
+						</a>
+					</li>
+				))
+			}
+		</ul>
+		<div class="vp-snone" hidden>
+			<p><b>No pages match.</b> Try the exact error text, or start from:</p>
+			<ul>
+				{
+					ROUTES.map((r) => (
+						<li>
+							<a href={r.href}>{r.label}</a>
+						</li>
+					))
+				}
+			</ul>
+		</div>
+		<p class="vp-sfail" hidden>Search could not load. Try again, or use the sections in the header.</p>
+		<div class="vp-sfoot">
+			<span>Enter opens the first result · ↑↓ move · Esc closes</span>
+			<span>Searches {versionText}: all four SDK examples and every error message</span>
+		</div>
+	</dialog>
+	<div class="sr-only" id="vp-live" aria-live="polite" aria-atomic="true"></div>
+</vp-search>
+
+<script is:inline>
+	(() => {
+		if (!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) return;
+		document.querySelectorAll('.vp-search-key').forEach((k) => (k.textContent = '⌘ K'));
+		document
+			.querySelectorAll('.vp-search-btn')
+			.forEach((b) => b.setAttribute('aria-keyshortcuts', 'Meta+K'));
+	})();
+</script>
+
+<script>
+	import { searchItems, type PagefindApi, type SearchItem } from '../../scripts/search';
+	import { adoptLive, returnLive, say } from '../../scripts/live';
+
+	class VorpalSearch extends HTMLElement {
+		constructor() {
+			super();
+			const base = this.dataset.base || '/';
+			const version = this.dataset.version || 'main';
+			const button = this.querySelector<HTMLButtonElement>('.vp-search-btn')!;
+			const dialog = this.querySelector<HTMLDialogElement>('dialog')!;
+			const input = dialog.querySelector<HTMLInputElement>('input')!;
+			const list = dialog.querySelector<HTMLUListElement>('.vp-sres')!;
+			const heading = dialog.querySelector<HTMLElement>('.vp-sres-h')!;
+			const none = dialog.querySelector<HTMLElement>('.vp-snone')!;
+			const fail = dialog.querySelector<HTMLElement>('.vp-sfail')!;
+			const start = list.innerHTML;
+			let returnTo: HTMLElement | null = null;
+
+			let pagefind: Promise<PagefindApi> | undefined;
+			const load = () =>
+				(pagefind ??= import(/* @vite-ignore */ `${base}pagefind/pagefind.js`).then(
+					async (pf: PagefindApi) => {
+						await pf.options({ baseUrl: base });
+						await pf.init();
+						return pf;
+					},
+				));
+
+			const open = (query?: string) => {
+				if (!dialog.open) {
+					returnTo = document.activeElement as HTMLElement | null;
+					adoptLive(dialog);
+					dialog.showModal();
+					button.setAttribute('aria-expanded', 'true');
+				}
+				if (query !== undefined) input.value = query;
+				input.focus();
+				input.select();
+				update();
+				load().catch(() => {});
+			};
+			const close = () => dialog.open && dialog.close();
+
+			dialog.addEventListener('close', () => {
+				returnLive();
+				button.setAttribute('aria-expanded', 'false');
+				(returnTo?.isConnected ? returnTo : button).focus();
+				returnTo = null;
+			});
+			button.addEventListener('click', () => open());
+			// Warm the index before the click.
+			button.addEventListener('pointerenter', () => load().catch(() => {}), { once: true });
+			dialog.querySelector('[data-close]')!.addEventListener('click', close);
+			// A click on the backdrop, or on a link (it may be on this page), closes.
+			dialog.addEventListener('click', (e) => {
+				if ((e.target as Element).closest?.('a')) return close();
+				if (e.target !== dialog) return;
+				const r = dialog.getBoundingClientRect();
+				const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+				if (!inside) close();
+			});
+			dialog.querySelector('form')!.addEventListener('submit', (e) => e.preventDefault());
+
+			const links = () => [...list.querySelectorAll<HTMLAnchorElement>('a')];
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					const first = links()[0];
+					if (first && !list.hidden) first.click();
+				} else if (e.key === 'ArrowDown') {
+					const first = links()[0];
+					if (first && !list.hidden) {
+						e.preventDefault();
+						first.focus();
+					}
+				}
+			});
+			list.addEventListener('keydown', (e) => {
+				if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+				const all = links();
+				const i = all.indexOf(document.activeElement as HTMLAnchorElement);
+				if (i < 0) return;
+				e.preventDefault();
+				const j = i + (e.key === 'ArrowDown' ? 1 : -1);
+				if (j < 0) input.focus();
+				else all[Math.min(j, all.length - 1)].focus();
+			});
+			// One Escape closes, even when the field has text (a search field
+			// would otherwise clear itself first).
+			dialog.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					close();
+				}
+			});
+
+			let seq = 0;
+			let announce: ReturnType<typeof setTimeout> | undefined;
+			const show = (state: 'start' | 'results' | 'none' | 'fail') => {
+				list.hidden = state === 'none' || state === 'fail';
+				heading.textContent = state === 'start' ? 'Start here' : 'Results';
+				none.hidden = state !== 'none';
+				fail.hidden = state !== 'fail';
+			};
+			const update = async () => {
+				const mine = ++seq;
+				const query = input.value.trim();
+				clearTimeout(announce);
+				if (!query) {
+					list.innerHTML = start;
+					show('start');
+					return;
+				}
+				let items: SearchItem[];
+				try {
+					const pf = await load();
+					const found = await pf.debouncedSearch(query, { filters: { version } }, 120);
+					if (found === null || mine !== seq) return;
+					const pages = await Promise.all(found.results.slice(0, 8).map((r) => r.data()));
+					if (mine !== seq) return;
+					items = searchItems(pages, 8);
+				} catch {
+					if (mine === seq) show('fail');
+					return;
+				}
+				list.replaceChildren(...items.map((item) => renderItem(item, query)));
+				show(items.length ? 'results' : 'none');
+				// Say the count once typing pauses.
+				announce = setTimeout(() => {
+					say(items.length ? `${items.length} ${items.length === 1 ? 'result' : 'results'}.` : 'No results.');
+				}, 700);
+			};
+			input.addEventListener('input', update);
+
+			// Ctrl or Cmd K, from anywhere.
+			window.addEventListener('keydown', (e) => {
+				if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+					e.preventDefault();
+					open();
+				}
+			});
+			document.addEventListener('vorpal:search', (e) => {
+				open((e as CustomEvent<{ query?: string }>).detail?.query ?? '');
+			});
+			(window as unknown as { vorpalOpenSearch: (q?: string) => void }).vorpalOpenSearch = (q) => open(q ?? '');
+		}
+	}
+
+	/** Title with the query's words marked, its meta line and type tag. */
+	function renderItem(item: SearchItem, query: string): HTMLLIElement {
+		const li = document.createElement('li');
+		const a = document.createElement('a');
+		a.href = item.url;
+		const title = document.createElement('span');
+		title.className = 'vp-st-t';
+		title.append(...highlight(item.title, query));
+		const meta = document.createElement('span');
+		meta.className = 'vp-st-p';
+		meta.textContent = item.meta;
+		a.append(title, meta);
+		if (item.tag) {
+			const tag = document.createElement('span');
+			tag.className = 'vp-st-k vp-kind';
+			tag.textContent = item.tag;
+			a.append(tag);
+		}
+		li.append(a);
+		return li;
+	}
+
+	function highlight(text: string, query: string): Node[] {
+		const words = query
+			.toLowerCase()
+			.split(/\s+/)
+			.map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+			.filter((w) => w.length > 1)
+			.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+		if (!words.length) return [document.createTextNode(text)];
+		const parts = text.split(new RegExp(`(${words.join('|')})`, 'gi'));
+		return parts.map((part, i) => {
+			if (i % 2 === 0) return document.createTextNode(part);
+			const mark = document.createElement('mark');
+			mark.textContent = part;
+			return mark;
+		});
+	}
+
+	customElements.define('vp-search', VorpalSearch);
+</script>

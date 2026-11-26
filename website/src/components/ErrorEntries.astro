@@ -1,0 +1,84 @@
+---
+// Error reference entries (docs-redesign step 5; template
+// troubleshooting-errors.html), from the `errors` collection
+// (src/content/errors/<id>.yaml). One entry per message, anchored
+// `#err-<id>`: the message word for word, one line per SDK or CLI wording
+// where it differs, then Printed by, What it means, Fix, Check it worked
+// and More.
+//
+// <ErrorEntries group="lockfile" />
+//
+// Headings are Starlight anchor headings inside `.vp-refent`, like every
+// other reference entry, so the link control and :target work the same.
+import { getCollection } from 'astro:content';
+import { Code } from '@astrojs/starlight/components';
+import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
+import { esc, inline } from '../data/inline';
+import { snapshotOf } from '../versions.mjs';
+
+interface Props {
+	group: 'lockfile' | 'config' | 'settings' | 'connection';
+}
+
+// Main's entries, or a version snapshot's frozen copy
+// (src/snapshots/<x.y>/errors/, ids `<x.y>/<id>`).
+const snapshot = snapshotOf(Astro.locals.starlightRoute.entry.id);
+const all = snapshot
+	? (await getCollection('snapshotErrors'))
+			.filter((e) => e.id.startsWith(`${snapshot.slug}/`))
+			.map((e) => ({ ...e, id: e.id.slice(snapshot.slug.length + 1) }))
+	: await getCollection('errors');
+const entries = all.filter((e) => e.data.group === Astro.props.group).sort((a, b) => a.data.order - b.data.order);
+
+/** A message as code, with `<placeholders>` dashed like Expected output. */
+const message = (m: string) =>
+	`<code dir="auto">${esc(m).replace(/&lt;[^&]+?&gt;/g, (p) => `<span class="vp-ph">${p}</span>`)}</code>`;
+---
+
+{
+	entries.map((e) => (
+		<div class="vp-refent vp-errent">
+			<AnchorHeading level={3} id={`err-${e.id}`}>
+				<span class="vp-etag">Error</span>
+				<Fragment set:html={message(e.data.message)} />
+			</AnchorHeading>
+			{e.data.variants && (
+				<ul class="vp-variants" aria-label="Wording in each SDK">
+					{e.data.variants.map((v) => (
+						<li>
+							<span class="vp-who">{v.who}</span>
+							<Fragment set:html={message(v.message)} />
+						</li>
+					))}
+				</ul>
+			)}
+			<dl class="vp-errdl">
+				<dt>Printed by</dt>
+				<dd set:html={inline(e.data.raised_by)} />
+				<dt>What it means</dt>
+				<dd set:html={inline(e.data.meaning)} />
+				<dt>Fix</dt>
+				<dd>
+					{e.data.fix.map((step) =>
+						'command' in step ? (
+							<>
+								<Code code={step.command} lang="bash" meta="prompt" />
+								{step.output && <Code code={step.output} lang="text" meta="output" />}
+							</>
+						) : (
+							<p set:html={inline(step.text)} />
+						),
+					)}
+				</dd>
+				<dt>Check it worked</dt>
+				<dd set:html={inline(e.data.check)} />
+				{e.data.links.length > 0 && (
+					<>
+						<dt>More</dt>
+						<dd set:html={e.data.links.map((l) => `<a href="${esc(l.href)}">${inline(l.text)}</a>`).join(' · ')} />
+					</>
+				)}
+			</dl>
+		</div>
+	))
+}

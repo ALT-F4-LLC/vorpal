@@ -1,0 +1,119 @@
+---
+// SDK example group (docs-redesign stage 4, decision 3; design-system.md §5).
+//
+// <SdkGroup example="job" />
+//
+// Shows one example in each SDK, read from src/examples/<example>/:
+// python.py, typescript.ts, go.go and rust.rs, so the same files can be
+// built or run in CI later. Each panel is an Expressive Code block (title,
+// syntax colours, Copy).
+//
+// - All four panels are in the HTML, each under a real heading, so without
+//   JavaScript (and for search and AI agents) every SDK shows.
+// - With JavaScript, <html data-sdk> (set before first paint by the head
+//   script, src/scripts/sdk-head.ts) and components.css show only the chosen
+//   SDK, so nothing shifts. The headings stay for screen readers.
+// - The tabs (JavaScript only) use manual activation: arrow keys, Home and
+//   End move focus; Enter or Space selects. Selecting changes the SDK for
+//   every group on every page, keeps the clicked tab where it was on screen,
+//   and dispatches `vorpal:sdk`. The script is `initSdkGroups` in
+//   src/scripts/sdk.ts, run by the header's script, so every page loads
+//   one module for the header, the SDK choice and the groups.
+// - An SDK without the file shows `missing[sdk]` instead: its tab stays and
+//   the panel says why.
+// - Prose instead of code: a slot named after the SDK
+//   (`<Fragment slot="python">…</Fragment>`) fills that panel, for content
+//   that differs by SDK but is not a program (TLS trust, for example).
+//   `example` is then optional.
+import { Code } from '@astrojs/starlight/components';
+import { SDKS, type Sdk } from '../scripts/sdk-head';
+import { snapshotOf } from '../versions.mjs';
+
+interface Props {
+	/** Folder under src/examples; optional when every SDK has a slot. */
+	example?: string;
+	/** File name shown above each panel, such as `src/vorpal.py`. */
+	titles?: Partial<Record<Sdk, string>>;
+	/** Why an SDK has no example ("No separate method: …"). */
+	missing?: Partial<Record<Sdk, string>>;
+	/** Level of the per-SDK headings; pick the one under the current section. */
+	level?: 2 | 3 | 4 | 5;
+}
+
+const { example, titles = {}, missing = {}, level = 3 } = Astro.props;
+
+const NAMES: Record<Sdk, string> = { python: 'Python', typescript: 'TypeScript', go: 'Go', rust: 'Rust' };
+const FILES: Record<Sdk, { ext: string; lang: string }> = {
+	python: { ext: 'py', lang: 'python' },
+	typescript: { ext: 'ts', lang: 'typescript' },
+	go: { ext: 'go', lang: 'go' },
+	rust: { ext: 'rs', lang: 'rust' },
+};
+
+const sources = import.meta.glob<string>(['../examples/*/*.{py,ts,go,rs}', '../snapshots/*/examples/*/*.{py,ts,go,rs}'], {
+	query: '?raw',
+	import: 'default',
+	eager: true,
+});
+// A version snapshot's pages show its frozen copy of the examples
+// (src/snapshots/<x.y>/examples/).
+const snapshot = snapshotOf(Astro.locals.starlightRoute.entry.id);
+const dir = snapshot ? `../snapshots/${snapshot.slug}/examples` : '../examples';
+
+const slots = Object.fromEntries(
+	await Promise.all(
+		SDKS.filter((sdk) => Astro.slots.has(sdk)).map(async (sdk) => [sdk, await Astro.slots.render(sdk)]),
+	),
+) as Partial<Record<Sdk, string>>;
+
+const panels = SDKS.map((sdk) => {
+	const code = example ? sources[`${dir}/${example}/${sdk}.${FILES[sdk].ext}`] : undefined;
+	if (code === undefined && !missing[sdk] && slots[sdk] === undefined) {
+		throw new Error(
+			`SdkGroup: src/${dir.slice(3)}/${example}/${sdk}.${FILES[sdk].ext} is missing; add it or give missing.${sdk}`,
+		);
+	}
+	return { sdk, name: NAMES[sdk], code: code?.replace(/\n$/, ''), lang: FILES[sdk].lang, html: slots[sdk] };
+});
+
+const locals = Astro.locals as { vpSdkGroups?: number };
+locals.vpSdkGroups = (locals.vpSdkGroups ?? 0) + 1;
+const id = `vp-sdkg-${locals.vpSdkGroups}`;
+const Heading = `h${level}`;
+---
+
+<div class="vp-sdkg" data-vp-sdkg>
+	<div class="vp-sdkg-top vp-jsonly">
+		<div class="vp-sdk-tabs" role="tablist" aria-label="SDK, applies to all examples">
+			{
+				panels.map((p, i) => (
+					<button
+						type="button"
+						role="tab"
+						id={`${id}-t-${p.sdk}`}
+						data-sdk={p.sdk}
+						aria-controls={`${id}-p-${p.sdk}`}
+						aria-selected={i === 0 ? 'true' : 'false'}
+						tabindex={i === 0 ? 0 : -1}
+					>
+						{p.name}
+					</button>
+				))
+			}
+		</div>
+	</div>
+	{
+		panels.map((p) => (
+			<div class="vp-sdk-p" id={`${id}-p-${p.sdk}`} data-sdk-panel={p.sdk} data-tab={`${id}-t-${p.sdk}`}>
+				<Heading class="vp-sdk-h">{p.name}</Heading>
+				{p.html !== undefined ? (
+					<Fragment set:html={p.html} />
+				) : p.code !== undefined ? (
+					<Code code={p.code} lang={p.lang} title={titles[p.sdk]} />
+				) : (
+					<p class="vp-sdk-na">{missing[p.sdk]}</p>
+				)}
+			</div>
+		))
+	}
+</div>

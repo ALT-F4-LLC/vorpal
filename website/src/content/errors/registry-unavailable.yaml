@@ -1,0 +1,42 @@
+group: connection
+order: 1
+message: Registry service is unavailable.
+variants:
+  - who: Python, TypeScript
+    message: Registry service is unavailable.
+  - who: Go
+    message: "error fetching artifact: <err>"
+  - who: Go, invalid address
+    message: "failed to connect to registry: <err>"
+  - who: Rust, CLI
+    message: "failed to connect to <uri>"
+raised_by: The SDK your config program uses, or the CLI, while it talks to the registry.
+meaning: The config program or the CLI could not reach the registry at the configured address.
+fix:
+  - text: >-
+      The message suggests the registry is down. If it is running and the address is `https://`, the
+      cause is usually certificate trust: Python and TypeScript trust only `ca.pem` when it exists.
+  - command: vorpal config get registry
+    label: check the address
+check: The build prints a digest.
+links:
+  - text: "`vorpal system services start`"
+    href: /reference/cli/system/services/
+  - text: "`registry`"
+    href: /reference/configuration/#key-registry
+sources:
+  - file: sdk/python/src/vorpal_sdk/context.py
+    line: 786
+    match: Registry service is unavailable.
+  - file: sdk/typescript/src/context.ts
+    line: 831
+    match: Registry service is unavailable.
+  - file: sdk/go/pkg/config/context.go
+    line: 502
+    match: "error fetching artifact: %v"
+  - file: sdk/go/pkg/config/context.go
+    line: 348
+    match: "failed to connect to registry: %v"
+  - file: sdk/rust/src/context.rs
+    line: 797
+    match: "failed to connect to {uri}"

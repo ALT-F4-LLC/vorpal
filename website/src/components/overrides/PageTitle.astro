@@ -1,0 +1,153 @@
+---
+// Page header (docs-redesign stage 4, design-system.md §3 and §4):
+// breadcrumb, h1, one-sentence summary, a meta line with the kind badge and
+// the versions the page applies to, then "On this page" as a disclosure
+// below 72rem (and at every width on wide pages).
+//
+// - The h1 keeps Starlight's `_top` id, which the skip link targets.
+// - Unreleased and "Since x.y.z" badges sit inside the h1, so screen readers
+//   and AI tools read them with the title. Both come from frontmatter only.
+// - The summary is `summary`, or else `description` (the same sentence: the
+//   summary is also the page's meta description).
+// - The version comes from website/package.json.
+// - Versions (src/versions.mjs). On main, a page that the latest release's
+//   snapshot does not have is Unreleased, as is one with `unreleased: true`:
+//   so the first Unreleased badge appears the first time main differs from
+//   the release (team decision 4), with no frontmatter to remember. A
+//   snapshot's page applies to its release only and opens with a banner
+//   that links the same page on main (or in the latest release).
+// - `data-pagefind-filter="version:…"` scopes search to the page's version
+//   (Search.astro).
+import TocList from '../TocList.astro';
+import { LATEST_RELEASE, LATEST_SNAPSHOT, mainPathOf } from '../../versions.mjs';
+import { versionLinks, versionPages } from '../../version-routes';
+
+const { entry } = Astro.locals.starlightRoute;
+const { section, trail, toc, snapshot } = Astro.locals.vorpalNav;
+const data = entry.data;
+const version = LATEST_RELEASE;
+const pages = await versionPages();
+const isPage = data.kind !== 'not-found' && data.kind !== 'home';
+const notInRelease =
+	!snapshot && isPage && !!LATEST_SNAPSHOT && !pages.snapshots.get(LATEST_SNAPSHOT.slug)?.has(mainPathOf(Astro.url.pathname));
+const unreleased = !snapshot && (!!data.unreleased || notInRelease);
+
+const KINDS: Record<string, string> = {
+	tutorial: 'Tutorial',
+	'how-to': 'How-to',
+	'operator-how-to': 'Operator how-to',
+	concept: 'Concept',
+	'reference-cli': 'Reference · CLI',
+	'reference-config': 'Reference · Config',
+	'reference-sdk': 'Reference · SDK',
+	'reference-errors': 'Reference · Errors',
+	troubleshooting: 'Troubleshooting',
+	'sdk-hub': 'SDK hub',
+	'not-found': '404 · Not found',
+};
+const kind = data.kind ? KINDS[data.kind] : undefined;
+const summary = data.summary ?? data.description;
+const applies = snapshot
+	? `Applies to ${snapshot.release}`
+	: unreleased
+		? 'Applies to main'
+		: `Applies to ${version} and main`;
+
+// The snapshot banner: this release, and where the newer docs are.
+let banner: { text: string; href: string; link: string } | undefined;
+if (snapshot) {
+	const links = await versionLinks(Astro.url.pathname);
+	const isLatest = snapshot.release === version;
+	const target = isLatest ? undefined : links.find((l) => l.snapshot === LATEST_SNAPSHOT && l.samePage);
+	const main = links[0];
+	const to = target ?? main;
+	banner = {
+		text: isLatest
+			? `the latest release. Main may have changes that are not released yet.`
+			: `an older release. The latest release is ${version}.`,
+		href: to.href,
+		link: `${to.samePage ? 'This page' : 'The docs'} ${to.snapshot ? `in ${to.snapshot.release}` : 'on main'}`,
+	};
+}
+/** Starlight's PAGE_TITLE_ID, the skip link's target. */
+const PAGE_TITLE_ID = '_top';
+const hasToc = !!toc && toc.length > 0;
+// A CLI command page's title is the command itself, shown as code.
+const codeTitle = data.kind === 'reference-cli' && data.title.startsWith('vorpal');
+// Home has no page header: its hero holds the h1 (components/home/Hero.astro).
+const isHome = data.kind === 'home';
+/** The type tag on search results (Search.astro). */
+const SEARCH_TAGS: Record<string, string> = {
+	tutorial: 'Tutorial',
+	'how-to': 'How-to',
+	'operator-how-to': 'How-to',
+	concept: 'Concept',
+	'reference-cli': 'CLI',
+	'reference-config': 'Config',
+	'reference-sdk': 'SDK',
+	'reference-errors': 'Errors',
+	troubleshooting: 'Troubleshooting',
+	'sdk-hub': 'SDK hub',
+};
+// Pagefind metadata for the search labels (Search.astro).
+const searchSection = section?.label;
+const searchKind = data.kind ? SEARCH_TAGS[data.kind] : undefined;
+---
+
+<span hidden data-pagefind-filter={`version:${snapshot ? snapshot.slug : 'main'}`} />
+{
+	banner && snapshot && (
+		<div class="vp-vbanner" role="note" aria-label="Version" data-pagefind-ignore>
+			<p>
+				<b>Docs for {snapshot.release}</b>, {banner.text}{' '}
+				<a href={banner.href} data-vp-version>
+					{banner.link}
+					<span aria-hidden="true"> →</span>
+				</a>
+			</p>
+		</div>
+	)
+}
+{!isHome && (
+<header class="vp-pagehead" data-wide={data.wide ? '' : undefined}>
+	{searchSection && <span hidden data-pagefind-meta={`section:${searchSection}`} />}
+	{searchKind && <span hidden data-pagefind-meta={`kind:${searchKind}`} />}
+	{
+		section && (
+			<nav class="vp-bc" aria-label="Breadcrumb" data-pagefind-ignore>
+				<ol>
+					<li>
+						<a href={section.href}>{section.label}</a>
+					</li>
+					{trail.map((g) => (
+						<li>{g.label}</li>
+					))}
+					<li>
+						<span aria-current="page">{data.title}</span>
+					</li>
+				</ol>
+			</nav>
+		)
+	}
+	<h1 id={PAGE_TITLE_ID}>
+		{codeTitle ? <code>{data.title}</code> : data.title}
+		{unreleased && <span class="vp-vb vp-vb-unrel">Unreleased</span>}
+		{data.since && <span class="vp-vb">Since {data.since}</span>}
+	</h1>
+	{summary && <p class="vp-summary">{summary}</p>}
+	<p class="vp-pmeta" data-pagefind-ignore>
+		{kind && <span class="vp-kind">{kind}</span>}
+		{data.kind !== 'not-found' && <span>{data.metaNote ? `${applies} · ${data.metaNote}` : applies}</span>}
+	</p>
+	{
+		hasToc && (
+			<details class="vp-toc-d" data-pagefind-ignore>
+				<summary class="vp-btn">On this page</summary>
+				<nav aria-label="On this page">
+					<TocList items={toc} />
+				</nav>
+			</details>
+		)
+	}
+</header>
+)}

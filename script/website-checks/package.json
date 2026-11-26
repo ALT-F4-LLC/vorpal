@@ -1,0 +1,16 @@
+{
+  "name": "website-checks",
+  "private": true,
+  "type": "module",
+  "description": "CI guardrails for the docs site: size budgets, axe, Lighthouse CI. Run against website/dist.",
+  "scripts": {
+    "size": "node size.mjs",
+    "a11y": "node a11y.mjs",
+    "lighthouse": "lhci autorun --config=lighthouserc.json"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@lhci/cli": "0.16.1",
+    "playwright": "1.65.1"
+  }
+}

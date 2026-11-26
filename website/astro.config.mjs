@@ -2,9 +2,29 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'astro/config';
+import { defineConfig, fontProviders } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import rehypeTableRegion from './src/plugins/rehype-table-region.mjs';
+import { satteri } from '@astrojs/markdown-satteri';
+import emDashes from './src/plugins/em-dashes.mjs';
+import tableRegion from './src/plugins/table-region.mjs';
+import sectionize from './src/plugins/sectionize.mjs';
+import { asideNotes, plannedDirective } from './src/plugins/callouts.mjs';
+import markdownTwins from './src/integrations/markdown-twins.mjs';
+import sitemap from '@astrojs/sitemap';
+import { sidebar } from './src/sidebar.mjs';
+import { SNAPSHOTS, checkSnapshots, snapshotGroupLabel, snapshotOf, snapshotSidebar } from './src/versions.mjs';
+
+// Version snapshots at /v/<x.y>/ (src/versions.mjs). The latest release
+// must have one.
+checkSnapshots();
+/**
+ * Starlight's sidebar: main's groups, then one group per snapshot, which
+ * route data (src/route-data.ts) shows only on that snapshot's pages.
+ */
+const starlightSidebar = [
+	...sidebar,
+	...SNAPSHOTS.map((s) => ({ label: snapshotGroupLabel(s), items: snapshotSidebar(s) })),
+];
 
 /**
  * Prefix root-absolute internal links with the configured `base` at build
@@ -54,17 +74,64 @@ function prefixBaseLinks() {
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://docs.vorpal.build',
+	// Self-hosted fonts: subset WOFF2 files committed in src/fonts (made by
+	// script/website-fonts/subset.py; 39 KB together), so the build needs no
+	// network and nothing outside bun.lock. `display: optional` plus Astro's
+	// metric-matched fallback faces keep a late font from shifting layout.
+	// Head.astro (an override) adds the @font-face rules and preloads.
+	fonts: [
+		{
+			provider: fontProviders.local(),
+			name: 'Instrument Sans',
+			cssVariable: '--font-instrument-sans',
+			display: 'optional',
+			fallbacks: ['sans-serif'],
+			options: {
+				variants: [
+					{ src: ['./src/fonts/instrument-sans-wght.woff2'], weight: '400 700', style: 'normal' },
+				],
+			},
+		},
+		{
+			provider: fontProviders.local(),
+			name: 'JetBrains Mono',
+			cssVariable: '--font-jetbrains-mono',
+			display: 'optional',
+			fallbacks: ['monospace'],
+			options: {
+				variants: [
+					{ src: ['./src/fonts/jetbrains-mono-wght.woff2'], weight: '400 700', style: 'normal' },
+				],
+			},
+		},
+	],
 	markdown: {
-		// Astro 6 leaves `gfm` undefined by default, which @astrojs/mdx reads as
-		// disabled, so `.mdx` pages lose GFM tables. Set it explicitly. The
-		// build's `markdown.gfm` deprecation warning is expected; when upgrading
-		// Astro, switch to an explicit `mdx({ gfm: true })` integration instead.
-		gfm: true,
-		// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
-		rehypePlugins: [rehypeTableRegion],
+		// Astro 7 renders Markdown and MDX with Sätteri. GFM (tables) is on by
+		// default; MDX inherits this processor.
+		processor: satteri({
+			// Sätteri renders `--` as an en dash; em-dashes.mjs keeps it an em dash.
+			// `attributes`: explicit heading ids (`## Title {#step-1}`), which
+			// sectionize.mjs keys on.
+			features: { smartPunctuation: { dashes: false }, attributes: true },
+			// `:::planned[ENG-364]`; Starlight adds its asides after this.
+			mdastPlugins: [plannedDirective],
+			hastPlugins: [
+				// Starlight's <aside> asides become role="note" callouts.
+				asideNotes,
+				// Bench steps, causes and reference entries, by frontmatter `kind`.
+				sectionize,
+				emDashes,
+				// Make wide tables keyboard-reachable scroll regions (WCAG 2.1.1).
+				tableRegion,
+			],
+		}),
 	},
 	integrations: [
 		prefixBaseLinks(),
+		// Starlight's own sitemap, without the snapshots: they are frozen
+		// copies, marked noindex (Head.astro), so search engines send readers
+		// to main.
+		sitemap({ filter: (page) => !snapshotOf(new URL(page).pathname) }),
 		starlight({
 			title: 'Vorpal',
 			head: [
@@ -77,65 +144,6 @@ export default defineConfig({
 						});
 					});`,
 				},
-				{
-					// Render ```mermaid code blocks as diagrams in the browser.
-					// - Exact version: a floating `mermaid@11` could change rendering
-					//   under us. Bump deliberately after checking the diagrams.
-					// - Theme follows Starlight's resolved theme
-					//   (`<html data-theme="light|dark">`) and re-renders on toggle.
-					// - Text equivalent: each diagram's source sets `accTitle` and
-					//   `accDescr`, which Mermaid writes into the SVG as <title> and
-					//   <desc>, referenced by aria-labelledby/aria-describedby.
-					// - If Mermaid fails to load or a diagram fails to parse, the code
-					//   block stays visible, so the source remains readable.
-					tag: 'script',
-					attrs: { type: 'module' },
-					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
-const theme = () => (document.documentElement.dataset.theme === 'light' ? 'default' : 'dark');
-const diagrams = Array.from(document.querySelectorAll('pre[data-language="mermaid"]'), (pre) => {
-  const block = pre.closest('.expressive-code') ?? pre;
-  const source = Array.from(pre.querySelectorAll('.ec-line'), (l) => l.textContent).join('\\n');
-  const div = document.createElement('div');
-  div.className = 'mermaid';
-  div.hidden = true;
-  block.after(div);
-  return { block, div, source };
-});
-let rendered = '';
-let count = 0;
-async function render() {
-  const next = theme();
-  if (next === rendered) return;
-  rendered = next;
-  // The dark theme's edge-label background leaves its #ccc text at 4.43:1;
-  // the page background brings it above 4.5:1.
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: next,
-    themeVariables: next === 'dark' ? { edgeLabelBackground: '#17181c' } : {},
-  });
-  for (const d of diagrams) {
-    try {
-      const { svg, bindFunctions } = await mermaid.render('vorpal-mermaid-' + count++, d.source);
-      d.div.innerHTML = svg;
-      bindFunctions?.(d.div);
-      d.div.hidden = false;
-      d.block.style.display = 'none';
-    } catch (error) {
-      console.error('Mermaid could not render a diagram; showing its source.', error);
-    }
-  }
-}
-let queue = Promise.resolve();
-const schedule = () => (queue = queue.then(render));
-if (diagrams.length) {
-  schedule();
-  new MutationObserver(schedule).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-  });
-}`,
-				},
 			],
 			social: [
 				{
@@ -144,45 +152,34 @@ if (diagrams.length) {
 					href: 'https://github.com/ALT-F4-LLC/vorpal',
 				},
 			],
-			customCss: ['./src/styles/custom.css'],
-			sidebar: [
-				{
-					label: 'Getting Started',
-					items: [
-						{ label: 'Installation', slug: 'getting-started/installation' },
-						{ label: 'Quickstart', slug: 'getting-started/quickstart' },
-					],
-				},
-				{
-					label: 'Guides',
-					items: [
-						{ label: 'Go', slug: 'guides/go' },
-						{ label: 'Python', slug: 'guides/python' },
-						{ label: 'Rust', slug: 'guides/rust' },
-						{ label: 'TypeScript', slug: 'guides/typescript' },
-					],
-				},
-				{
-					label: 'Concepts',
-					items: [
-						{ label: 'Architecture', slug: 'concepts/architecture' },
-						{ label: 'Artifacts', slug: 'concepts/artifacts' },
-						{ label: 'Caching', slug: 'concepts/caching' },
-						{ label: 'Environments', slug: 'concepts/environments' },
-						{ label: 'Jobs', slug: 'concepts/jobs' },
-						{ label: 'Processes', slug: 'concepts/processes' },
-					],
-				},
-				{
-					label: 'Reference',
-					items: [
-						{ label: 'Command-line (CLI)', slug: 'reference/cli' },
-						{ label: 'Configuration', slug: 'reference/configuration' },
-						{ label: 'API', slug: 'reference/api' },
-						{ label: 'Contributing to Docs', slug: 'reference/contributing' },
-					],
-				},
+			customCss: [
+				'./src/styles/tokens.css',
+				'./src/styles/shell.css',
+				'./src/styles/components.css',
+				'./src/styles/custom.css',
 			],
+			// Edit this page. Starlight appends the page's path from website/.
+			editLink: {
+				baseUrl: 'https://github.com/ALT-F4-LLC/vorpal/edit/main/website/',
+			},
+			// The page shell (docs-redesign step 3): sections, the narrowed
+			// sidebar and the page header read this route data.
+			routeMiddleware: './src/route-data.ts',
+			components: {
+				Head: './src/components/overrides/Head.astro',
+				Header: './src/components/overrides/Header.astro',
+				Search: './src/components/overrides/Search.astro',
+				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
+				MobileMenuToggle: './src/components/overrides/MobileMenuToggle.astro',
+				Sidebar: './src/components/overrides/Sidebar.astro',
+				PageTitle: './src/components/overrides/PageTitle.astro',
+				MobileTableOfContents: './src/components/overrides/MobileTableOfContents.astro',
+				Footer: './src/components/overrides/Footer.astro',
+			},
+			// Code blocks: themes, styles and the CLI-block plugin live in
+			// ec.config.mjs, so the <Code> component (SdkGroup) uses them too.
+			sidebar: starlightSidebar,
 		}),
+		markdownTwins({ sidebar, snapshots: SNAPSHOTS, title: 'Vorpal' }),
 	],
 });

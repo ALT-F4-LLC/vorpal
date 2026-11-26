@@ -1,0 +1,308 @@
+# Hand-written text for the generated CLI reference (docs-redesign step 5).
+#
+# main.json is generated from the clap definitions in cli/src and lists every
+# command, argument and flag with its default and environment variable. This
+# file adds what clap does not know: the sentence a reader needs, the setting
+# that replaces a default, how an environment variable changes it, and a
+# "Why" link. The build fails when a command, argument or flag in main.json
+# has no entry here, or an entry here has nothing in main.json.
+#
+# One entry per command path. In an entry:
+#   summary      one sentence: the page summary and the command list line.
+#   arguments    by clap id; options by clap id (the long flag without --).
+# In an argument or option:
+#   text         what it does (Markdown: `code`, [links](/url/), **bold**;
+#                a blank line starts a new paragraph).
+#   value_name   the placeholder shown after the flag, instead of clap's.
+#   default      how to show the default, instead of the generated value.
+#   setting      the configuration key that replaces the default.
+#   env          how an environment variable changes it (Markdown).
+#   why          a link to the page that explains when to use it (Markdown).
+#   since        the release that added it, when older than the oldest
+#                release data in releases/ (badges are computed otherwise).
+
+build:
+  summary: Build one artifact and its dependencies from your config program, and print the artifact's digest.
+  arguments:
+    name:
+      text: >-
+        The name of an artifact your config program defines. If none has that name, the command stops
+        with [`selected 'artifact' not found: <NAME>`](/troubleshooting/errors/#err-selected-artifact-not-found).
+  options:
+    agent:
+      value_name: ADDRESS
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The agent daemon's address. The agent daemon is the local service that prepares sources and seals secrets.
+    config:
+      value_name: PATH
+      text: Path to the project's `Vorpal.toml`.
+    context:
+      value_name: PATH
+      text: The folder that source paths are relative to.
+    export:
+      text: Prints the artifact's definition as JSON. The artifact isn't built; the config program is, if it isn't in the store.
+    list:
+      text: >-
+        Prints the artifact and each of its dependencies in build order, with digests, one per line. The
+        artifact isn't built; the config program is, if it isn't in the store.
+      why: "[Caching](/concepts/caching/)"
+    namespace:
+      value_name: NAME
+      setting: namespace
+      text: The namespace to store the artifact in.
+    path:
+      text: Prints the artifact output's path instead of its digest.
+    rebuild:
+      text: >-
+        Before building, removes the local artifact output of this artifact and of the config program.
+        Dependencies keep their outputs. Archives are kept, so if this artifact's archive is in the store,
+        Vorpal unpacks it instead of running the steps. To make the steps run, first run
+        `vorpal system prune --artifact-archives`, which removes every archive in the store.
+    registry:
+      value_name: ADDRESS
+      setting: registry
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The registry's address.
+    system:
+      value_name: SYSTEM
+      setting: system
+      text: "The system to build for: `aarch64-darwin`, `aarch64-linux`, `x86_64-darwin` or `x86_64-linux`."
+    unlock:
+      text: >-
+        Runs in unlocked mode: creates or updates pins in `Vorpal.lock`. Without it, the build stops if a
+        remote source is unpinned or no longer matches its pin. It prints no summary; `vorpal prepare` does.
+      why: "[`vorpal prepare`](/reference/cli/prepare/)"
+    variable:
+      value_name: KEY=VALUE
+      text: Passes a variable to your config program. Repeat the flag for more than one.
+    worker:
+      value_name: ADDRESS
+      setting: worker
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The worker's address.
+
+prepare:
+  summary: Pin an artifact's remote sources in Vorpal.lock without building the artifact, and print its digest.
+  arguments:
+    name:
+      text: The name of an artifact your config program defines.
+  options:
+    agent:
+      value_name: ADDRESS
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The agent daemon's address.
+    config:
+      value_name: PATH
+      text: Path to the project's `Vorpal.toml`.
+    context:
+      value_name: PATH
+      text: The folder that source paths are relative to.
+    namespace:
+      value_name: NAME
+      setting: namespace
+      text: The namespace to store the artifact in.
+    registry:
+      value_name: ADDRESS
+      setting: registry
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The registry's address.
+    system:
+      value_name: SYSTEM
+      setting: system
+      text: >-
+        The system to pin sources for: `aarch64-darwin`, `aarch64-linux`, `x86_64-darwin` or
+        `x86_64-linux`. Any host can prepare any system: the config program always runs on the host.
+    unlock:
+      value_name: "true|false"
+      text: >-
+        Creates or updates pins in `Vorpal.lock`. On by default, unlike `vorpal build`. Pass
+        `--unlock=false` to stop on an unpinned or changed source instead, as `build` does. A bare
+        `--unlock` means `--unlock=true`; the value needs `=`, so `--unlock false` is an error.
+    variable:
+      value_name: KEY=VALUE
+      text: Passes a variable to your config program. Repeat the flag for more than one.
+    worker:
+      value_name: ADDRESS
+      setting: worker
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The worker's address. Only the config program and its toolchain are built.
+
+config:
+  summary: Set, get and show settings in Vorpal.toml or ~/.vorpal/settings.json.
+  options:
+    user:
+      text: Uses `~/.vorpal/settings.json` (your settings on this machine) instead of the project's `Vorpal.toml`.
+    config:
+      value_name: PATH
+      text: Path to the project's `Vorpal.toml`.
+
+config set:
+  summary: Set a setting.
+  arguments:
+    key:
+      text: >-
+        The setting: `language`, `name`, `namespace`, `registry`, `system` or `worker`. Any other key
+        stops with [`unknown setting key`](/troubleshooting/errors/#err-unknown-setting-key).
+    value:
+      text: The value to store.
+
+config get:
+  summary: Print one setting and where its value comes from.
+  arguments:
+    key:
+      text: The setting to print.
+
+config show:
+  summary: Print every setting, its value and where the value comes from.
+
+init:
+  summary: Create a project with a config program in the SDK you choose.
+  arguments:
+    name:
+      text: >-
+        The project name. The config program defines two artifacts from it: `<NAME>` and
+        `<NAME>-dev`.
+  options:
+    path:
+      value_name: PATH
+      text: The folder to write the project files to.
+
+inspect:
+  summary: Print a stored artifact's definition as JSON, by its digest.
+  arguments:
+    digest:
+      text: The artifact's digest, as `vorpal build` prints it.
+  options:
+    namespace:
+      value_name: NAME
+      setting: namespace
+      text: The namespace the artifact is stored in.
+    registry:
+      value_name: ADDRESS
+      setting: registry
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The registry's address.
+
+login:
+  summary: Sign in to an OIDC provider with the device flow and store the credentials for a registry.
+  options:
+    issuer:
+      value_name: URL
+      text: The OIDC issuer's base URL.
+    issuer-audience:
+      value_name: AUDIENCE
+      text: The OAuth2 audience to request, when your provider needs one.
+    issuer-client-id:
+      value_name: ID
+      text: The OAuth2 client ID the CLI signs in as.
+    registry:
+      value_name: ADDRESS
+      setting: registry
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The registry the credentials are for. They are stored in `/var/lib/vorpal/key/credentials.json`.
+
+run:
+  summary: Run a built artifact's program from the store, by its alias.
+  arguments:
+    alias:
+      text: "The artifact's alias: `[<namespace>/]<name>[:<tag>]`."
+    args:
+      text: Arguments for the program. Put them after `--`, so flags go to the program and not to `vorpal`.
+  options:
+    bin:
+      value_name: NAME
+      default: the artifact's name
+      text: The program to run from the artifact's `bin/` folder.
+    registry:
+      value_name: ADDRESS
+      setting: registry
+      env: "`VORPAL_SOCKET_PATH` changes the default socket"
+      text: The registry to pull the artifact from when it isn't in the local store.
+
+system:
+  summary: Manage keys, the store and the services on this machine.
+
+system keys:
+  summary: Manage the keys the services use.
+
+system keys generate:
+  summary: Create the CA, the service certificate and keys, and the service secret in /var/lib/vorpal/key/.
+
+system prune:
+  summary: Remove artifact outputs, archives, aliases, config programs or sandboxes from the local store.
+  options:
+    all:
+      text: Removes everything the other flags remove.
+    artifact-aliases:
+      text: Removes artifact aliases.
+    artifact-archives:
+      text: Removes artifact archives.
+    artifact-configs:
+      text: Removes built config programs.
+    artifact-outputs:
+      text: Removes unpacked artifact outputs.
+    sandboxes:
+      text: Removes build sandboxes.
+
+system services:
+  summary: Start the agent daemon, registry and worker.
+
+system services start:
+  summary: Start the agent daemon, registry and worker on a Unix socket or a TCP port.
+  options:
+    archive-cache-ttl:
+      value_name: SECONDS
+      text: How long, in seconds, to cache the result of checking whether an archive exists. `0` turns the cache off.
+    health-check:
+      text: Starts a plaintext gRPC health-check listener on `--health-check-port`.
+    health-check-port:
+      value_name: PORT
+      text: The health-check listener's port.
+    issuer:
+      value_name: URL
+      text: The OIDC issuer whose tokens the services check.
+    issuer-audience:
+      value_name: AUDIENCE
+      text: The audience a token must have.
+    issuer-client-id:
+      value_name: ID
+      text: The OAuth2 client ID the worker uses to get registry tokens.
+    issuer-client-secret-file:
+      value_name: PATH
+      text: >-
+        A file holding the OAuth2 client secret for `--issuer-client-id`. Group and others must have no
+        access to it (mode `0600` or stricter). One trailing newline is ignored.
+    issuer-service-client-ids:
+      value_name: IDS
+      text: >-
+        Comma-separated OAuth2 client IDs whose tokens count as trusted services: a token whose `azp`
+        claim is in the list skips the namespace roles. Unset, every token goes through the namespace roles.
+    port:
+      value_name: PORT
+      default: none (Unix socket)
+      env: "`VORPAL_SOCKET_PATH` sets the socket path when there is no port"
+      text: >-
+        The TCP port to listen on. Without it, the services listen on the Unix socket
+        `/var/lib/vorpal/vorpal.sock`; with `--tls` and no port, on 23151.
+    services:
+      value_name: LIST
+      text: "Comma-separated services to start: `agent`, `registry`, `worker`."
+    registry-backend:
+      value_name: BACKEND
+      text: "Where the registry stores archives: `local` (the store on this machine) or `s3`."
+    registry-backend-s3-bucket:
+      value_name: BUCKET
+      text: The S3 bucket, when `--registry-backend` is `s3`.
+    registry-backend-s3-force-path-style:
+      text: Uses path-style S3 URLs, for S3-compatible services that need them.
+    tls:
+      text: Serves TLS, with the keys from [`vorpal system keys generate`](/reference/cli/system/keys/).
+
+# Global options: on every command.
+_global:
+  options:
+    level:
+      value_name: LEVEL
+      text: >-
+        The log level: `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR`. Logs go to stderr; at `DEBUG` and
+        `TRACE` they include file names and line numbers. Use `--level debug` to see full build output.

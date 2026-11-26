@@ -7,4 +7,12 @@ exclude = [
   # Fragment anchors URL-encoded as %23 and treated as file paths
   "%23",
   "^https://docs\\.vorpal\\.build/",
+  # Example addresses in code (a local dev server, a Keycloak realm), which
+  # the Markdown copies and llms-full.txt show as plain text
+  "^https?://localhost[:/]",
+  # "Edit this page" links: GitHub's editor needs a signed-in session
+  "^https://github\\.com/ALT-F4-LLC/vorpal/edit/",
+  # npm's website answers 403 to link checkers. The package itself is
+  # checked by name in the registry (registry.npmjs.org), not here.
+  "^https://www\\.npmjs\\.com/package/",
 ]

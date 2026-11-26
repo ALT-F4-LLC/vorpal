@@ -1,0 +1,44 @@
+---
+// Theme control: the design's Auto / Light / Dark segmented radio group
+// (design-system.md §1). Storage is Starlight's, so its head script
+// (ThemeProvider) applies the choice before first paint: key
+// `starlight-theme`, values `auto` (stored as ''), `light`, `dark`. See
+// src/scripts/theme.ts; the header's script wires the radios up.
+//
+// The radios need JavaScript to do anything, so the group shows only with
+// it (`vp-jsonly`). Without JavaScript the page follows the system setting
+// (tokens.css and the code themes key dark mode on `.vp-js`).
+//
+// Starlight may render this component more than once on a page, so each
+// group gets its own radio name.
+const locals = Astro.locals as { vpThemeGroups?: number };
+locals.vpThemeGroups = (locals.vpThemeGroups ?? 0) + 1;
+const name = `vp-theme-${locals.vpThemeGroups}`;
+const options = [
+	{ value: 'auto', label: Astro.locals.t('themeSelect.auto') },
+	{ value: 'light', label: Astro.locals.t('themeSelect.light') },
+	{ value: 'dark', label: Astro.locals.t('themeSelect.dark') },
+];
+---
+
+<fieldset class="vp-seg vp-jsonly" data-vp-theme-seg>
+	<legend class="sr-only">{Astro.locals.t('themeSelect.accessibleLabel')}</legend>
+	{
+		options.map((o) => (
+			<label>
+				<input type="radio" name={name} value={o.value} checked={o.value === 'auto'} />
+				{o.label}
+			</label>
+		))
+	}
+</fieldset>
+
+{/* Inlined so the group shows the stored choice before first paint. */}
+<script
+	is:inline
+	set:html={`(() => {
+		let theme = '';
+		try { theme = localStorage.getItem('starlight-theme') || ''; } catch {}
+		if (theme === 'light' || theme === 'dark') document.querySelectorAll('[data-vp-theme-seg] input[value="' + theme + '"]').forEach((r) => { r.checked = true; });
+	})();`}
+/>

@@ -1,0 +1,48 @@
+---
+title: vorpal init
+description: Create a project with a config program in the SDK you choose.
+kind: reference-cli
+metaNote: Generated from the CLI source
+tableOfContents:
+  maxHeadingLevel: 2
+related:
+  - getting-started/quickstart
+  - reference/configuration
+---
+
+import CliSynopsis from '../../../../components/cli/CliSynopsis.astro';
+import CliEntries from '../../../../components/cli/CliEntries.astro';
+
+## Synopsis {#synopsis}
+
+<CliSynopsis command="init" />
+
+## Arguments {#arguments}
+
+<CliEntries command="init" kind="arguments" />
+
+## Options {#options}
+
+<CliEntries command="init" kind="options" />
+
+**Global options:** [`--level`](/reference/cli/#flag-level) sets the log level for every command.
+
+## Language prompt {#prompt}
+
+`init` asks which SDK the config program uses, then writes these files:
+
+- **Go:** `cmd/<name>/main.go`, `cmd/vorpal/main.go`, `go.mod`, `go.sum`, `Vorpal.toml`. The template folder `cmd/example/` is renamed to `cmd/<name>/`.
+- **Python:** `pyproject.toml`, `uv.lock`, `src/main.py`, `src/vorpal.py`, `Vorpal.toml`, `.gitignore`.
+- **Rust:** `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/vorpal.rs`, `Vorpal.toml`, `.gitignore`.
+- **TypeScript:** `src/vorpal.ts`, `src/main.ts`, `package.json`, `tsconfig.json`, `Vorpal.toml`, `.gitignore`, `bun.lock`.
+
+It writes no `Vorpal.lock`: run [`vorpal prepare`](/reference/cli/prepare/) before the first build.
+
+## Examples {#examples}
+
+```bash prompt
+# Create a project in the current folder
+vorpal init my-project
+# Create a project in another folder
+vorpal init my-project --path /path/to/project
+```

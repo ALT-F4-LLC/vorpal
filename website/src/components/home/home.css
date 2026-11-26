@@ -1,0 +1,137 @@
+/*
+ * Home below the hero (docs-redesign stage 4, templates/home.html): routes by
+ * situation, the SDK group beside the terminal block, the comparison strip
+ * and "How the scene maps". Imported by src/content/docs/index.mdx only.
+ */
+
+/* The home column: the hero's 1168 px scene. */
+:root:has(.vp-hx) {
+	--sl-content-width: 73rem;
+}
+/* No page header on Home (PageTitle.astro): drop its empty panel. */
+main:has(.vp-hx) > .content-panel:has(> .sl-container:empty) {
+	display: none;
+}
+main:has(.vp-hx) > .content-panel {
+	/* The scene's own 20 px margin is the gap under the header. */
+	padding-top: 0;
+	border-top: 0;
+}
+
+.sl-markdown-content .vp-home-sec h2 {
+	margin: 0 0 0.75rem;
+	font-size: 1.1875rem;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+}
+.sl-markdown-content .vp-home-sec {
+	margin-top: 1.875rem;
+}
+.sl-markdown-content .vp-home-p {
+	margin: 0 0 0.5rem;
+	color: var(--vp-ink-2);
+	font-size: 0.90625rem;
+}
+.sl-markdown-content .vp-home-routes {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.sl-markdown-content .vp-home-routes .vp-card {
+	font-size: 0.90625rem;
+}
+
+/* The SDK group and the terminal side by side from 1000 px. */
+.sl-markdown-content .vp-home-two {
+	display: grid;
+	grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+	gap: 1.5rem 2rem;
+	align-items: start;
+}
+.sl-markdown-content .vp-home-two > .vp-home-sec {
+	margin-top: 1.875rem;
+}
+.sl-markdown-content .vp-home-two .vp-sdkg pre {
+	max-height: 380px;
+}
+.sl-markdown-content .vp-home-sec > :is(.expressive-code, .vp-sdkg) + * {
+	margin-top: 0.75rem;
+}
+
+/* Comparison strip */
+.sl-markdown-content .vp-home-cmp {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0.625rem;
+	margin: 0 0 0.75rem;
+	padding: 0;
+	list-style: none;
+}
+.sl-markdown-content .vp-home-cmp li {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin: 0;
+	padding: 13px 16px;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-lg, 10px);
+	background: var(--vp-surface);
+	color: var(--vp-ink-2);
+	font-size: 0.90625rem;
+}
+.sl-markdown-content .vp-home-cmp b {
+	color: var(--vp-ink);
+	font-weight: 650;
+}
+.sl-markdown-content .vp-home-cmp > li > b {
+	font-size: 0.96875rem;
+}
+.sl-markdown-content .vp-home-cmp .vp-home-me {
+	border-color: var(--vp-line-strong);
+}
+
+/* How the scene maps */
+.sl-markdown-content .vp-home-how {
+	padding: 20px 24px;
+	border: 1px solid var(--vp-line);
+	border-radius: var(--vp-r-lg, 10px);
+	background: var(--vp-bench);
+}
+.sl-markdown-content .vp-home-how-b {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 4px 32px;
+	color: var(--vp-ink-2);
+	font-size: 0.875rem;
+}
+.sl-markdown-content .vp-home-how-b ul {
+	margin: 0;
+	padding-inline-start: 18px;
+}
+.sl-markdown-content .vp-home-how-b li {
+	margin: 0 0 7px;
+}
+.sl-markdown-content .vp-home-how-b b {
+	color: var(--vp-ink);
+}
+.sl-markdown-content .vp-home-src {
+	color: var(--vp-ink-2);
+	font: 0.75rem var(--vp-mono);
+}
+
+@media (max-width: 1000px) {
+	.sl-markdown-content .vp-home-two,
+	.sl-markdown-content .vp-home-how-b,
+	.sl-markdown-content .vp-home-cmp {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sl-markdown-content .vp-home-routes {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+@media (max-width: 700px) {
+	.sl-markdown-content .vp-home-routes {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sl-markdown-content .vp-home-how {
+		padding: 16px;
+	}
+}

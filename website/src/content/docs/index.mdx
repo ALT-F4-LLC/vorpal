@@ -1,216 +1,117 @@
 ---
 title: Vorpal
-description: A build system that works as code. Define builds, environments, CI, and services as real programs in Go, Python, Rust, or TypeScript.
+description: Real code in, identical builds out. Define builds, environments, CI and services as programs in Python, TypeScript, Go or Rust; pinned sources, sandboxed steps and cached artifacts in one registry.
+kind: home
 template: splash
-hero:
-  tagline: Define your builds, environments, CI, and services as real programs — not JSON, not YAML — using SDKs in Go, Python, Rust, or TypeScript.
-  actions:
-    - text: Get Started
-      link: /getting-started/installation/
-      icon: right-arrow
-      variant: primary
-    - text: View on GitHub
-      link: https://github.com/ALT-F4-LLC/vorpal
-      icon: external
-      variant: minimal
-      attrs:
-        target: _blank
+editUrl: false
+tableOfContents: false
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
-import CarouselScript from '../../components/CarouselScript.astro';
-import DocsBrowse from '../../components/DocsBrowse.astro';
+import Hero from '../../components/home/Hero.astro';
+import SdkGroup from '../../components/SdkGroup.astro';
+import '../../components/home/home.css';
 
-<DocsBrowse />
+<Hero />
 
-<div class="landing-section landing-section-wide">
+<section class="vp-home-sec" aria-labelledby="routes">
 
-<CardGrid>
-  <Card title="Multi-language" icon="seti:config">
-    Builds, CI, environments, and services — defined as real programs with full IDE support.
-  </Card>
-  <Card title="Multi-purpose" icon="setting">
-    Dev environments, user configs, and long-running services — all defined and managed as artifacts.
-  </Card>
-  <Card title="Multi-service" icon="rocket">
-    Run builds on your machine or distribute them across remote workers. Same result either way.
-  </Card>
-</CardGrid>
+<h2 id="routes">Start from where you are</h2>
 
-</div>
+<ul class="vp-cards vp-home-routes">
+<li class="vp-card"><span class="vp-card-type">New here</span><a href="/getting-started/quickstart/">Get started<span class="vp-card-arrow" aria-hidden="true">→</span></a>Install, then build the Python template.</li>
+<li class="vp-card"><span class="vp-card-type">Building with an SDK</span><a href="/guides/development-environment/">Guides<span class="vp-card-arrow" aria-hidden="true">→</span></a>Environments, and every guide in your SDK.</li>
+<li class="vp-card"><span class="vp-card-type">Something broke</span><a href="/troubleshooting/errors/">Troubleshooting<span class="vp-card-arrow" aria-hidden="true">→</span></a>Every error message, word for word, with its fix.</li>
+<li class="vp-card"><span class="vp-card-type">Running it for a team</span><a href="/self-hosting/tls/">Self-hosting<span class="vp-card-arrow" aria-hidden="true">→</span></a>Registry and workers on your hardware, with TLS.</li>
+<li class="vp-card"><span class="vp-card-type">How it works</span><a href="/concepts/how-a-build-runs/">Concepts<span class="vp-card-arrow" aria-hidden="true">→</span></a>Follow one build from source to program.</li>
+<li class="vp-card"><span class="vp-card-type">Looking something up</span><a href="/reference/cli/">Reference<span class="vp-card-arrow" aria-hidden="true">→</span></a>CLI commands and flags, configuration, API.</li>
+<li class="vp-card"><span class="vp-card-type">Choosing a tool</span><a href="/concepts/how-vorpal-compares/">How Vorpal compares<span class="vp-card-arrow" aria-hidden="true">→</span></a>Nix, Docker, Bazel and Dagger.</li>
+<li class="vp-card"><span class="vp-card-type">Working in one language</span><a href="/sdks/python/">SDKs<span class="vp-card-arrow" aria-hidden="true">→</span></a>Install, project layout and API for each SDK.</li>
+</ul>
 
-<div class="landing-section">
+</section>
 
-## Your build, your language.
+<div class="vp-home-two">
 
-<p class="landing-subtitle">Choose the SDK that fits your project. All SDKs produce identical artifacts.</p>
+<section class="vp-home-sec" aria-labelledby="sdk">
 
-<div class="sdk-carousel" data-carousel>
-  <div class="sdk-carousel-tabs" role="tablist" aria-label="SDK language selector">
-    <button role="tab" id="tab-go" aria-selected="true" aria-controls="panel-go" tabindex="0">Go</button>
-    <button role="tab" id="tab-python" aria-selected="false" aria-controls="panel-python" tabindex="-1">Python</button>
-    <button role="tab" id="tab-rust" aria-selected="false" aria-controls="panel-rust" tabindex="-1">Rust</button>
-    <button role="tab" id="tab-ts" aria-selected="false" aria-controls="panel-ts" tabindex="-1">TypeScript</button>
-  </div>
+<h2 id="sdk">Write it in the language you use</h2>
 
-  <div class="sdk-carousel-panels">
-    <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" class="sdk-carousel-panel active">
+<p class="vp-home-p">Each SDK's `vorpal init` writes a program like this. The same definition gives the same digest in every SDK, at the same SDK version.</p>
 
-<Card title="Go SDK" icon="seti:go">
-  For full-stack and platform engineers who want builds that read like the rest of their code.
+<SdkGroup
+	example="quickstart"
+	titles={{
+		python: 'src/vorpal.py',
+		typescript: 'src/vorpal.ts',
+		go: 'cmd/vorpal/main.go',
+		rust: 'src/vorpal.rs',
+	}}
+/>
 
-  ```bash title="Install"
-  go get github.com/ALT-F4-LLC/vorpal/sdk/go
-  ```
-</Card>
+</section>
 
-```go title="vorpal.go"
-package main
+<section class="vp-home-sec" aria-labelledby="terminal">
 
-import (
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
-)
+<h2 id="terminal">Build it from the terminal</h2>
 
-func main() {
-    ctx := config.GetContext()
+<p class="vp-home-p">People, AI agents and CI run the same commands.</p>
 
-    language.NewGo("my-app", config.SYSTEMS).
-        WithBuildDirectory("cmd/app").
-        WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
-        Build(ctx)
-
-    ctx.Run()
-}
+```bash prompt
+vorpal init hello-world
+vorpal prepare hello-world
+vorpal build hello-world
+$(vorpal build --path hello-world)/bin/hello-world
 ```
 
-    </div>
-
-    <div role="tabpanel" id="panel-python" aria-labelledby="tab-python" class="sdk-carousel-panel">
-
-<Card title="Python SDK" icon="seti:python">
-  For platform and automation engineers who want builds as approachable as any other Python script.
-
-  ```bash title="Install"
-  pip install vorpal-sdk
-  ```
-</Card>
-
-```python title="vorpal.py"
-from vorpal_sdk import SYSTEMS, ConfigContext, Python
-
-ctx = ConfigContext.create()
-
-(
-    Python("my-app", SYSTEMS)
-    .with_entrypoint("src/main.py")
-    .with_includes(["pyproject.toml", "uv.lock", "src"])
-    .build(ctx)
-)
-
-ctx.run()
+```text output title="Expected output of the last two commands"
+<digest>
+Hello, world!
 ```
 
-    </div>
+<p class="vp-home-p">`prepare` pins every remote source in `Vorpal.lock` once; builds then run locked.</p>
 
-    <div role="tabpanel" id="panel-rust" aria-labelledby="tab-rust" class="sdk-carousel-panel">
+<p class="vp-home-p">[Quickstart](/getting-started/quickstart/) · [`vorpal build` reference](/reference/cli/build/)</p>
 
-<Card title="Rust SDK" icon="seti:rust">
-  For systems programmers who expect compile-time guarantees — even from their build system.
-
-  ```bash title="Install"
-  cargo add vorpal-sdk
-  ```
-</Card>
-
-```rust title="vorpal.rs"
-use vorpal_sdk::{
-    artifact::{language::rust::Rust, system},
-    context::get_context,
-};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut ctx = get_context().await?;
-
-    Rust::new("my-app", system::SYSTEMS)
-        .with_bins(vec!["my-app"])
-        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(&mut ctx)
-        .await?;
-
-    ctx.run().await
-}
-```
-
-    </div>
-
-    <div role="tabpanel" id="panel-ts" aria-labelledby="tab-ts" class="sdk-carousel-panel">
-
-<Card title="TypeScript SDK" icon="seti:typescript">
-  For frontend and tooling engineers who want builds in the language they already ship.
-
-  ```bash title="Install"
-  bun add @altf4llc/vorpal-sdk
-  ```
-</Card>
-
-```typescript title="vorpal.ts"
-import { ConfigContext, SYSTEMS, TypeScript } from "@altf4llc/vorpal-sdk";
-
-const ctx = ConfigContext.create();
-
-await new TypeScript("my-app", SYSTEMS)
-  .withEntrypoint("src/main.ts")
-  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
-  .build(ctx);
-
-await ctx.run();
-```
-
-    </div>
-  </div>
+</section>
 
 </div>
 
-<CarouselScript />
+<section class="vp-home-sec" aria-labelledby="registry">
 
+<h2 id="registry">Why the registry is built in</h2>
+
+<ul class="vp-home-cmp">
+<li><b>Nix</b><span>Binary caches (substituters). Credentials go in a netrc file; access rules come from the server.<a class="vp-fn" href="/concepts/how-vorpal-compares/#vs-nix" aria-label="Source 1: How Vorpal compares, Nix">[1]</a></span></li>
+<li><b>Docker</b><span>Image registry. Build cache and BuildKit builders are set up separately.<a class="vp-fn" href="/concepts/how-vorpal-compares/#vs-docker" aria-label="Source 2: How Vorpal compares, Docker">[2]</a></span></li>
+<li class="vp-home-me"><b>Vorpal</b><span>Sources and artifacts in one registry, OIDC roles, remote workers. SBOM <span class="vp-pln">Planned · <b>ENG-373</b></span></span></li>
+</ul>
+
+<p class="vp-home-p">[How Vorpal compares with Nix, Docker, Bazel and Dagger](/concepts/how-vorpal-compares/)</p>
+
+</section>
+
+<section class="vp-home-sec vp-home-how" aria-labelledby="scene">
+
+<h2 id="scene">How the scene maps to Vorpal</h2>
+
+<div class="vp-home-how-b">
+<ul>
+<li><b>Who:</b> people, AI agents and automations such as CI all use the same CLI. Agent daemon, registry and worker are separate services you can start on any machine with `vorpal system services start --services`; the CLI reaches each through `--agent`, `--registry` and `--worker`. <span class="vp-home-src">command.rs:98, 164-214; build.rs:816-820</span></li>
+<li><b>Agent daemon</b> (a local service, not an AI agent): the build's config asks it to prepare sources. It checks them against `Vorpal.lock` and stops on a mismatch unless you pass `--unlock`, zeroes file times, hashes, packs (zstd) and pushes them to the registry only if they are missing. <span class="vp-home-src">sdk/rust context.rs:430-434; agent.rs:517-566, 700-731</span></li>
+<li><b>Registry, anywhere:</b> the CLI takes `--registry` (or `vorpal config set registry`) and hands that address to the agent daemon, which checks and pushes sources there. A registry on a new machine starts with its own storage; this scene replays each stage as a fresh build. <span class="vp-home-src">command.rs:196-198; config.rs:96, 132; sdk/rust context.rs:414-420; agent.rs:448-454</span></li>
+<li><b>Worker:</b> the CLI asks it to build each missing artifact and shows its logs. The worker pulls the sources from the registry, runs the steps, and pushes the archive back. Files never go from the CLI to the worker: the CLI checks its store, then the registry, and pulls archives straight from the registry. <span class="vp-home-src">build.rs:137, 233-262, 291; worker.rs:293-312, 968-982</span></li>
+<li><b>Worker, anywhere:</b> `vorpal system services start` runs agent, registry and worker together by default, so one laptop can do it all; start a worker elsewhere with `--services worker` and point the CLI at it with `--worker` or `vorpal config set worker`. The CLI hands the worker its registry address, and the worker only builds artifacts whose target matches its own system, so the digest is the same on either machine. <span class="vp-home-src">command.rs:98, 212-214; config.rs:101, 137; build.rs:273-279; worker.rs:268-280, 1107-1121</span></li>
+<li><b>Shared worker:</b> with sign-in on, any caller with `write` on the namespace (or a trusted service) can ask the worker to build; it locks each artifact while it builds. <span class="vp-home-src">worker.rs:1395-1407, 1090-1093</span></li>
+<li><b>Other CLI users</b> pull from the registry the same way, with `vorpal build` or `vorpal run` for an alias. <span class="vp-home-src">run.rs:29-66, 94-130</span></li>
+<li>Step secrets are sealed by the agent daemon (AES-256-GCM, RSA-OAEP key wrap) and opened only by the worker. <span class="vp-home-src">notary.rs:64-70; agent.rs:909-911; worker.rs:678-689</span></li>
+</ul>
+<ul>
+<li><b>TLS:</b> services take `--tls` with keys from `vorpal system keys generate` (the generated certificate covers `localhost`; bring your own for a real host name). Clients use TLS for `https://` addresses and trust `ca.pem`. <span class="vp-home-src">start.rs:119-150; keys.rs:143; sdk/rust context.rs:727-745</span></li>
+<li><b>OIDC:</b> with `--issuer`, the registry and worker reject calls without a valid token. Pulls need `read` on the namespace; builds need `write`. Client IDs in `--issuer-service-client-ids` are trusted services and skip namespace roles. <span class="vp-home-src">start.rs:220-238, 264-278; auth.rs:314-347, 481-520; registry.rs:236, 374, 467; worker.rs:1403-1407</span></li>
+<li><b>Registry storage:</b> `--registry-backend local` or `s3`. The default address is a local socket, so share a registry by giving it a network address: `vorpal config set registry <address>`. <span class="vp-home-src">command.rs:101-105; config.rs:96, 132; sdk/rust artifact.rs:1008-1015</span></li>
+<li><b>Sandboxed steps:</b> on Linux, the SDKs' shell steps run under Bubblewrap; on macOS they run in plain Bash for now <span class="vp-pln">Planned · <b>ENG-364</b></span>. <span class="vp-home-src">sdk/rust artifact/step.rs:59-85</span></li>
+<li>Digests in the scene are computed in your browser from the Python SDK's own definitions (stand-ins: a remote source's digest is the SHA-256 of its URL; the app's is the SHA-256 of the line shown). Timings are illustrative. SBOM: Planned (ENG-373).</li>
+</ul>
 </div>
 
-<div class="landing-section">
-
-## One simple CLI.
-
-<p class="landing-subtitle">After defining your config in any SDK, the Vorpal CLI handles the rest.</p>
-
-<CardGrid>
-  <Card title="Build" icon="rocket">
-    Produce a content-addressed artifact. Cached builds resolve instantly.
-
-    ```bash title="Terminal"
-    vorpal build my-app
-    ```
-  </Card>
-  <Card title="Run" icon="right-arrow">
-    Execute any built artifact by name — locally or from a remote registry.
-
-    ```bash title="Terminal"
-    vorpal run my-app:1.0.0
-    ```
-  </Card>
-</CardGrid>
-
-</div>
-
-<div class="landing-section cta-section">
-
-## Ready to get started?
-
-Install Vorpal in seconds and build your first artifact.
-
-<div class="cta-actions">
-  <a href="/getting-started/installation/" class="sl-link-button primary">Install Vorpal</a>
-  <a href="/getting-started/quickstart/" class="sl-link-button minimal">Read the quickstart →</a>
-</div>
-
-</div>
+</section>

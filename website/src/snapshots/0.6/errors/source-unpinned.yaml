@@ -1,0 +1,22 @@
+group: lockfile
+order: 2
+message: "source '<name>' is unpinned - use '--unlock' to pin"
+raised_by: The agent daemon, during `vorpal build` or `vorpal prepare --unlock=false`, for a remote source.
+meaning: >-
+  The source has no pin in `Vorpal.lock` yet, and the build runs in locked mode. Every new project
+  starts this way: `vorpal init` writes no `Vorpal.lock`.
+fix:
+  - command: vorpal prepare <artifact>
+    label: mint the pin
+    output: |-
+      mint: <name> (<platform>) -> <digest>
+      <artifact-digest>
+  - text: Then commit `Vorpal.lock`.
+check: "`Vorpal.lock` has a new entry and `vorpal build <artifact>` prints the digest."
+links:
+  - text: "`vorpal prepare`"
+    href: /reference/cli/prepare/
+sources:
+  - file: cli/src/command/start/agent.rs
+    line: 728
+    match: "source '{}' is unpinned - use '--unlock' to pin"

@@ -1,0 +1,76 @@
+---
+// Reference entry properties (design-system.md §10): one line of labelled
+// values under an entry's heading, always in this order: Required, File,
+// Type, Default, Allowed, Setting, Flag, Env, Repeatable, Conflicts with,
+// Since. Leave out what does not apply.
+//
+// <Props type="string" default="`&quot;rust&quot;`" env="`VORPAL_SOCKET_PATH` changes the socket" />
+//
+// Values are inline Markdown: `code`, [links](/url/) and **bold**. A `since`
+// of "Unreleased" shows the Unreleased badge.
+//
+// The entry around it comes from the heading (`### name {#key-name}` on a
+// page with a reference `kind`; src/plugins/sectionize.mjs). Its link
+// control is Starlight's anchor link beside the heading: a real link that
+// works without JavaScript; with it, a click also copies the link.
+import { inline } from '../data/inline';
+
+interface Props {
+	required?: string;
+	file?: string;
+	type?: string;
+	default?: string;
+	allowed?: string;
+	setting?: string;
+	flag?: string;
+	env?: string;
+	repeatable?: string;
+	conflicts?: string;
+	since?: string;
+}
+
+const ORDER = [
+	['required', 'Required'],
+	['file', 'File'],
+	['type', 'Type'],
+	['default', 'Default'],
+	['allowed', 'Allowed'],
+	['setting', 'Setting'],
+	['flag', 'Flag'],
+	['env', 'Env'],
+	['repeatable', 'Repeatable'],
+	['conflicts', 'Conflicts with'],
+	['since', 'Since'],
+] as const;
+
+const rows = ORDER.flatMap(([key, label]) => {
+	const value = Astro.props[key];
+	if (value === undefined) return [];
+	const html =
+		key === 'since' && value === 'Unreleased'
+			? '<span class="vp-vb vp-vb-unrel">Unreleased</span>'
+			: inline(value);
+	return [{ label, html }];
+});
+---
+
+<dl class="vp-props">
+	{
+		rows.map((r) => (
+			<div>
+				<dt>{r.label}</dt>
+				<dd set:html={r.html} />
+			</div>
+		))
+	}
+</dl>
+
+<script>
+	// A click on an entry's link control also copies the link. Navigation
+	// still happens, so the address bar and :target show the entry.
+	document.querySelectorAll<HTMLAnchorElement>('.vp-refent .sl-anchor-link').forEach((a) =>
+		a.addEventListener('click', () => {
+			navigator.clipboard?.writeText(a.href).catch(() => {});
+		}),
+	);
+</script>
